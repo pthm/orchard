@@ -31,13 +31,24 @@ type Result struct {
 func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *graph.Graph) (*Result, error) {
 	// resolved maps NodeID string → output name → value.
 	resolved := make(map[string]map[string]cty.Value)
+	// componentInputs caches resolved inputs per component key so internal
+	// actions see them as their var.* namespace.
+	componentInputs := make(map[string]map[string]cty.Value)
 
 	for _, nodeID := range g.Order {
 		node := g.Nodes[nodeID]
 
 		switch node.Kind {
 		case graph.ActionNode:
-			outputs, err := e.executeAction(ctx, node, ps.Variables, resolved)
+			vars := ps.Variables
+			if node.ComponentKey != "" {
+				inputs, err := e.componentInputsFor(node.ComponentKey, ps, resolved, componentInputs)
+				if err != nil {
+					return nil, fmt.Errorf("resolving inputs for %s: %w", nodeID, err)
+				}
+				vars = inputs
+			}
+			outputs, err := e.executeAction(ctx, node, vars, resolved)
 			if err != nil {
 				return nil, fmt.Errorf("executing %s: %w", nodeID, err)
 			}
@@ -45,7 +56,7 @@ func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *grap
 			fmt.Printf("  ✓ %s\n", nodeID)
 
 		case graph.ComponentNode:
-			outputs, err := e.resolveComponentOutputs(node, ps, resolved)
+			outputs, err := e.resolveComponentOutputs(node, ps, resolved, componentInputs)
 			if err != nil {
 				return nil, fmt.Errorf("resolving outputs for %s: %w", nodeID, err)
 			}
@@ -103,21 +114,41 @@ func (e *Engine) buildNodeEvalContext(
 
 	// Component-scoped action: remap internal action IDs to bare action references.
 	// e.g., resolved["component.merchant.base.action.sql.create"] → action.sql.create
+	// Caller is responsible for passing component-scoped vars (inputs) here.
 	componentPrefix := "component." + node.ComponentKey + ".action."
 	scopedResolved := make(map[string]map[string]cty.Value)
 
 	for nodeID, outputs := range resolved {
 		if len(nodeID) > len(componentPrefix) && nodeID[:len(componentPrefix)] == componentPrefix {
-			// Strip the component prefix to make it a bare action reference.
 			bare := "action." + nodeID[len(componentPrefix):]
 			scopedResolved[bare] = outputs
 		}
 	}
 
-	// Component inputs become the var.* namespace.
-	// TODO: resolve component inputs from the parent eval context.
-	// For now, use scenario variables as a pass-through.
 	return buildEvalContext(vars, scopedResolved)
+}
+
+// componentInputsFor returns the resolved var.* namespace for a component,
+// computing it on first use and caching for subsequent internal-action calls.
+func (e *Engine) componentInputsFor(
+	key string,
+	ps *parser.ParsedScenario,
+	resolved map[string]map[string]cty.Value,
+	cache map[string]map[string]cty.Value,
+) (map[string]cty.Value, error) {
+	if inputs, ok := cache[key]; ok {
+		return inputs, nil
+	}
+	comp, ok := ps.Components[key]
+	if !ok {
+		return nil, fmt.Errorf("component %q not found", key)
+	}
+	inputs, err := e.resolveComponentInputs(comp, ps.Variables, resolved)
+	if err != nil {
+		return nil, err
+	}
+	cache[key] = inputs
+	return inputs, nil
 }
 
 // resolveComponentOutputs evaluates a component's output blocks using
@@ -126,6 +157,7 @@ func (e *Engine) resolveComponentOutputs(
 	node *graph.Node,
 	ps *parser.ParsedScenario,
 	resolved map[string]map[string]cty.Value,
+	inputCache map[string]map[string]cty.Value,
 ) (map[string]cty.Value, error) {
 	comp, ok := ps.Components[node.ComponentKey]
 	if !ok {
@@ -142,8 +174,7 @@ func (e *Engine) resolveComponentOutputs(
 		}
 	}
 
-	// Resolve component inputs to use as var.* inside the component.
-	compVars, err := e.resolveComponentInputs(comp, ps.Variables, resolved)
+	compVars, err := e.componentInputsFor(node.ComponentKey, ps, resolved, inputCache)
 	if err != nil {
 		return nil, err
 	}

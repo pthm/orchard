@@ -162,21 +162,24 @@ func TestClientRoundtripNilResult(t *testing.T) {
 func TestClientIdsIncrement(t *testing.T) {
 	// Two sequential Roundtrips should produce distinct ids, and
 	// the client must match each response to the right request.
+	// A single server goroutine handles both requests in order —
+	// Roundtrip is sequential, so there's no need for (and no safe
+	// way to run) concurrent handlers sharing one pipe reader.
 	c, serverIn, serverOut, cleanup := newPipeClient(t)
 	defer cleanup()
 
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(1)
 	var seen []int64
-	for i := 0; i < 2; i++ {
-		go func() {
-			defer wg.Done()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 2; i++ {
 			handle(t, serverIn, serverOut, func(req protocol.Request) protocol.Response {
 				seen = append(seen, req.ID)
 				return protocol.Response{ID: req.ID, Result: json.RawMessage(`{}`)}
 			})
-		}()
-	}
+		}
+	}()
 
 	if err := c.Roundtrip(context.Background(), "a", nil, nil); err != nil {
 		t.Fatal(err)

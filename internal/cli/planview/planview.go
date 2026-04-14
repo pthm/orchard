@@ -1,11 +1,17 @@
 // Package planview renders a parsed scenario + its execution
-// graph into a human-readable plan. The output is designed to
-// answer the question "what will happen if I run this?" — not
-// just the DAG, but the providers, variables, dependency shape,
-// and what each action is going to do.
+// graph into a human-readable plan that answers "what will
+// happen if I run this?" — the nodes that will execute, their
+// dependencies, the providers they route to, and the outputs
+// that will be produced.
 //
-// Styling goes through internal/cli/render so a non-TTY pipe
-// gets clean, uncolored text automatically.
+// Shape: a Terraform-style block listing (`action "<type>"
+// "<name>"`, `component "<type>" "<name>"`) laid out as a tree
+// of primary-parent indentation, so the dependency graph reads
+// top-down. Secondary parents surface as "also after: ..." lines
+// under the affected node.
+//
+// Styling goes through internal/cli/render so non-TTY pipes get
+// clean, uncolored text.
 package planview
 
 import (
@@ -15,159 +21,50 @@ import (
 	"strings"
 
 	"github.com/hashicorp/hcl/v2"
-	"github.com/zclconf/go-cty/cty"
 
 	"github.com/pthm/orchard/internal/cli/render"
 	"github.com/pthm/orchard/internal/graph"
 	"github.com/pthm/orchard/internal/parser"
 )
 
-// Render writes the plan to w. Section order: Scenario header,
-// Providers, Variables, Components (if any), Execution order,
-// Outputs, final status line. Each section is elided when empty.
-func Render(w io.Writer, ps *parser.ParsedScenario, g *graph.Graph) {
-	fmt.Fprintf(w, "%s %s\n\n",
-		render.Header.Render("▸ Scenario"),
-		render.Bold.Render(ps.Scenario.Name))
+// ProviderOf returns the local alias of the provider that will
+// handle the given action node. Empty string when the node isn't
+// an action or the routing isn't resolvable (ambiguous, missing).
+// Pass nil to render without provider annotations.
+type ProviderOf func(*graph.Node) string
 
-	renderProviders(w, ps)
-	renderVariables(w, ps)
-	renderComponents(w, ps)
-	renderExecutionOrder(w, ps, g)
+// Render writes the plan to w.
+func Render(w io.Writer, ps *parser.ParsedScenario, g *graph.Graph, providerOf ProviderOf) {
+	if providerOf == nil {
+		providerOf = func(*graph.Node) string { return "" }
+	}
+
+	fmt.Fprintf(w, "%s %s\n",
+		render.Header.Render("▸"),
+		render.Bold.Render(ps.Scenario.Name))
+	fmt.Fprintln(w,
+		render.Muted.Render("  "+summary(ps, g)))
+	fmt.Fprintln(w)
+
+	forest := buildForest(g)
+	for i, root := range forest {
+		if i > 0 {
+			fmt.Fprintln(w)
+		}
+		renderNode(w, ps, g, providerOf, root, 0)
+	}
+
 	renderOutputs(w, ps)
 }
 
-// RenderSuccess writes the final "plan is valid" line.
+// RenderSuccess writes the final success line.
 func RenderSuccess(w io.Writer) {
 	fmt.Fprintf(w, "%s\n", render.Success.Render("✓ Plan is valid"))
 }
 
-// --- providers -------------------------------------------------
-
-func renderProviders(w io.Writer, ps *parser.ParsedScenario) {
-	if len(ps.RequiredProviders) == 0 {
-		return
-	}
-	section(w, "Providers", len(ps.RequiredProviders))
-
-	names := sortedRequiredProviderNames(ps.RequiredProviders)
-	width := longestString(names)
-	for _, name := range names {
-		spec := ps.RequiredProviders[name]
-		fmt.Fprintf(w, "  %s  %s\n",
-			render.Bold.Render(padRight(name, width)),
-			render.Kind.Render(spec.Source))
-		// Print configured attributes, one per line, muted.
-		cfg := ps.ProviderConfigs[name]
-		if len(cfg) > 0 {
-			keys := sortedKeys(cfg)
-			for _, k := range keys {
-				fmt.Fprintf(w, "    %s %s %s\n",
-					render.Muted.Render(padRight(k, longestString(keys))),
-					render.Muted.Render("="),
-					render.Value.Render(formatValue(cfg[k])))
-			}
-		}
-	}
-	fmt.Fprintln(w)
-}
-
-// --- variables -------------------------------------------------
-
-func renderVariables(w io.Writer, ps *parser.ParsedScenario) {
-	if len(ps.Variables) == 0 {
-		return
-	}
-	section(w, "Variables", len(ps.Variables))
-
-	// Build a lookup from the declared variable blocks so we can
-	// print each variable's type even when it wasn't declared.
-	declTypes := make(map[string]string, len(ps.Scenario.Variables))
-	for _, v := range ps.Scenario.Variables {
-		t, err := parser.ResolveVariableType(v)
-		if err != nil || t == cty.DynamicPseudoType {
-			continue
-		}
-		declTypes[v.Name] = t.FriendlyName()
-	}
-
-	names := sortedKeys(ps.Variables)
-	nameWidth := longestString(names)
-	// Only reserve type-column width if at least one variable
-	// declares a type. Scenarios that leave types implicit get a
-	// cleaner two-column "name = value" layout.
-	typeWidth := 0
-	for _, tn := range declTypes {
-		if len(tn)+2 > typeWidth {
-			typeWidth = len(tn) + 2
-		}
-	}
-	for _, name := range names {
-		typeCol := ""
-		if tn, ok := declTypes[name]; ok {
-			typeCol = "(" + tn + ")"
-		}
-		if typeWidth > 0 {
-			fmt.Fprintf(w, "  %s  %s  %s\n",
-				render.Bold.Render(padRight(name, nameWidth)),
-				render.Muted.Render(padRight(typeCol, typeWidth)),
-				render.Value.Render(formatValue(ps.Variables[name])))
-		} else {
-			fmt.Fprintf(w, "  %s  %s\n",
-				render.Bold.Render(padRight(name, nameWidth)),
-				render.Value.Render(formatValue(ps.Variables[name])))
-		}
-	}
-	fmt.Fprintln(w)
-}
-
-// --- components ------------------------------------------------
-
-func renderComponents(w io.Writer, ps *parser.ParsedScenario) {
-	if len(ps.Components) == 0 {
-		return
-	}
-	section(w, "Components", len(ps.Components))
-
-	keys := sortedComponentKeys(ps.Components)
-	for _, key := range keys {
-		comp := ps.Components[key]
-		fmt.Fprintf(w, "  %s  %s\n",
-			render.Bold.Render(key),
-			render.Muted.Render("source: "+comp.Ref.Source))
-
-		// inputs
-		inputKeys := extractStaticInputKeys(comp.Ref.Inputs)
-		if len(inputKeys) > 0 {
-			fmt.Fprintf(w, "    %s\n", render.Muted.Render("inputs:"))
-			for _, k := range inputKeys {
-				fmt.Fprintf(w, "      %s\n", k)
-			}
-		}
-
-		// outputs (names only — values are runtime)
-		if len(comp.Def.Outputs) > 0 {
-			names := make([]string, 0, len(comp.Def.Outputs))
-			for _, o := range comp.Def.Outputs {
-				names = append(names, o.Name)
-			}
-			sort.Strings(names)
-			fmt.Fprintf(w, "    %s %s\n",
-				render.Muted.Render("outputs:"),
-				render.Muted.Render(strings.Join(names, ", ")))
-		}
-	}
-	fmt.Fprintln(w)
-}
-
-// --- execution order -------------------------------------------
-
-func renderExecutionOrder(w io.Writer, _ *parser.ParsedScenario, g *graph.Graph) {
-	if len(g.Order) == 0 {
-		return
-	}
-
-	// Count actions vs components for the header.
+// summary returns a one-line description of the plan's shape:
+// "2 actions, 1 component — via postgres, echo".
+func summary(ps *parser.ParsedScenario, g *graph.Graph) string {
 	actions, components := 0, 0
 	for _, id := range g.Order {
 		switch g.Nodes[id].Kind {
@@ -177,61 +74,287 @@ func renderExecutionOrder(w io.Writer, _ *parser.ParsedScenario, g *graph.Graph)
 			components++
 		}
 	}
-	fmt.Fprintf(w, "%s  %s\n",
-		render.Label.Render("Execution plan"),
-		render.Muted.Render(fmt.Sprintf("(%s, %s)",
-			pluralize(actions, "action", "actions"),
-			pluralize(components, "component", "components"))))
-	fmt.Fprintln(w,
-		render.Muted.Render(strings.Repeat("─", 40)))
+	parts := []string{pluralize(actions, "action", "actions")}
+	if components > 0 {
+		parts = append(parts, pluralize(components, "component", "components"))
+	}
+	summary := strings.Join(parts, ", ")
 
-	// Width for step numbers.
-	stepWidth := len(fmt.Sprintf("%d", len(g.Order)))
-
-	for i, nodeID := range g.Order {
-		node := g.Nodes[nodeID]
-		step := render.Muted.Render(padLeft(fmt.Sprintf("%d.", i+1), stepWidth+1))
-
-		switch node.Kind {
-		case graph.ActionNode:
-			renderActionStep(w, step, node)
-		case graph.ComponentNode:
-			renderComponentStep(w, step, node)
+	if len(ps.RequiredProviders) > 0 {
+		names := make([]string, 0, len(ps.RequiredProviders))
+		for name := range ps.RequiredProviders {
+			names = append(names, name)
 		}
+		sort.Strings(names)
+		summary += " — via " + strings.Join(names, ", ")
+	}
+	return summary
+}
 
-		if len(node.Dependencies) > 0 {
-			deps := make([]string, len(node.Dependencies))
-			for i, d := range node.Dependencies {
-				deps[i] = string(d)
+// --- tree construction -----------------------------------------
+
+// displayNode is one entry in the plan tree. It wraps a graph
+// node plus any children (nodes whose primary parent is this one)
+// and the IDs of secondary parents that can't be shown via
+// indentation alone.
+type displayNode struct {
+	id               graph.NodeID
+	node             *graph.Node
+	children         []*displayNode
+	secondaryParents []graph.NodeID
+}
+
+// buildForest builds the primary-parent tree over the "top-level"
+// nodes of the graph. Component-internal actions are excluded
+// from the top-level tree — they render inside their component's
+// block instead.
+//
+// The primary parent of a node is the parent with the highest
+// index in g.Order. That gives consistent behaviour with the
+// engine's topo walk (the "closest" ancestor wins) and makes the
+// rendered tree feel intuitive: each node sits under the thing
+// the engine will have just finished before running it.
+func buildForest(g *graph.Graph) []*displayNode {
+	topo := make(map[graph.NodeID]int, len(g.Order))
+	for i, id := range g.Order {
+		topo[id] = i
+	}
+
+	// Top-level filter: drop component-internal actions. Component
+	// nodes themselves stay — they are the block headers.
+	topLevel := make(map[graph.NodeID]bool, len(g.Nodes))
+	for id, n := range g.Nodes {
+		if n.Kind == graph.ActionNode && n.ComponentKey != "" {
+			continue
+		}
+		topLevel[id] = true
+	}
+
+	nodesByID := make(map[graph.NodeID]*displayNode, len(topLevel))
+	for id := range topLevel {
+		nodesByID[id] = &displayNode{id: id, node: g.Nodes[id]}
+	}
+
+	for id := range topLevel {
+		n := g.Nodes[id]
+		// Collect top-level parents only. An internal action's
+		// parent chain bubbles up to the component node via the
+		// component-internal dependency graph; for the top-level
+		// tree we skip those edges.
+		var topParents []graph.NodeID
+		for _, dep := range n.Dependencies {
+			if topLevel[dep] {
+				topParents = append(topParents, dep)
 			}
-			sort.Strings(deps)
-			fmt.Fprintf(w, "     %s %s\n",
-				render.Muted.Render("after"),
-				render.Ref.Render(strings.Join(deps, ", ")))
+		}
+		if len(topParents) == 0 {
+			continue
+		}
+		// Pick the parent with the highest topo index as the primary.
+		sort.SliceStable(topParents, func(i, j int) bool {
+			return topo[topParents[i]] > topo[topParents[j]]
+		})
+		primary := topParents[0]
+		nodesByID[primary].children = append(nodesByID[primary].children, nodesByID[id])
+		// Rest are secondaries — shown as "also after" on the child.
+		for _, sp := range topParents[1:] {
+			nodesByID[id].secondaryParents = append(nodesByID[id].secondaryParents, sp)
 		}
 	}
-	fmt.Fprintln(w)
-}
 
-func renderActionStep(w io.Writer, step string, node *graph.Node) {
-	kind := render.Kind.Render("[action]")
-	providerSuffix := ""
-	if node.ProviderAlias != "" {
-		providerSuffix = "  " + render.Muted.Render("via "+node.ProviderAlias)
+	// Roots: nodes with no top-level parent.
+	var roots []*displayNode
+	for id, dn := range nodesByID {
+		hasTopParent := false
+		for _, dep := range g.Nodes[id].Dependencies {
+			if topLevel[dep] {
+				hasTopParent = true
+				break
+			}
+		}
+		if !hasTopParent {
+			roots = append(roots, dn)
+		}
 	}
-	fmt.Fprintf(w, "  %s %s %s%s\n",
-		step,
-		kind,
-		render.Bold.Render(string(node.ID)),
-		providerSuffix)
+	// Stable ordering: sort roots by topo index. Same for each
+	// child list so nested layout follows topological time.
+	sortByTopo(roots, topo)
+	var fixOrder func(dn *displayNode)
+	fixOrder = func(dn *displayNode) {
+		sortByTopo(dn.children, topo)
+		for _, c := range dn.children {
+			fixOrder(c)
+		}
+	}
+	for _, r := range roots {
+		fixOrder(r)
+	}
+	return roots
 }
 
-func renderComponentStep(w io.Writer, step string, node *graph.Node) {
-	kind := render.Kind.Render("[component]")
-	fmt.Fprintf(w, "  %s %s %s\n",
-		step,
-		kind,
-		render.Bold.Render(string(node.ID)))
+func sortByTopo(ns []*displayNode, topo map[graph.NodeID]int) {
+	sort.SliceStable(ns, func(i, j int) bool {
+		return topo[ns[i].id] < topo[ns[j].id]
+	})
+}
+
+// --- node rendering --------------------------------------------
+
+const indentUnit = "  "
+
+func renderNode(
+	w io.Writer,
+	ps *parser.ParsedScenario,
+	g *graph.Graph,
+	providerOf ProviderOf,
+	dn *displayNode,
+	depth int,
+) {
+	indent := strings.Repeat(indentUnit, depth)
+
+	switch dn.node.Kind {
+	case graph.ActionNode:
+		renderActionHeader(w, indent, dn.node, providerOf)
+		renderSecondaryParents(w, indent+indentUnit, dn.secondaryParents)
+	case graph.ComponentNode:
+		renderComponentBlock(w, ps, g, providerOf, indent, dn)
+		renderSecondaryParents(w, indent+indentUnit, dn.secondaryParents)
+		// Blank line between a component's interior (above) and its
+		// dependent children (below). The ↳ glyph and the blank
+		// line together are what the eye uses to tell "inside the
+		// component" from "runs after the component".
+		if len(dn.children) > 0 {
+			fmt.Fprintln(w)
+		}
+	}
+
+	for _, child := range dn.children {
+		renderNode(w, ps, g, providerOf, child, depth+1)
+	}
+}
+
+func renderActionHeader(w io.Writer, indent string, n *graph.Node, providerOf ProviderOf) {
+	typ, name := parseActionID(string(n.ID))
+	header := formatActionHeader(typ, name)
+	suffix := ""
+	if alias := providerOf(n); alias != "" {
+		suffix = "  " + render.Muted.Render("via ") + render.Ref.Render(alias)
+	}
+	fmt.Fprintf(w, "%s%s%s\n", indent, header, suffix)
+}
+
+func renderComponentBlock(
+	w io.Writer,
+	ps *parser.ParsedScenario,
+	g *graph.Graph,
+	providerOf ProviderOf,
+	indent string,
+	dn *displayNode,
+) {
+	key := dn.node.ComponentKey
+	comp := ps.Components[key]
+
+	typ, name := splitComponentKey(key)
+	fmt.Fprintf(w, "%s%s\n", indent, formatComponentHeader(typ, name))
+
+	// Component interior sits at indent+1 — the same indent
+	// dependents would get, but the ↳ glyph plus the blank line
+	// that renderNode inserts before rendering dependents is what
+	// visually separates "inside the component" from "runs after".
+	interior := indent + indentUnit
+	if comp != nil && comp.Ref.Source != "" {
+		fmt.Fprintf(w, "%s%s  %s\n",
+			interior,
+			render.Muted.Render("source"),
+			render.Ref.Render(comp.Ref.Source))
+	}
+	if comp != nil {
+		if keys := extractStaticInputKeys(comp.Ref.Inputs); len(keys) > 0 {
+			fmt.Fprintf(w, "%s%s  %s\n",
+				interior,
+				render.Muted.Render("inputs"),
+				strings.Join(keys, ", "))
+		}
+	}
+	for _, id := range g.Order {
+		child := g.Nodes[id]
+		if child.Kind != graph.ActionNode || child.ComponentKey != key {
+			continue
+		}
+		typ, name := parseActionID(string(child.ID))
+		suffix := ""
+		if alias := providerOf(child); alias != "" {
+			suffix = "  " + render.Muted.Render("via ") + render.Ref.Render(alias)
+		}
+		fmt.Fprintf(w, "%s%s %s%s\n",
+			interior,
+			render.Muted.Render("↳"),
+			formatActionHeader(typ, name),
+			suffix)
+	}
+}
+
+func renderSecondaryParents(w io.Writer, indent string, parents []graph.NodeID) {
+	if len(parents) == 0 {
+		return
+	}
+	names := make([]string, len(parents))
+	for i, p := range parents {
+		names[i] = string(p)
+	}
+	sort.Strings(names)
+	fmt.Fprintf(w, "%s%s  %s\n",
+		indent,
+		render.Muted.Render("also after"),
+		render.Ref.Render(strings.Join(names, ", ")))
+}
+
+// formatActionHeader renders `action "<type>" "<name>"` with the
+// keyword in a dedicated color and labels bold.
+func formatActionHeader(typ, name string) string {
+	return render.Kind.Render("action") + " " +
+		render.Bold.Render(quote(typ)) + " " +
+		render.Bold.Render(quote(name))
+}
+
+// formatComponentHeader renders `component "<type>" "<name>"` —
+// same treatment, different keyword color so the eye separates
+// component blocks from action leaves.
+func formatComponentHeader(typ, name string) string {
+	return render.Label.Render("component") + " " +
+		render.Bold.Render(quote(typ)) + " " +
+		render.Bold.Render(quote(name))
+}
+
+func quote(s string) string {
+	return `"` + s + `"`
+}
+
+// parseActionID splits an "action.<type>.<name>" NodeID into its
+// parts. Component-internal action IDs look like
+// "component.<key>.action.<type>.<name>"; we also handle those.
+func parseActionID(id string) (string, string) {
+	rest := id
+	if after, ok := strings.CutPrefix(rest, "component."); ok {
+		if idx := strings.Index(after, ".action."); idx >= 0 {
+			rest = "action." + after[idx+len(".action."):]
+		}
+	}
+	if after, ok := strings.CutPrefix(rest, "action."); ok {
+		parts := strings.SplitN(after, ".", 2)
+		if len(parts) == 2 {
+			return parts[0], parts[1]
+		}
+	}
+	return "", id
+}
+
+// splitComponentKey turns "merchant.base" into ("merchant", "base").
+func splitComponentKey(key string) (string, string) {
+	if parts := strings.SplitN(key, ".", 2); len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	return key, ""
 }
 
 // --- outputs ---------------------------------------------------
@@ -240,17 +363,16 @@ func renderOutputs(w io.Writer, ps *parser.ParsedScenario) {
 	if len(ps.Scenario.Outputs) == 0 {
 		return
 	}
-	section(w, "Outputs", len(ps.Scenario.Outputs))
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, render.Label.Render("Outputs"))
 
 	names := make([]string, 0, len(ps.Scenario.Outputs))
-	for _, o := range ps.Scenario.Outputs {
-		names = append(names, o.Name)
-	}
-	sort.Strings(names)
 	byName := make(map[string]*parser.OutputBlock, len(ps.Scenario.Outputs))
 	for _, o := range ps.Scenario.Outputs {
+		names = append(names, o.Name)
 		byName[o.Name] = o
 	}
+	sort.Strings(names)
 	nameWidth := longestString(names)
 
 	for _, name := range names {
@@ -267,10 +389,6 @@ func renderOutputs(w io.Writer, ps *parser.ParsedScenario) {
 	fmt.Fprintln(w)
 }
 
-// firstReference returns the first `action.X.Y.Z` or
-// `component.X.Y.Z` traversal the expression references, as a
-// dotted string. Empty when the expression is a literal or
-// references nothing graph-level.
 func firstReference(expr hcl.Expression) string {
 	for _, t := range expr.Variables() {
 		root := t.RootName()
@@ -299,13 +417,6 @@ func traverseAttrName(t hcl.Traverser) (string, bool) {
 
 // --- helpers ---------------------------------------------------
 
-func section(w io.Writer, label string, count int) {
-	fmt.Fprintf(w, "%s  %s\n",
-		render.Label.Render(label),
-		render.Muted.Render(fmt.Sprintf("(%d)", count)))
-	fmt.Fprintln(w, render.Muted.Render(strings.Repeat("─", 40)))
-}
-
 func extractStaticInputKeys(body hcl.Body) []string {
 	if body == nil {
 		return nil
@@ -318,9 +429,6 @@ func extractStaticInputKeys(body hcl.Body) []string {
 	if !ok {
 		return nil
 	}
-	// We don't evaluate (may reference action outputs). Use the
-	// ExprAsKeyword-style key extraction via hcl.ExprMap when
-	// available; otherwise render the raw expression.
 	pairs, diags := hcl.ExprMap(inputs.Expr)
 	if diags.HasErrors() {
 		return nil
@@ -333,33 +441,6 @@ func extractStaticInputKeys(body hcl.Body) []string {
 	}
 	sort.Strings(keys)
 	return keys
-}
-
-func sortedKeys(m map[string]cty.Value) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func sortedRequiredProviderNames(m map[string]parser.RequiredProviderSpec) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func sortedComponentKeys(m map[string]*parser.ParsedComponent) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }
 
 func longestString(ss []string) int {
@@ -379,41 +460,9 @@ func padRight(s string, width int) string {
 	return s + strings.Repeat(" ", width-len(s))
 }
 
-func padLeft(s string, width int) string {
-	if len(s) >= width {
-		return s
-	}
-	return strings.Repeat(" ", width-len(s)) + s
-}
-
 func pluralize(n int, singular, plural string) string {
 	if n == 1 {
 		return fmt.Sprintf("%d %s", n, singular)
 	}
 	return fmt.Sprintf("%d %s", n, plural)
-}
-
-func formatValue(v cty.Value) string {
-	if v.IsNull() {
-		return "null"
-	}
-	switch v.Type() {
-	case cty.String:
-		return v.AsString()
-	case cty.Number:
-		bf := v.AsBigFloat()
-		if bf.IsInt() {
-			i, _ := bf.Int64()
-			return fmt.Sprintf("%d", i)
-		}
-		f, _ := bf.Float64()
-		return fmt.Sprintf("%g", f)
-	case cty.Bool:
-		if v.True() {
-			return "true"
-		}
-		return "false"
-	default:
-		return v.GoString()
-	}
 }

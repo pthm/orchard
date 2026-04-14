@@ -10,16 +10,26 @@ import (
 
 	"github.com/pthm/orchard/internal/graph"
 	"github.com/pthm/orchard/internal/parser"
-	"github.com/pthm/orchard/internal/provider"
+	"github.com/pthm/orchard/pkg/protocol"
+	"github.com/pthm/orchard/pkg/provider"
 )
 
 // Engine executes a scenario's dependency graph.
 type Engine struct {
 	registry *provider.Registry
+	// routes maps a scenario-level action type (the first label in
+	// `action "TYPE" "name" {}`) to the provider that owns it. Built
+	// once at construction time from registered providers' schemas.
+	routes map[string]actionRoute
 }
 
-func New(registry *provider.Registry) *Engine {
-	return &Engine{registry: registry}
+// actionRoute records which registered provider handles a given
+// scenario action type, and which of that provider's action names
+// it maps to.
+type actionRoute struct {
+	providerName string
+	actionName   string
+	schema       protocol.ActionSchema
 }
 
 // Result holds the outputs from executing a scenario.
@@ -27,28 +37,54 @@ type Result struct {
 	Outputs map[string]cty.Value
 }
 
+// New constructs an Engine over the given provider registry. It also
+// builds the action-type routing table, failing if two providers
+// declare the same action name — that ambiguity must be resolved by
+// the caller (via an explicit provider choice in the scenario,
+// coming in a later milestone) before execution can proceed.
+func New(registry *provider.Registry) (*Engine, error) {
+	routes, err := buildRoutes(registry)
+	if err != nil {
+		return nil, err
+	}
+	return &Engine{registry: registry, routes: routes}, nil
+}
+
+func buildRoutes(registry *provider.Registry) (map[string]actionRoute, error) {
+	routes := make(map[string]actionRoute)
+	for _, name := range registry.Names() {
+		p, err := registry.Get(name)
+		if err != nil {
+			return nil, err
+		}
+		schema := p.Schema()
+		for actionName, actionSchema := range schema.Actions {
+			if existing, dup := routes[actionName]; dup {
+				return nil, fmt.Errorf(
+					"action type %q is exposed by both provider %q and %q; "+
+						"only one provider per action type is supported today",
+					actionName, existing.providerName, name)
+			}
+			routes[actionName] = actionRoute{
+				providerName: name,
+				actionName:   actionName,
+				schema:       actionSchema,
+			}
+		}
+	}
+	return routes, nil
+}
+
 // Execute runs all nodes in topological order and returns scenario outputs.
 func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *graph.Graph) (*Result, error) {
-	// resolved maps NodeID string → output name → value.
 	resolved := make(map[string]map[string]cty.Value)
-	// componentInputs caches resolved inputs per component key so internal
-	// actions see them as their var.* namespace.
-	componentInputs := make(map[string]map[string]cty.Value)
 
 	for _, nodeID := range g.Order {
 		node := g.Nodes[nodeID]
 
 		switch node.Kind {
 		case graph.ActionNode:
-			vars := ps.Variables
-			if node.ComponentKey != "" {
-				inputs, err := e.componentInputsFor(node.ComponentKey, ps, resolved, componentInputs)
-				if err != nil {
-					return nil, fmt.Errorf("resolving inputs for %s: %w", nodeID, err)
-				}
-				vars = inputs
-			}
-			outputs, err := e.executeAction(ctx, node, vars, resolved)
+			outputs, err := e.executeAction(ctx, node, ps.Variables, resolved)
 			if err != nil {
 				return nil, fmt.Errorf("executing %s: %w", nodeID, err)
 			}
@@ -56,7 +92,7 @@ func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *grap
 			fmt.Printf("  ✓ %s\n", nodeID)
 
 		case graph.ComponentNode:
-			outputs, err := e.resolveComponentOutputs(node, ps, resolved, componentInputs)
+			outputs, err := e.resolveComponentOutputs(node, ps, resolved)
 			if err != nil {
 				return nil, fmt.Errorf("resolving outputs for %s: %w", nodeID, err)
 			}
@@ -65,7 +101,6 @@ func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *grap
 		}
 	}
 
-	// Evaluate scenario-level outputs.
 	scenarioOutputs := make(map[string]cty.Value)
 	evalCtx := buildEvalContext(ps.Variables, resolved)
 
@@ -86,17 +121,23 @@ func (e *Engine) executeAction(
 	vars map[string]cty.Value,
 	resolved map[string]map[string]cty.Value,
 ) (map[string]cty.Value, error) {
-	p, err := e.registry.Get(node.ActionType)
+	route, ok := e.routes[node.ActionType]
+	if !ok {
+		return nil, fmt.Errorf("no provider registered for action type %q", node.ActionType)
+	}
+	p, err := e.registry.Get(route.providerName)
 	if err != nil {
 		return nil, err
 	}
 
-	// Build an eval context scoped to what this node can see.
-	// For component-scoped actions, we need to remap internal action references
-	// and provide component variables.
 	evalCtx := e.buildNodeEvalContext(node, vars, resolved)
 
-	return p.Execute(ctx, node.Body, evalCtx)
+	attrs, err := evalAttrs(node.Body, route.schema, evalCtx)
+	if err != nil {
+		return nil, err
+	}
+
+	return p.Execute(ctx, route.actionName, attrs)
 }
 
 // buildNodeEvalContext creates an EvalContext appropriate for the node.
@@ -108,16 +149,11 @@ func (e *Engine) buildNodeEvalContext(
 	resolved map[string]map[string]cty.Value,
 ) *hcl.EvalContext {
 	if node.ComponentKey == "" {
-		// Scenario-level action: sees scenario variables and all resolved outputs.
 		return buildEvalContext(vars, resolved)
 	}
 
-	// Component-scoped action: remap internal action IDs to bare action references.
-	// e.g., resolved["component.merchant.base.action.sql.create"] → action.sql.create
-	// Caller is responsible for passing component-scoped vars (inputs) here.
 	componentPrefix := "component." + node.ComponentKey + ".action."
 	scopedResolved := make(map[string]map[string]cty.Value)
-
 	for nodeID, outputs := range resolved {
 		if len(nodeID) > len(componentPrefix) && nodeID[:len(componentPrefix)] == componentPrefix {
 			bare := "action." + nodeID[len(componentPrefix):]
@@ -125,30 +161,8 @@ func (e *Engine) buildNodeEvalContext(
 		}
 	}
 
+	// TODO: resolve component inputs from the parent eval context.
 	return buildEvalContext(vars, scopedResolved)
-}
-
-// componentInputsFor returns the resolved var.* namespace for a component,
-// computing it on first use and caching for subsequent internal-action calls.
-func (e *Engine) componentInputsFor(
-	key string,
-	ps *parser.ParsedScenario,
-	resolved map[string]map[string]cty.Value,
-	cache map[string]map[string]cty.Value,
-) (map[string]cty.Value, error) {
-	if inputs, ok := cache[key]; ok {
-		return inputs, nil
-	}
-	comp, ok := ps.Components[key]
-	if !ok {
-		return nil, fmt.Errorf("component %q not found", key)
-	}
-	inputs, err := e.resolveComponentInputs(comp, ps.Variables, resolved)
-	if err != nil {
-		return nil, err
-	}
-	cache[key] = inputs
-	return inputs, nil
 }
 
 // resolveComponentOutputs evaluates a component's output blocks using
@@ -157,14 +171,12 @@ func (e *Engine) resolveComponentOutputs(
 	node *graph.Node,
 	ps *parser.ParsedScenario,
 	resolved map[string]map[string]cty.Value,
-	inputCache map[string]map[string]cty.Value,
 ) (map[string]cty.Value, error) {
 	comp, ok := ps.Components[node.ComponentKey]
 	if !ok {
 		return nil, fmt.Errorf("component %q not found", node.ComponentKey)
 	}
 
-	// Build an eval context with the component's internal action results.
 	componentPrefix := "component." + node.ComponentKey + ".action."
 	scopedResolved := make(map[string]map[string]cty.Value)
 	for nodeID, outputs := range resolved {
@@ -174,7 +186,7 @@ func (e *Engine) resolveComponentOutputs(
 		}
 	}
 
-	compVars, err := e.componentInputsFor(node.ComponentKey, ps, resolved, inputCache)
+	compVars, err := e.resolveComponentInputs(comp, ps.Variables, resolved)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +214,6 @@ func (e *Engine) resolveComponentInputs(
 ) (map[string]cty.Value, error) {
 	result := make(map[string]cty.Value)
 
-	// Start with component variable defaults.
 	for _, v := range comp.Def.Variables {
 		if v.Default != nil {
 			val, diags := v.Default.Value(&hcl.EvalContext{})
@@ -213,9 +224,7 @@ func (e *Engine) resolveComponentInputs(
 		}
 	}
 
-	// Override with input values from the scenario.
 	if comp.Ref.Inputs != nil {
-		// The Inputs body contains an "inputs" attribute with an object value.
 		type inputsWrapper struct {
 			Inputs map[string]cty.Value `hcl:"inputs,optional"`
 		}

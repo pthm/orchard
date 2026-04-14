@@ -413,9 +413,31 @@ action "charge" "test_payment" {
 
 The action-type label (`"charge"`) matches an entry in the provider's schema. The full set of actions a scenario can use is the union of all declared providers' action names.
 
-### Planned: Command Execution
+### Shell Commands (builtin/exec)
 
-Run external commands or scripts. Parameters are passed through the environment or argv. Not yet shipped; tracked in the roadmap below.
+Run external programs and capture stdout, stderr, and exit code. Non-zero exit is an error by default (documented behaviour changes when retry / success-codes land).
+
+```hcl
+provider "exec" {
+  dir = "/opt/myproj"
+  env = { PATH = "/usr/local/bin:/usr/bin" }
+}
+
+action "run" "seed" {
+  command = "./scripts/seed"
+  args    = ["--env", "test"]
+  env     = { DATABASE_URL = var.dsn }
+  stdin   = file("fixtures.sql")
+}
+
+action "run" "reindex" {
+  depends_on = [action.run.seed]
+  command    = "./scripts/reindex"
+  timeout    = "30s"
+}
+```
+
+Outputs: `{stdout = string, stderr = string, exit_code = number}`. Provider-level `dir` and `env` act as defaults that per-action values override.
 
 ### Planned: Schema-Aware Database Operations
 
@@ -442,7 +464,31 @@ action "db.insert" "merchant" {
 
 Dependencies are inferred automatically from expression references. When an action references `component.merchant.base.id`, Orchard knows that the merchant component must complete before that action can run. No explicit ordering is required for most cases.
 
-A `depends_on` escape hatch for side-effect-only dependencies (actions that must run after another action without reading its outputs) is planned in Milestone 3 and not yet wired.
+For side-effect-only dependencies — where one action must run after another without reading any of its outputs — actions accept a `depends_on` list:
+
+```hcl
+action "request" "reindex" {
+  depends_on = [action.sql.seed_data]
+  method = "POST"
+  url    = "/reindex"
+}
+```
+
+Entries must be node-reference traversals (`action.X.Y`, `component.X.Y`). Inside a component, references scope to the component's internal actions.
+
+### Action-Level Timeouts
+
+Individual actions can set a wall-clock deadline:
+
+```hcl
+action "request" "slow_api" {
+  timeout = "30s"
+  method  = "POST"
+  url     = "/slow-endpoint"
+}
+```
+
+The engine wraps `provider.Execute` in `context.WithTimeout`. On breach the error names the action and the timeout so scenario authors see `action X exceeded timeout 30s` rather than a bare `context deadline exceeded`. Go duration syntax: `"500ms"`, `"30s"`, `"2m"`.
 
 ### Execution Phases
 
@@ -803,12 +849,14 @@ Fill in the remaining action-layer features that were in the original Milestone 
 
 | Feature | Status |
 |---------|--------|
-| Command execution provider (`action "cmd"`) | Not started |
-| `depends_on` explicit dependency support | Not started |
-| Action-level timeout support | Not started |
-| Action retry support | Not started |
+| `depends_on` explicit dependency support | Done |
+| Action-level `timeout = "..."` | Done |
+| Shell command builtin (`builtin/exec`, `action "run"`) | Done |
+| Action retry block | Not started |
 | Plan-time reference type-checking (output types → eval context) | Not started |
-| Dotted action types (`action "db.insert"`) | Not started |
+| Dotted action types (`action "db.insert"`) | Deferred — see below |
+
+**Reserved action attributes.** `provider`, `depends_on`, and `timeout` are now the three orchard-reserved attributes stripped from action bodies before provider schema validation runs. Retry controls will join them as a nested block (`retry { ... }`) rather than a flat attribute. The reservation mechanism lives in one place (`internal/graph/graph.go`), so adding the next one is a localised change.
 
 **Routing today.** The engine routes actions by the scenario's local provider alias. `required_providers { db = { source = "builtin/postgres" } }` registers the postgres provider under the name `db`; `provider "db" {}` configures it; and an action body can pick it explicitly with `provider = "db"`. When only one registered provider offers a given action type, the action body can omit `provider =` and the engine resolves it automatically. When two or more providers offer the same action type, the engine returns a clear error listing the candidates and pointing at the `provider = "<alias>"` escape.
 
@@ -856,6 +904,10 @@ Harden the tool for real-world use and improve the authoring experience.
 
 | Feature | Status |
 |---------|--------|
+| Styled terminal output (lipgloss, TTY vs Plain reporters) | Done |
+| `orchard plan` as a DAG-shaped dependency tree | Done |
+| Engine-Reporter split so CLI presentation lives outside the engine | Done |
+| `--no-color` / `NO_COLOR` respect | Done |
 | Scenario and component `description` and `tags` metadata | Not started |
 | Improved error messages with HCL source locations | Partial — parser/plan errors carry HCL coordinates; runtime errors don't yet |
 | Dry-run mode (plan with expression evaluation but no execution) | Not started |
@@ -912,11 +964,22 @@ internal/
 
   engine/
     engine.go                   Walk topo order, resolve compVars per component,
-                                dispatch via pkg/provider.Provider
+                                dispatch via pkg/provider.Provider. Reporter
+                                interface (RunStarted/NodeStarted/NodeCompleted/
+                                NodeFailed/RunCompleted) decouples the engine
+                                from presentation.
     evalattrs.go                Schema-driven HCL body → map[string]cty.Value with
                                 coercion to declared types and defaults from schema
     validate.go                 Engine.ValidateGraph — structural schema check, no eval
     context.go                  Build nested cty.ObjectVal EvalContext from resolved outputs
+
+  cli/                          CLI-only helpers, kept out of engine/
+    render/                     Lipgloss semantic styles (Success/Error/Muted/Label/
+                                Kind/Ref), color palette in one place
+    reporter/                   PlainReporter + TTYReporter implementations plus
+                                Select(Options) that picks via isatty/NO_COLOR/--no-color
+    planview/                   Renders a ParsedScenario + Graph as a dependency-
+                                tree plan with Terraform-style block headers
 
 pkg/ (public SDK surface)
   protocol/
@@ -934,6 +997,9 @@ pkg/ (public SDK surface)
       schema.hcl                Embedded via //go:embed
       provider.go, sql.go, cty.go, register.go
     http/                       builtin/http — net/http-backed request action
+      schema.hcl                Embedded via //go:embed
+      provider.go, register.go
+    exec/                       builtin/exec — os/exec-backed run action
       schema.hcl                Embedded via //go:embed
       provider.go, register.go
     external/                   exec:<path> subprocess adapter

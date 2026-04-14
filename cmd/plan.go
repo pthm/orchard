@@ -52,8 +52,20 @@ func newPlanCmd() *cobra.Command {
 				return fmt.Errorf("validation failed: %w", err)
 			}
 
+			// Provide a route resolver so each action header can name
+			// the provider that will handle it. Falls back to empty
+			// string when the routing is unresolved, which keeps the
+			// renderer tolerant of validation gaps.
+			providerOf := func(n *graph.Node) string {
+				if n.Kind != graph.ActionNode {
+					return ""
+				}
+				alias, _ := eng.ResolveProvider(n.ActionType, n.ProviderAlias)
+				return alias
+			}
+
 			out := cmd.OutOrStdout()
-			planview.Render(out, ps, g)
+			planview.Render(out, ps, g, providerOf)
 			planview.RenderSuccess(out)
 			return nil
 		},

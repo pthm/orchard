@@ -159,6 +159,21 @@ func (e *Engine) SetReporter(r Reporter) {
 	e.reporter = r
 }
 
+// ResolveProvider exposes the engine's action-to-provider routing
+// for tooling (the plan renderer, future "orchard describe"
+// commands). It returns the local alias of the provider that
+// will handle (actionType, providerAlias) or an error when the
+// pair is ambiguous / unknown. providerAlias may be empty when
+// the scenario did not explicitly disambiguate; a unique candidate
+// is returned in that case.
+func (e *Engine) ResolveProvider(actionType, providerAlias string) (string, error) {
+	route, err := e.resolveRoute(actionType, providerAlias)
+	if err != nil {
+		return "", err
+	}
+	return route.providerAlias, nil
+}
+
 func buildRoutes(registry *provider.Registry) (map[string][]actionRoute, error) {
 	routes := make(map[string][]actionRoute)
 	for _, name := range registry.Names() {

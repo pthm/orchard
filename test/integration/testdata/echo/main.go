@@ -1,8 +1,9 @@
-// echo is a minimal Orchard external provider used in tests.
-// It implements one action, "echo", which returns its input
-// attrs as outputs. Speaks the protocol directly with the
-// standard library — no orchard imports — so it serves as a
-// live proof that the wire contract is language-independent.
+// echo is a minimal external provider used as an end-to-end test
+// fixture. TestMain compiles this into a temp binary and the
+// integration scenarios launch it via exec: provider source.
+//
+// No imports from orchard — the test doubles as a live proof that
+// the wire contract is language-independent.
 package main
 
 import (

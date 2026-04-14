@@ -12,6 +12,7 @@ import (
 
 	// Side-effect imports register builtin provider sources. Adding
 	// a new builtin provider is a one-line change here.
+	_ "github.com/pthm/orchard/pkg/provider/http"
 	_ "github.com/pthm/orchard/pkg/provider/postgres"
 )
 

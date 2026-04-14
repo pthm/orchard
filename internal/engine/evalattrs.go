@@ -35,7 +35,7 @@ func evalAttrs(
 	// no-op actions) are legal. Early-return avoids a nil-body panic
 	// in hcl.Body.Content.
 	if body == nil {
-		if schema.Attrs == nil || len(schema.Attrs) == 0 {
+		if len(schema.Attrs) == 0 {
 			return map[string]cty.Value{}, nil
 		}
 		for _, attr := range schema.Attrs {
@@ -45,25 +45,13 @@ func evalAttrs(
 		}
 	}
 
-	bodySchema := &hcl.BodySchema{
-		Attributes: make([]hcl.AttributeSchema, 0, len(schema.Attrs)),
-	}
-	for name, attr := range schema.Attrs {
-		bodySchema.Attributes = append(bodySchema.Attributes, hcl.AttributeSchema{
-			Name:     name,
-			Required: attr.Required,
-		})
-	}
-
-	var content *hcl.BodyContent
+	content := &hcl.BodyContent{}
 	if body != nil {
 		var diags hcl.Diagnostics
-		content, diags = body.Content(bodySchema)
+		content, diags = body.Content(bodySchemaFromActionSchema(schema))
 		if diags.HasErrors() {
 			return nil, fmt.Errorf("action body: %s", diags.Error())
 		}
-	} else {
-		content = &hcl.BodyContent{}
 	}
 
 	out := make(map[string]cty.Value, len(schema.Attrs))

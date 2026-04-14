@@ -215,13 +215,9 @@ func traversalToNodeID(traversal hcl.Traversal, componentKey string) (NodeID, bo
 		return "", false
 	}
 
-	root := traversal.RootName()
-	switch root {
+	switch traversal.RootName() {
 	case "action":
 		// action.<type>.<name>[.<output>]
-		if len(traversal) < 3 {
-			return "", false
-		}
 		actionType, ok := traversalAttr(traversal[1])
 		if !ok {
 			return "", false
@@ -238,9 +234,6 @@ func traversalToNodeID(traversal hcl.Traversal, componentKey string) (NodeID, bo
 
 	case "component":
 		// component.<type>.<name>[.<output>]
-		if len(traversal) < 3 {
-			return "", false
-		}
 		compType, ok := traversalAttr(traversal[1])
 		if !ok {
 			return "", false
@@ -250,22 +243,17 @@ func traversalToNodeID(traversal hcl.Traversal, componentKey string) (NodeID, bo
 			return "", false
 		}
 		return NodeID(fmt.Sprintf("component.%s.%s", compType, compName)), true
-
-	case "var":
-		// Variables are pre-resolved, no graph dependency.
-		return "", false
 	}
 
+	// var.* is pre-resolved, and anything else is not a graph dependency.
 	return "", false
 }
 
 func traversalAttr(t hcl.Traverser) (string, bool) {
-	switch v := t.(type) {
-	case hcl.TraverseAttr:
+	if v, ok := t.(hcl.TraverseAttr); ok {
 		return v.Name, true
-	default:
-		return "", false
 	}
+	return "", false
 }
 
 // reservedActionSchema is the body-schema used to pull off orchard-

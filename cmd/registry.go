@@ -73,14 +73,3 @@ func instantiateProvider(source string) (provider.Provider, error) {
 	}
 }
 
-// buildRegistry is intentionally not provided as a single-call
-// helper anymore. Callers must register providers first (which for
-// exec: sources spawns subprocesses that need cleanup even on
-// failure), defer Close, and only then call Configure — otherwise
-// a failed Configure leaves running subprocesses or open pools
-// that nothing will clean up. See cmd/run.go and cmd/plan.go for
-// the correct order.
-//
-// The split is deliberate despite the small amount of caller
-// boilerplate — bundling register+configure+defer into one helper
-// encouraged the leak pattern in the first place.

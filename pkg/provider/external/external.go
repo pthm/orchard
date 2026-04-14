@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -221,7 +222,8 @@ func waitErr(err error) error {
 	if err == nil {
 		return nil
 	}
-	if exit, ok := err.(*exec.ExitError); ok && exit.ExitCode() == 0 {
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 0 {
 		return nil
 	}
 	return err

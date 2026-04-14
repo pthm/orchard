@@ -54,21 +54,26 @@ func buildEvalContext(
 		}
 	}
 
-	if len(actionsByType) > 0 {
-		typeObjs := make(map[string]cty.Value)
-		for typ, names := range actionsByType {
-			typeObjs[typ] = cty.ObjectVal(names)
-		}
-		variables["action"] = cty.ObjectVal(typeObjs)
+	if v, ok := wrapGrouped(actionsByType); ok {
+		variables["action"] = v
 	}
-
-	if len(componentsByType) > 0 {
-		typeObjs := make(map[string]cty.Value)
-		for typ, names := range componentsByType {
-			typeObjs[typ] = cty.ObjectVal(names)
-		}
-		variables["component"] = cty.ObjectVal(typeObjs)
+	if v, ok := wrapGrouped(componentsByType); ok {
+		variables["component"] = v
 	}
 
 	return &hcl.EvalContext{Variables: variables}
+}
+
+// wrapGrouped folds a two-level type→name→value map into a single
+// cty object value. Returns false when the input is empty, so the
+// caller can skip adding the namespace entirely.
+func wrapGrouped(byType map[string]map[string]cty.Value) (cty.Value, bool) {
+	if len(byType) == 0 {
+		return cty.NilVal, false
+	}
+	typeObjs := make(map[string]cty.Value, len(byType))
+	for typ, names := range byType {
+		typeObjs[typ] = cty.ObjectVal(names)
+	}
+	return cty.ObjectVal(typeObjs), true
 }

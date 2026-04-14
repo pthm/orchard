@@ -204,13 +204,7 @@ func ctyMapToStringMap(v cty.Value) map[string]string {
 	it := v.ElementIterator()
 	for it.Next() {
 		k, val := it.Element()
-		var sv string
-		if val.Type() == cty.String {
-			sv = val.AsString()
-		} else {
-			sv = ctyToString(val)
-		}
-		out[k.AsString()] = sv
+		out[k.AsString()] = ctyToString(val)
 	}
 	return out
 }
@@ -222,10 +216,10 @@ func ctyToString(v cty.Value) string {
 	if v.IsNull() {
 		return ""
 	}
-	if v.Type() == cty.String {
+	switch v.Type() {
+	case cty.String:
 		return v.AsString()
-	}
-	if v.Type() == cty.Number {
+	case cty.Number:
 		bf := v.AsBigFloat()
 		if bf.IsInt() {
 			i, _ := bf.Int64()
@@ -233,8 +227,7 @@ func ctyToString(v cty.Value) string {
 		}
 		f, _ := bf.Float64()
 		return fmt.Sprintf("%g", f)
-	}
-	if v.Type() == cty.Bool {
+	case cty.Bool:
 		if v.True() {
 			return "true"
 		}

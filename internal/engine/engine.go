@@ -17,6 +17,22 @@ import (
 	"github.com/pthm/orchard/pkg/provider"
 )
 
+// scopedComponentResolved rewrites resolved node outputs for a
+// component-scoped eval context: internal action node IDs
+// ("component.<key>.action.<type>.<name>") are re-keyed to their
+// bare "action.<type>.<name>" form so expressions inside the
+// component see only their own siblings.
+func scopedComponentResolved(componentKey string, resolved map[string]map[string]cty.Value) map[string]map[string]cty.Value {
+	prefix := "component." + componentKey + ".action."
+	out := make(map[string]map[string]cty.Value)
+	for nodeID, outputs := range resolved {
+		if bare, ok := strings.CutPrefix(nodeID, prefix); ok {
+			out["action."+bare] = outputs
+		}
+	}
+	return out
+}
+
 // Engine executes a scenario's dependency graph.
 type Engine struct {
 	registry *provider.Registry
@@ -116,31 +132,29 @@ func (e *Engine) resolveRoute(actionType, providerAlias string) (actionRoute, er
 	if len(candidates) == 0 {
 		return actionRoute{}, fmt.Errorf("no provider registered for action type %q", actionType)
 	}
+	aliasesOf := func() string {
+		aliases := make([]string, len(candidates))
+		for i, c := range candidates {
+			aliases[i] = c.providerAlias
+		}
+		sort.Strings(aliases)
+		return strings.Join(aliases, ", ")
+	}
 	if providerAlias != "" {
 		for _, c := range candidates {
 			if c.providerAlias == providerAlias {
 				return c, nil
 			}
 		}
-		aliases := make([]string, len(candidates))
-		for i, c := range candidates {
-			aliases[i] = c.providerAlias
-		}
-		sort.Strings(aliases)
 		return actionRoute{}, fmt.Errorf(
 			"provider %q does not expose action %q (providers offering it: %s)",
-			providerAlias, actionType, strings.Join(aliases, ", "))
+			providerAlias, actionType, aliasesOf())
 	}
 	if len(candidates) > 1 {
-		aliases := make([]string, len(candidates))
-		for i, c := range candidates {
-			aliases[i] = c.providerAlias
-		}
-		sort.Strings(aliases)
 		return actionRoute{}, fmt.Errorf(
 			"action type %q is offered by multiple providers (%s); "+
 				"add `provider = \"<alias>\"` to the action body to disambiguate",
-			actionType, strings.Join(aliases, ", "))
+			actionType, aliasesOf())
 	}
 	return candidates[0], nil
 }
@@ -242,21 +256,12 @@ func (e *Engine) buildNodeEvalContext(
 		return buildEvalContext(vars, resolved)
 	}
 
-	componentPrefix := "component." + node.ComponentKey + ".action."
-	scopedResolved := make(map[string]map[string]cty.Value)
-	for nodeID, outputs := range resolved {
-		if len(nodeID) > len(componentPrefix) && nodeID[:len(componentPrefix)] == componentPrefix {
-			bare := "action." + nodeID[len(componentPrefix):]
-			scopedResolved[bare] = outputs
-		}
-	}
-
 	scopedVars := compVars[node.ComponentKey]
 	if scopedVars == nil {
 		// Component with no inputs block and no declared variables.
 		scopedVars = map[string]cty.Value{}
 	}
-	return buildEvalContext(scopedVars, scopedResolved)
+	return buildEvalContext(scopedVars, scopedComponentResolved(node.ComponentKey, resolved))
 }
 
 // resolveComponentOutputs evaluates a component's output blocks using
@@ -276,14 +281,7 @@ func (e *Engine) resolveComponentOutputs(
 		return nil, fmt.Errorf("component %q not found", node.ComponentKey)
 	}
 
-	componentPrefix := "component." + node.ComponentKey + ".action."
-	scopedResolved := make(map[string]map[string]cty.Value)
-	for nodeID, outputs := range resolved {
-		if len(nodeID) > len(componentPrefix) && nodeID[:len(componentPrefix)] == componentPrefix {
-			bare := "action." + nodeID[len(componentPrefix):]
-			scopedResolved[bare] = outputs
-		}
-	}
+	scopedResolved := scopedComponentResolved(node.ComponentKey, resolved)
 
 	vars, ok := compVars[node.ComponentKey]
 	if !ok {

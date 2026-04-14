@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/hashicorp/hcl/v2"
+	"github.com/hashicorp/hcl/v2/hclsyntax"
+
 	"github.com/pthm/orchard/internal/parser"
 )
 
@@ -39,6 +41,11 @@ type Node struct {
 	// engine-imposed deadline (the caller's ctx still applies).
 	// Set via `timeout = "30s"` in the action body.
 	Timeout time.Duration
+	// Retry captures a `retry { ... }` block on the action. nil
+	// means no retries — the engine calls the provider exactly
+	// once. When non-nil, the engine retries failed attempts with
+	// the configured backoff.
+	Retry *RetryConfig
 }
 
 // Graph holds the dependency graph built from a parsed scenario.
@@ -78,6 +85,7 @@ func Build(ps *parser.ParsedScenario) (*Graph, error) {
 			ProviderAlias: reserved.ProviderAlias,
 			Dependencies:  reserved.DependsOn,
 			Timeout:       reserved.Timeout,
+			Retry:         reserved.Retry,
 		}); err != nil {
 			return nil, err
 		}
@@ -104,6 +112,7 @@ func Build(ps *parser.ParsedScenario) (*Graph, error) {
 				ProviderAlias: reserved.ProviderAlias,
 				Dependencies:  reserved.DependsOn,
 				Timeout:       reserved.Timeout,
+				Retry:         reserved.Retry,
 			}); err != nil {
 				return nil, err
 			}
@@ -182,19 +191,34 @@ func Build(ps *parser.ParsedScenario) (*Graph, error) {
 	return &Graph{Nodes: nodes, Order: order}, nil
 }
 
+// reservedAttrNames lists the orchard-owned action attributes we
+// never want to treat as sources of graph dependencies. They were
+// already consumed by extractReservedActionAttrs and their values
+// are either literal (provider, timeout) or already handled
+// specially (depends_on). The name-filter is the simplest way
+// around hcl.Body.JustAttributes erroring on any leftover block
+// regardless of PartialContent's hidden-markers.
+var reservedAttrNames = map[string]bool{
+	"provider":   true,
+	"depends_on": true,
+	"timeout":    true,
+}
+
 // extractDependencies inspects all expressions in a body for variable references
 // and returns the corresponding node IDs as dependencies.
+//
+// The body may contain nested blocks (e.g. the reserved `retry` block).
+// hcl.Body.JustAttributes errors on any block even when PartialContent
+// marked it hidden, so we reach past that and walk the hclsyntax.Body's
+// Attributes map directly. Reserved attribute names are filtered by
+// the name set above; blocks aren't considered — only attribute values
+// carry graph-level references. Non-hclsyntax bodies (merged bodies in
+// tests, mocks) fall back to JustAttributes.
 func extractDependencies(body hcl.Body, componentKey string) ([]NodeID, error) {
-	attrs, diags := body.JustAttributes()
-	if diags.HasErrors() {
-		return nil, fmt.Errorf("reading attributes: %s", diags.Error())
-	}
-
 	seen := make(map[NodeID]bool)
 	var deps []NodeID
-
-	for _, attr := range attrs {
-		for _, dep := range extractExprDependencies(attr.Expr, componentKey) {
+	addExpr := func(expr hcl.Expression) {
+		for _, dep := range extractExprDependencies(expr, componentKey) {
 			if !seen[dep] {
 				seen[dep] = true
 				deps = append(deps, dep)
@@ -202,6 +226,26 @@ func extractDependencies(body hcl.Body, componentKey string) ([]NodeID, error) {
 		}
 	}
 
+	if hb, ok := body.(*hclsyntax.Body); ok {
+		for name, attr := range hb.Attributes {
+			if reservedAttrNames[name] {
+				continue
+			}
+			addExpr(attr.Expr)
+		}
+		return deps, nil
+	}
+
+	attrs, diags := body.JustAttributes()
+	if diags.HasErrors() {
+		return nil, fmt.Errorf("reading attributes: %s", diags.Error())
+	}
+	for name, attr := range attrs {
+		if reservedAttrNames[name] {
+			continue
+		}
+		addExpr(attr.Expr)
+	}
 	return deps, nil
 }
 
@@ -267,15 +311,50 @@ func traversalAttr(t hcl.Traverser) (string, bool) {
 }
 
 // reservedActionSchema is the body-schema used to pull off orchard-
-// level attributes from an action body before handing the leftover
-// to a provider's own schema validation. Retry controls will join
-// it in the rest of Milestone 3.
+// level attributes and blocks from an action body before handing
+// the leftover to a provider's own schema validation.
 var reservedActionSchema = &hcl.BodySchema{
 	Attributes: []hcl.AttributeSchema{
 		{Name: "provider"},
 		{Name: "depends_on"},
 		{Name: "timeout"},
 	},
+	Blocks: []hcl.BlockHeaderSchema{
+		{Type: "retry"},
+	},
+}
+
+// retryBodySchema parses the inside of a retry { ... } block.
+var retryBodySchema = &hcl.BodySchema{
+	Attributes: []hcl.AttributeSchema{
+		{Name: "max_attempts", Required: true},
+		{Name: "delay"},
+		{Name: "backoff"},
+		{Name: "max_delay"},
+	},
+}
+
+// BackoffStrategy selects how the delay between retry attempts
+// grows. All three start from RetryConfig.Delay as the baseline.
+type BackoffStrategy int
+
+const (
+	// BackoffConstant sleeps Delay between every pair of attempts.
+	BackoffConstant BackoffStrategy = iota
+	// BackoffLinear sleeps Delay * attemptNumber.
+	BackoffLinear
+	// BackoffExponential sleeps Delay * 2^(attemptNumber-1).
+	BackoffExponential
+)
+
+// RetryConfig captures a `retry { ... }` block on an action.
+// The engine treats nil as "no retry" and uses the contents to
+// drive a bounded retry loop around the provider call.
+type RetryConfig struct {
+	MaxAttempts int
+	Delay       time.Duration
+	Backoff     BackoffStrategy
+	MaxDelay    time.Duration // zero = no cap
 }
 
 // reservedActionAttrs bundles the attributes orchard owns on an
@@ -302,6 +381,11 @@ type reservedActionAttrs struct {
 	// their own library defaults). The scenario writes Go-style
 	// duration strings: `timeout = "30s"`, `timeout = "2m"`.
 	Timeout time.Duration
+
+	// Retry captures the `retry { ... }` block if present. nil
+	// means "no retry — one attempt". When non-nil, the engine
+	// wraps the action's Execute call in a bounded retry loop.
+	Retry *RetryConfig
 }
 
 // extractReservedActionAttrs pulls orchard-reserved attributes off
@@ -363,7 +447,119 @@ func extractReservedActionAttrs(body hcl.Body, componentKey string) (reservedAct
 		out.Timeout = d
 	}
 
+	// At most one retry block per action. Multiple would ambiguate
+	// "which retry policy wins" and is surely a mistake.
+	var retryBlocks []*hcl.Block
+	for _, b := range content.Blocks {
+		if b.Type == "retry" {
+			retryBlocks = append(retryBlocks, b)
+		}
+	}
+	if len(retryBlocks) > 1 {
+		return out, nil, fmt.Errorf("retry: at most one retry block per action, got %d", len(retryBlocks))
+	}
+	if len(retryBlocks) == 1 {
+		cfg, err := parseRetryBlock(retryBlocks[0])
+		if err != nil {
+			return out, nil, fmt.Errorf("retry: %w", err)
+		}
+		out.Retry = cfg
+	}
+
 	return out, remain, nil
+}
+
+// parseRetryBlock decodes the attributes of a retry { ... } block
+// into a RetryConfig. All validation (range checks, enum values,
+// default substitution) lives here so callers get a fully-formed
+// config or an error.
+func parseRetryBlock(block *hcl.Block) (*RetryConfig, error) {
+	content, diags := block.Body.Content(retryBodySchema)
+	if diags.HasErrors() {
+		return nil, fmt.Errorf("%s", diags.Error())
+	}
+
+	cfg := &RetryConfig{
+		Delay:   1 * time.Second,
+		Backoff: BackoffExponential,
+	}
+
+	attr := content.Attributes["max_attempts"]
+	val, diags := attr.Expr.Value(nil)
+	if diags.HasErrors() {
+		return nil, fmt.Errorf("max_attempts: %s", diags.Error())
+	}
+	if val.Type().FriendlyName() != "number" {
+		return nil, fmt.Errorf("max_attempts must be a number, got %s", val.Type().FriendlyName())
+	}
+	bf := val.AsBigFloat()
+	if !bf.IsInt() {
+		return nil, fmt.Errorf("max_attempts must be a whole number, got %s", bf.String())
+	}
+	n, _ := bf.Int64()
+	if n < 1 {
+		return nil, fmt.Errorf("max_attempts must be at least 1, got %d", n)
+	}
+	cfg.MaxAttempts = int(n)
+
+	if a, ok := content.Attributes["delay"]; ok {
+		d, err := durationAttr("delay", a)
+		if err != nil {
+			return nil, err
+		}
+		cfg.Delay = d
+	}
+
+	if a, ok := content.Attributes["max_delay"]; ok {
+		d, err := durationAttr("max_delay", a)
+		if err != nil {
+			return nil, err
+		}
+		cfg.MaxDelay = d
+	}
+
+	if a, ok := content.Attributes["backoff"]; ok {
+		val, diags := a.Expr.Value(nil)
+		if diags.HasErrors() {
+			return nil, fmt.Errorf("backoff: %s", diags.Error())
+		}
+		if val.Type().FriendlyName() != "string" {
+			return nil, fmt.Errorf("backoff must be a string, got %s", val.Type().FriendlyName())
+		}
+		switch val.AsString() {
+		case "constant":
+			cfg.Backoff = BackoffConstant
+		case "linear":
+			cfg.Backoff = BackoffLinear
+		case "exponential":
+			cfg.Backoff = BackoffExponential
+		default:
+			return nil, fmt.Errorf(`backoff must be "constant", "linear", or "exponential" (got %q)`, val.AsString())
+		}
+	}
+
+	return cfg, nil
+}
+
+// durationAttr parses a duration attribute shared by delay and
+// max_delay in the retry block. Positive required.
+func durationAttr(name string, attr *hcl.Attribute) (time.Duration, error) {
+	val, diags := attr.Expr.Value(nil)
+	if diags.HasErrors() {
+		return 0, fmt.Errorf("%s: %s", name, diags.Error())
+	}
+	if val.Type().FriendlyName() != "string" {
+		return 0, fmt.Errorf(`%s must be a string duration like "500ms", got %s`, name, val.Type().FriendlyName())
+	}
+	raw := val.AsString()
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%s %q is not a valid Go duration: %w", name, raw, err)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("%s %q must be positive", name, raw)
+	}
+	return d, nil
 }
 
 // extractDependsOnRefs turns the RHS of `depends_on = [...]` into

@@ -324,14 +324,19 @@ action "sql" "warm_cache" {
 
 ### Plan-time Validation
 
-`orchard plan` instantiates every declared provider for schemas only — no `Configure`, no connections — and runs two validation passes before rendering:
+`orchard plan` instantiates every declared provider for schemas only — no `Configure`, no connections, no long-lived subprocesses — and runs three validation passes before rendering:
 
-1. **Structural** (`Engine.ValidateGraph`). Walks every action body against its provider's declared attribute schema. Catches unknown attributes, missing required fields, and action types without a matching provider. HCL source coordinates land in the error message.
-2. **Reference type-check** (`Engine.ValidateReferences`). Builds a typed eval context — `var.*` with real values, each `action.<type>.<name>` as a typed-but-unknown cty value based on the provider's declared output shape — and evaluates every scenario expression (action attributes, outputs, component inputs) against it. HCL's type-checker flags references that don't exist (`action.X.Y.typo`), attribute access on a primitive (`.status.foo` where status is a number), and mismatched types.
+1. **Provider config** (`Registry.ValidateConfigs`). Walks each `provider "name" {}` block's evaluated attributes against the provider's declared config schema. Rejects unknown attributes (the typical source of "my config quietly did nothing" bugs), flags missing required fields, and coerces supplied values to declared types — the same pass `Configure` runs at execute time, exposed as a separate entry point so plan surfaces the error without opening any connection.
+2. **Structural** (`Engine.ValidateGraph`). Walks every action body against its provider's declared attribute schema. Catches unknown attributes, missing required fields, and action types without a matching provider. HCL source coordinates land in the error message.
+3. **Reference type-check** (`Engine.ValidateReferences`). Builds a typed eval context — `var.*` with real values, each `action.<type>.<name>` as a typed-but-unknown cty value based on the provider's declared output shape — and evaluates every scenario expression: action attributes, scenario outputs, component inputs, and component outputs (scoped to each component's own variables and internal actions). HCL's type-checker flags references that don't exist (`action.X.Y.typo`), attribute access on a primitive (`.status.foo` where status is a number), and mismatched types.
 
-The same two passes also run at the start of `orchard run`, before any provider `Configure` opens a connection. A typo-riddled scenario fails fast without opening databases or spawning subprocesses.
+The same passes also run at the start of `orchard run`, before any provider `Configure` opens a connection. A typo-riddled scenario fails fast without opening databases or spawning subprocesses.
 
-Coverage caveats: actions with `output { type = any }` (today: `postgres.sql`) are typed as `cty.DynamicPseudoType`, which HCL allows any attribute access against — typos there remain runtime errors. Component outputs are also treated as dynamic; type-propagating through component output expressions is future work.
+External providers stay plan-safe via a `<binary> schema` subcommand: plan invokes it as a short-lived probe, reads the schema JSON, and wraps the result in a `SchemaProvider` that errors on `Configure` / `Execute`. Nothing dials out, nothing stays resident, and the same code path refuses to accidentally call into the provider past the schema pass. `orchard run` still spawns the subprocess normally for the full lifecycle.
+
+Runtime complements this with **output contract enforcement**: after `Provider.Execute` returns, the engine coerces the output map against the action's declared output type. Unknown attributes are rejected, declared attributes are converted to their declared cty type, and missing declared attributes materialise as typed nulls so downstream expressions see the shape plan-time typing promised. Actions declared with `outputs { type = any }` remain opaque, as they have been.
+
+Coverage caveats: actions with `output { type = any }` (today: `postgres.sql`) are typed as `cty.DynamicPseudoType`, which HCL allows any attribute access against — typos there remain runtime errors. Component outputs are type-propagated from the component's internal action schemas, but component output *types* still surface at scenario level as `cty.DynamicPseudoType`; sharpening that is future work.
 
 ### Writing a Provider
 
@@ -349,6 +354,7 @@ See `pkg/provider/postgres/` and `pkg/provider/http/` as references.
 2. Return your schema from `describe` as a JSON object matching `pkg/protocol/schema.go`'s `ProviderSchema` shape.
 3. Reserve stdout for protocol traffic; use stderr for diagnostics (Orchard streams it to the log).
 4. Exit cleanly after responding to `shutdown`.
+5. Implement a top-level `schema` subcommand: when invoked as `<binary> schema`, write the same JSON schema document that `describe` returns to stdout and exit with status 0. `orchard plan` uses this path so it can validate a scenario without starting the full subprocess; without it, the binary is not plan-safe.
 
 See `test/integration/testdata/echo/main.go` for a minimal reference (~100 lines of standard-library Go, zero Orchard imports).
 
@@ -773,6 +779,17 @@ Raw SQL and command execution are first-class. The tool should never force users
 - Cross-database parity (Postgres first, others later)
 - Remote component registry
 - Visual UI / editor plugins
+
+---
+
+## Known Limitations
+
+These are intentional tradeoffs or deferred items that surfaced during code review and are documented here so scenario authors, provider authors, and future contributors know where the sharp edges are.
+
+- **`exec` provider inherits host env and cwd.** Commands run by `builtin/exec` inherit the full environment and working directory of the `orchard` process. This is great for ergonomics (users don't have to re-plumb `PATH` into every scenario) but makes runs host-sensitive: a scenario that relies on `$PGHOST` or the current shell's `GOPATH` behaves differently on CI than on a laptop. A future `inherit_env = false` config attribute (with an optional explicit `env = {...}` and `cwd = "..."`) is the planned fix; for now, scenario authors should prefer passing inputs explicitly through action attributes.
+- **Builtin providers register globally at `init()`.** Blank-importing `pkg/provider/postgres` et al from `cmd/run.go` triggers a package-level `init()` that writes to the global builtin factory table. Two consequences: tests can't swap builtins easily, and it's not possible today to run two orchard processes in the same binary with different builtin sets. The plan is to shift to per-registry registration when the plugin system matures; everything keeps working in the meantime because the binary only has one registry per process.
+- **Component output types are still dynamic at scenario scope.** Plan-time type checking threads types through a component's *internal* action outputs for its own output expressions, but at the scenario scope (`component.foo.bar.x`) the type remains `cty.DynamicPseudoType`. Tightening this requires recursively typing each component's output expressions; out of scope for the current milestone.
+- **Dynamic-output actions (`outputs { type = any }`) skip runtime output validation.** There's nothing to coerce against, by design. `postgres.sql` is the main example today because `RETURNING` shapes are open-ended. Providers should declare concrete output types where they can — the runtime check gets stricter for free when they do.
 
 ---
 

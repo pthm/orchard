@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 )
@@ -91,10 +92,10 @@ func WriteMessage(w io.Writer, v any) error {
 func ReadMessage(r *bufio.Reader, v any) error {
 	line, err := r.ReadBytes('\n')
 	if err != nil {
-		if err == io.EOF && len(line) == 0 {
-			return io.EOF
-		}
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
+			if len(line) == 0 {
+				return io.EOF
+			}
 			return io.ErrUnexpectedEOF
 		}
 		return fmt.Errorf("protocol: read message: %w", err)

@@ -56,19 +56,24 @@ func validateActionBody(body hcl.Body, schema protocol.ActionSchema) error {
 		return nil
 	}
 
-	bodySchema := &hcl.BodySchema{
-		Attributes: make([]hcl.AttributeSchema, 0, len(schema.Attrs)),
-	}
-	for name, attr := range schema.Attrs {
-		bodySchema.Attributes = append(bodySchema.Attributes, hcl.AttributeSchema{
-			Name:     name,
-			Required: attr.Required,
-		})
-	}
-
-	_, diags := body.Content(bodySchema)
+	_, diags := body.Content(bodySchemaFromActionSchema(schema))
 	if diags.HasErrors() {
 		return fmt.Errorf("action body: %s", diags.Error())
 	}
 	return nil
+}
+
+// bodySchemaFromActionSchema builds the hcl.BodySchema used to parse
+// an action body against the provider's declared attributes.
+func bodySchemaFromActionSchema(schema protocol.ActionSchema) *hcl.BodySchema {
+	bs := &hcl.BodySchema{
+		Attributes: make([]hcl.AttributeSchema, 0, len(schema.Attrs)),
+	}
+	for name, attr := range schema.Attrs {
+		bs.Attributes = append(bs.Attributes, hcl.AttributeSchema{
+			Name:     name,
+			Required: attr.Required,
+		})
+	}
+	return bs
 }

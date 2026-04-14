@@ -100,8 +100,7 @@ func componentInputKeys(body hcl.Body) ([]string, bool, error) {
 	}
 	keys := make([]string, 0, len(obj.Items))
 	for _, item := range obj.Items {
-		name, diags := hcl.ExprAsKeyword(item.KeyExpr), hcl.Diagnostics(nil)
-		_ = diags
+		name := hcl.ExprAsKeyword(item.KeyExpr)
 		if name == "" {
 			// Non-identifier key (e.g. dynamic, computed, string literal
 			// with spaces). Treat as unknown shape — runtime catches it.

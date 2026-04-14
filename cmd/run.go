@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spf13/cobra"
 	"github.com/zclconf/go-cty/cty"
 
@@ -11,8 +10,8 @@ import (
 	"github.com/pthm/orchard/internal/engine"
 	"github.com/pthm/orchard/internal/graph"
 	"github.com/pthm/orchard/internal/parser"
-	"github.com/pthm/orchard/internal/provider"
-	sqlprovider "github.com/pthm/orchard/internal/provider/sql"
+	"github.com/pthm/orchard/pkg/provider"
+	"github.com/pthm/orchard/pkg/provider/postgres"
 )
 
 func newRunCmd() *cobra.Command {
@@ -23,7 +22,6 @@ func newRunCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 
-			// Parse scenario.
 			ps, err := parser.LoadScenario(args[0], varFlags)
 			if err != nil {
 				return fmt.Errorf("loading scenario: %w", err)
@@ -31,33 +29,44 @@ func newRunCmd() *cobra.Command {
 
 			fmt.Printf("Scenario: %s\n", ps.Scenario.Name)
 
-			// Build dependency graph.
 			g, err := graph.Build(ps)
 			if err != nil {
 				return fmt.Errorf("building graph: %w", err)
 			}
 
-			// Connect to database.
-			dsn := config.ResolveDSN(dsnFlag)
-			pool, err := pgxpool.New(ctx, dsn)
-			if err != nil {
-				return fmt.Errorf("connecting to database: %w", err)
-			}
-			defer pool.Close()
-
-			// Register providers.
+			// Build the provider registry and configure each provider
+			// before the engine starts executing. Configure establishes
+			// connections and validates credentials; failing here is
+			// cheaper than failing inside the first action.
 			reg := provider.NewRegistry()
-			reg.Register("sql", sqlprovider.NewProvider(pool))
+			if err := reg.Register(postgres.New()); err != nil {
+				return fmt.Errorf("registering postgres provider: %w", err)
+			}
 
-			// Execute.
+			dsn := config.ResolveDSN(dsnFlag)
+			configs := map[string]map[string]cty.Value{
+				"postgres": {"dsn": cty.StringVal(dsn)},
+			}
+			if err := reg.Configure(ctx, configs); err != nil {
+				return fmt.Errorf("configuring providers: %w", err)
+			}
+			defer func() {
+				if closeErr := reg.Close(); closeErr != nil {
+					fmt.Printf("warning: %v\n", closeErr)
+				}
+			}()
+
+			eng, err := engine.New(reg)
+			if err != nil {
+				return fmt.Errorf("building engine: %w", err)
+			}
+
 			fmt.Println("Executing...")
-			eng := engine.New(reg)
 			result, err := eng.Execute(ctx, ps, g)
 			if err != nil {
 				return fmt.Errorf("execution failed: %w", err)
 			}
 
-			// Print outputs.
 			if len(result.Outputs) > 0 {
 				fmt.Println("\nOutputs:")
 				for name, val := range result.Outputs {

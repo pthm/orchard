@@ -224,6 +224,82 @@ func TestScenario_Echo(t *testing.T) {
 		ctyString(t, outputs["second"]))
 }
 
+// --- cross-provider + foreign-key dependency chain -----------
+
+// TestScenario_CombinedProviders exercises the dependency graph
+// across two providers and a multi-level FK chain:
+//
+//	echo.randomize (external, produces merchant name)
+//	  → sql.merchant (postgres INSERT)
+//	     → sql.product_a (FK merchants.id)
+//	     → sql.product_b (FK merchants.id, sibling of product_a)
+//	        → sql.review (FK products.id AND merchants.id — diamond)
+//
+// Assertions verify (a) the graph ordered everything correctly (FK
+// constraints would reject out-of-order inserts), (b) the echo
+// output flowed into the SQL chain, (c) sibling products are
+// ordered independently of each other, and (d) the row in
+// product_reviews points at product_a and merchant rows the
+// scenario actually produced.
+func TestScenario_CombinedProviders(t *testing.T) {
+	resetDB(t)
+
+	outputs := runScenario(t, "testdata/scenarios/combined.hcl", map[string]string{
+		"dsn":             testDSN,
+		"merchant_prefix": "acme",
+	})
+
+	merchantID := ctyInt(t, outputs["merchant_id"])
+	productAID := ctyInt(t, outputs["product_a_id"])
+	productBID := ctyInt(t, outputs["product_b_id"])
+	reviewID := ctyInt(t, outputs["review_id"])
+
+	assert.Positive(t, merchantID)
+	assert.Positive(t, productAID)
+	assert.Positive(t, productBID)
+	assert.Positive(t, reviewID)
+	assert.NotEqual(t, productAID, productBID, "sibling products must be distinct rows")
+
+	// Name came from echo.randomize: "<prefix>-<8 hex chars>"
+	merchantName := ctyString(t, outputs["merchant_name"])
+	assert.Truef(t,
+		strings.HasPrefix(merchantName, "acme-"),
+		"merchant name %q should begin with the echo prefix", merchantName)
+	assert.Lenf(t, merchantName, len("acme-")+8,
+		"merchant name %q should carry an 8-char hex suffix", merchantName)
+
+	// Verify the merchant row actually exists with that name.
+	var dbName string
+	require.NoError(t, testPool.QueryRow(context.Background(),
+		"SELECT name FROM merchants WHERE id = $1", merchantID).Scan(&dbName))
+	assert.Equal(t, merchantName, dbName)
+
+	// Both products FK the merchant.
+	var productMerchantCount int
+	require.NoError(t, testPool.QueryRow(context.Background(),
+		"SELECT COUNT(*) FROM products WHERE merchant_id = $1 AND id IN ($2, $3)",
+		merchantID, productAID, productBID).Scan(&productMerchantCount))
+	assert.Equal(t, 2, productMerchantCount, "both products must link to the merchant")
+
+	// The review FKs both product_a and the merchant.
+	var (
+		reviewProductID  int64
+		reviewMerchantID int64
+		reviewRating     int
+	)
+	require.NoError(t, testPool.QueryRow(context.Background(),
+		"SELECT product_id, merchant_id, rating FROM product_reviews WHERE id = $1", reviewID).
+		Scan(&reviewProductID, &reviewMerchantID, &reviewRating))
+	assert.Equal(t, productAID, reviewProductID)
+	assert.Equal(t, merchantID, reviewMerchantID)
+	assert.Equal(t, 5, reviewRating)
+
+	// Successful FK inserts are themselves proof of correct topo
+	// order — a sibling that ran before its parent would have
+	// failed here with a foreign-key-violation error, not made it
+	// into outputs.
+}
+
 // --- http builtin provider ------------------------------------
 
 func TestScenario_HTTP(t *testing.T) {

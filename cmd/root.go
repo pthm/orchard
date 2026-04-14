@@ -22,6 +22,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newRunCmd())
 	root.AddCommand(newPlanCmd())
 	root.AddCommand(newListCmd())
+	root.AddCommand(newDocsCmd())
 
 	return root
 }

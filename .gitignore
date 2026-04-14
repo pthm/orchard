@@ -1,2 +1,11 @@
 # Compiled external provider test fixture — rebuilt by TestMain.
 test/integration/testdata/echo/echo-provider
+
+# Generator output for provider docs — produced by `just docs-generate`.
+# Mounted over docs/content/ by Hugo; not tracked so schema edits
+# don't produce noisy diffs.
+docs/content-generated/
+
+# Hugo build artefacts.
+docs/public/
+docs/resources/

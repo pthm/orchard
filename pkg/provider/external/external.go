@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"os/exec"
+	"sync"
 	"time"
 
 	"github.com/zclconf/go-cty/cty"
@@ -31,13 +32,22 @@ const shutdownTimeout = 5 * time.Second
 // Lifecycle: Spawn starts the subprocess, completes the describe
 // handshake, and caches the schema. Configure, Execute, and Close
 // then behave like any in-process provider.
+//
+// Concurrency: the stderr-drain goroutine runs alongside the
+// handshake, so it reads p.schema while Spawn is about to write
+// it. Every access to schema goes through schemaMu; drainStderr,
+// Schema, and any other reader stay read-locked; Spawn and Close
+// take the write lock briefly when mutating it.
 type Provider struct {
 	cmd    *exec.Cmd
 	client *Client
 	stderr io.ReadCloser
-	schema protocol.ProviderSchema
+	path   string
 	logger *log.Logger
 	done   chan error // receives cmd.Wait() result exactly once
+
+	schemaMu sync.RWMutex
+	schema   protocol.ProviderSchema
 }
 
 // Compile-time assertion that Provider satisfies the interface.
@@ -77,6 +87,7 @@ func Spawn(path string, args ...string) (*Provider, error) {
 		cmd:    cmd,
 		client: NewClient(stdout, stdin),
 		stderr: stderr,
+		path:   path,
 		logger: log.Default(),
 		done:   make(chan error, 1),
 	}
@@ -88,7 +99,10 @@ func Spawn(path string, args ...string) (*Provider, error) {
 	// Start stderr drain before the handshake: a misconfigured
 	// provider's first act is often to print an error to stderr
 	// and exit, and we want that visible rather than swallowed.
-	go p.drainStderr("unknown")
+	// The drain reads schema under a read-lock, so the log prefix
+	// flips from the path to the schema name the moment describe
+	// completes and setSchema returns.
+	go p.drainStderr()
 
 	// Bound the describe handshake: a subprocess that starts but
 	// never writes a response must not wedge Spawn indefinitely.
@@ -104,40 +118,64 @@ func Spawn(path string, args ...string) (*Provider, error) {
 		p.forceClose()
 		return nil, fmt.Errorf("external: invalid schema from %s: %w", path, err)
 	}
-	p.schema = result.Schema
+	p.setSchema(result.Schema)
 	return p, nil
+}
+
+// setSchema writes p.schema under the mutex. Exactly one call
+// per successful Spawn; later reads see the populated schema.
+func (p *Provider) setSchema(s protocol.ProviderSchema) {
+	p.schemaMu.Lock()
+	p.schema = s
+	p.schemaMu.Unlock()
+}
+
+// getSchema returns the current schema under the read lock.
+// Safe to call concurrently with setSchema.
+func (p *Provider) getSchema() protocol.ProviderSchema {
+	p.schemaMu.RLock()
+	defer p.schemaMu.RUnlock()
+	return p.schema
+}
+
+// logPrefix returns the best available identifier for stderr log
+// lines: the schema name once it's been set, otherwise the path
+// orchard launched. Both are stable strings once read.
+func (p *Provider) logPrefix() string {
+	if name := p.getSchema().Name; name != "" {
+		return name
+	}
+	return p.path
 }
 
 // drainStderr copies subprocess stderr to the logger, line by line.
 // Runs until stderr closes (the subprocess exits or closes its
-// stream). The providerName argument lets the log prefix use the
-// real schema name once Spawn has parsed it.
-func (p *Provider) drainStderr(providerName string) {
+// stream). Each line's prefix is resolved under the schema lock,
+// so the prefix transitions cleanly from the binary path to the
+// provider's schema name once describe completes.
+func (p *Provider) drainStderr() {
 	scanner := bufio.NewScanner(p.stderr)
 	for scanner.Scan() {
-		name := providerName
-		if p.schema.Name != "" {
-			name = p.schema.Name
-		}
-		p.logger.Printf("[%s] %s", name, scanner.Text())
+		p.logger.Printf("[%s] %s", p.logPrefix(), scanner.Text())
 	}
 }
 
 // Schema returns the schema returned by the subprocess during the
 // describe handshake.
 func (p *Provider) Schema() protocol.ProviderSchema {
-	return p.schema
+	return p.getSchema()
 }
 
 // Configure marshals the config map to JSON using the provider's
 // declared config types and sends it to the subprocess.
 func (p *Provider) Configure(ctx context.Context, config map[string]cty.Value) error {
-	raw, err := encodeAttrs(config, p.schema.Config)
+	schema := p.getSchema()
+	raw, err := encodeAttrs(config, schema.Config)
 	if err != nil {
-		return fmt.Errorf("external: configure %s: %w", p.schema.Name, err)
+		return fmt.Errorf("external: configure %s: %w", schema.Name, err)
 	}
 	if err := p.client.Roundtrip(ctx, protocol.MethodConfigure, protocol.ConfigureParams{Config: raw}, nil); err != nil {
-		return fmt.Errorf("external: configure %s: %w", p.schema.Name, err)
+		return fmt.Errorf("external: configure %s: %w", schema.Name, err)
 	}
 	return nil
 }
@@ -148,13 +186,14 @@ func (p *Provider) Configure(ctx context.Context, config map[string]cty.Value) e
 // how in-process providers return dynamic output maps — and will
 // come in the plan-time reference-typing milestone.
 func (p *Provider) Execute(ctx context.Context, action string, attrs map[string]cty.Value) (map[string]cty.Value, error) {
-	actionSchema, ok := p.schema.Actions[action]
+	schema := p.getSchema()
+	actionSchema, ok := schema.Actions[action]
 	if !ok {
-		return nil, fmt.Errorf("external %s: unknown action %q", p.schema.Name, action)
+		return nil, fmt.Errorf("external %s: unknown action %q", schema.Name, action)
 	}
 	raw, err := encodeAttrs(attrs, actionSchema.Attrs)
 	if err != nil {
-		return nil, fmt.Errorf("external %s.%s: %w", p.schema.Name, action, err)
+		return nil, fmt.Errorf("external %s.%s: %w", schema.Name, action, err)
 	}
 
 	var result protocol.ExecuteResult
@@ -162,12 +201,12 @@ func (p *Provider) Execute(ctx context.Context, action string, attrs map[string]
 		Action: action, Attrs: raw,
 	}, &result)
 	if err != nil {
-		return nil, fmt.Errorf("external %s.%s: %w", p.schema.Name, action, err)
+		return nil, fmt.Errorf("external %s.%s: %w", schema.Name, action, err)
 	}
 
 	outputs, err := protocol.UnmarshalAttrs(result.Outputs, nil)
 	if err != nil {
-		return nil, fmt.Errorf("external %s.%s: decode outputs: %w", p.schema.Name, action, err)
+		return nil, fmt.Errorf("external %s.%s: decode outputs: %w", schema.Name, action, err)
 	}
 	return outputs, nil
 }
@@ -198,7 +237,7 @@ func (p *Provider) Close() error {
 			_ = p.cmd.Process.Kill()
 		}
 		<-p.done
-		return fmt.Errorf("external %s: did not shut down within %s; killed", p.schema.Name, shutdownTimeout)
+		return fmt.Errorf("external %s: did not shut down within %s; killed", p.getSchema().Name, shutdownTimeout)
 	}
 }
 

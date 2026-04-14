@@ -7,9 +7,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/zclconf/go-cty/cty"
+
+	"github.com/pthm/orchard/pkg/protocol"
 )
 
 // TestMain re-uses the test binary as its own subprocess fixture.
@@ -101,6 +104,32 @@ func TestCloseIsIdempotentViaGracefulExit(t *testing.T) {
 	if err := p.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
+}
+
+// TestSchemaConcurrentAccess pins the RWMutex guarding p.schema.
+// drainStderr reads the schema for every log line while Spawn is
+// about to write it; running this under -race is the regression
+// check that the mutex is actually taken on both sides.
+func TestSchemaConcurrentAccess(t *testing.T) {
+	p := &Provider{done: make(chan error, 1)}
+	close(p.done)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			p.setSchema(protocol.ProviderSchema{Name: fmt.Sprintf("n%d", i)})
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			_ = p.Schema()
+			_ = p.logPrefix()
+		}
+	}()
+	wg.Wait()
 }
 
 // runEchoHelper is the helper-process entry point. It reads JSON

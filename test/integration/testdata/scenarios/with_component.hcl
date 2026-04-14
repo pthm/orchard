@@ -1,6 +1,20 @@
 scenario "merchant_with_products" {
+  required_providers {
+    postgres = {
+      source = "builtin/postgres"
+    }
+  }
+
+  variable "dsn" {
+    default = ""
+  }
+
   variable "merchant_name" {
     default = "Globex"
+  }
+
+  provider "postgres" {
+    dsn = var.dsn
   }
 
   component "merchant" "base" {

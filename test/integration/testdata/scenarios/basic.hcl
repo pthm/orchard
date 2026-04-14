@@ -1,10 +1,24 @@
 scenario "basic_merchant_and_product" {
+  required_providers {
+    postgres = {
+      source = "builtin/postgres"
+    }
+  }
+
+  variable "dsn" {
+    default = ""
+  }
+
   variable "merchant_name" {
     default = "Acme Corp"
   }
 
   variable "region" {
     default = "us"
+  }
+
+  provider "postgres" {
+    dsn = var.dsn
   }
 
   action "sql" "create_merchant" {

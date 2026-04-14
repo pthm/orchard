@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -22,8 +24,9 @@ import (
 var migrationsFS embed.FS
 
 var (
-	testDSN  string
-	testPool *pgxpool.Pool
+	testDSN        string
+	testPool       *pgxpool.Pool
+	echoBinaryPath string
 )
 
 func TestMain(m *testing.M) {
@@ -61,6 +64,11 @@ func TestMain(m *testing.M) {
 		log.Fatalf("creating pool: %v", err)
 	}
 
+	if err := buildEchoProvider(); err != nil {
+		_ = testcontainers.TerminateContainer(container)
+		log.Fatalf("building echo provider: %v", err)
+	}
+
 	testDSN = dsn
 	testPool = pool
 
@@ -86,6 +94,21 @@ func runMigrations(dsn string) error {
 	}
 	if err := goose.Up(db, "migrations"); err != nil {
 		return fmt.Errorf("goose up: %w", err)
+	}
+	return nil
+}
+
+// buildEchoProvider compiles the test-only echo external provider
+// into a known location inside testdata/echo so integration scenarios
+// can reference it via `exec:./testdata/echo/echo-provider`. The
+// relative path is what the scenario sees when go test sets cwd to
+// the package directory during the run.
+func buildEchoProvider() error {
+	echoBinaryPath = filepath.Join("testdata", "echo", "echo-provider")
+	cmd := exec.Command("go", "build", "-o", echoBinaryPath, "./testdata/echo")
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("go build echo: %w", err)
 	}
 	return nil
 }

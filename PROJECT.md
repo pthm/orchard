@@ -290,6 +290,38 @@ Scenarios declare their providers by source string:
 
 Additional schemes (remote registries, OCI-distributed binaries) are possible future extensions; the source string is parsed through a scheme switch that stays open for them.
 
+### Local Names and Disambiguation
+
+Providers are keyed by the scenario-local name the user chooses in `required_providers`, not by the provider's schema name:
+
+```hcl
+required_providers {
+  db    = { source = "builtin/postgres" }
+  cache = { source = "builtin/postgres" }   # same source, different alias
+}
+
+provider "db"    { dsn = var.primary_dsn }
+provider "cache" { dsn = var.cache_dsn }
+```
+
+This lets two instances of the same provider coexist with independent config.
+
+When a single registered provider offers an action type, scenarios write it bare (`action "sql" "x"`) and the engine resolves it unambiguously. When multiple providers expose the same action type, the action body picks one with the reserved `provider` attribute:
+
+```hcl
+action "sql" "insert_row" {
+  provider = "db"
+  query    = "INSERT INTO ..."
+}
+
+action "sql" "warm_cache" {
+  provider = "cache"
+  query    = "SELECT ..."
+}
+```
+
+`provider` is an Orchard-reserved attribute (like `depends_on` / `timeout` / `retry` in Milestone 3). It's stripped from the action body before the provider's own schema validation runs, so providers never have to know about it.
+
 ### Plan-time Validation
 
 `orchard plan` instantiates every declared provider for schemas only — no `Configure`, no connections — and validates every action body in the graph against its provider's declared schema. Unknown attributes, missing required fields, and action types without a matching provider are caught here with HCL source coordinates, long before the first INSERT runs.
@@ -760,6 +792,10 @@ Rebuild the action layer around a language-agnostic plugin model so third partie
 | Presentation layer separated from engine (Reporter interface) | Done |
 | Context-aware external providers (Execute/Close bounded by ctx) | Done |
 | Duplicate scenario element detection (variables, actions, outputs, components) | Done |
+| Alias-based provider identity (`required_providers { db = {...} }`) | Done |
+| Multi-provider disambiguation via `provider = "<alias>"` on actions | Done |
+| Plan-time validation of scenario output references | Done |
+| Plan-time validation of component inputs (static keys + required check) | Done |
 
 ### Milestone 3: Action Ergonomics and Routing
 
@@ -772,9 +808,11 @@ Fill in the remaining action-layer features that were in the original Milestone 
 | Action-level timeout support | Not started |
 | Action retry support | Not started |
 | Plan-time reference type-checking (output types → eval context) | Not started |
-| Action routing by local provider alias (dotted `provider.action` form) | Not started |
+| Dotted action types (`action "db.insert"`) | Not started |
 
-**Known limitation — action routing.** Today the engine builds a flat `action-name → provider` map keyed on the provider's *schema* name, and refuses to start when two providers expose the same action name. That works for the small builtin set but blocks a realistic plugin ecosystem: two database providers both named `sql`, multiple HTTP clients both named `request`, vendor-shipped providers colliding on generic verbs. The fix is to route by the *local* provider name the scenario chose in `required_providers` and adopt a dotted access form (`action "postgres.sql" "x"`), with the bare form as sugar only when there's a single candidate. That requires a scenario migration and is deliberately scoped to its own change rather than tacking onto this milestone.
+**Routing today.** The engine routes actions by the scenario's local provider alias. `required_providers { db = { source = "builtin/postgres" } }` registers the postgres provider under the name `db`; `provider "db" {}` configures it; and an action body can pick it explicitly with `provider = "db"`. When only one registered provider offers a given action type, the action body can omit `provider =` and the engine resolves it automatically. When two or more providers offer the same action type, the engine returns a clear error listing the candidates and pointing at the `provider = "<alias>"` escape.
+
+**Open — dotted action types.** The design doc's earlier `action "db.insert" "merchant"` example implies a dotted action-type label with a corresponding `action.db.insert.merchant.id` traversal. HCL attribute traversals don't naturally parse that — `action.db.insert.merchant.id` is five attribute accesses, not "action type db.insert / name merchant / field id". The options are (a) pivot to three-label actions `action "<provider>" "<action>" "<name>"` with a scenario migration, or (b) add a special parse path for dotted action-type labels. Deferred until the need is concrete; today's alias-based routing covers the plugin-ecosystem use cases that motivated the concern.
 
 ### Milestone 4: Schema-Aware Database Provider
 

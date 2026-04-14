@@ -103,6 +103,15 @@ func LoadScenario(path string, vars map[string]string) (*ParsedScenario, error) 
 		components[key] = &ParsedComponent{Ref: ref, Def: def}
 	}
 
+	// Validate each component instance's inputs against its declared
+	// variables. Static check only — value expressions may reference
+	// runtime outputs that do not exist yet.
+	for _, comp := range components {
+		if err := ValidateComponentInputs(comp); err != nil {
+			return nil, err
+		}
+	}
+
 	return &ParsedScenario{
 		Scenario:          sf.Scenario,
 		Components:        components,

@@ -133,12 +133,19 @@ func Build(ps *parser.ParsedScenario) (*Graph, error) {
 		}
 	}
 
-	// Also extract dependencies from scenario-level output expressions.
+	// Validate scenario-level output expressions. Outputs don't
+	// become graph nodes (they're evaluated after every action
+	// completes), but their references must still point at real
+	// nodes — otherwise `output "x" { value = action.sql.missing.id }`
+	// silently passes plan and blows up at runtime.
 	for _, output := range ps.Scenario.Outputs {
 		deps := extractExprDependencies(output.Value, "")
-		// Output deps don't create new nodes; they create ordering constraints.
-		// For now, outputs are evaluated after all actions complete.
-		_ = deps
+		for _, dep := range deps {
+			if _, ok := nodes[dep]; !ok {
+				return nil, fmt.Errorf(
+					"output %q references unknown node %q", output.Name, dep)
+			}
+		}
 	}
 
 	// Topological sort.

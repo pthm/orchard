@@ -7,6 +7,7 @@ import (
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/gohcl"
 	"github.com/zclconf/go-cty/cty"
+	"github.com/zclconf/go-cty/cty/convert"
 
 	"github.com/pthm/orchard/internal/graph"
 	"github.com/pthm/orchard/internal/parser"
@@ -274,21 +275,50 @@ func (e *Engine) resolveComponentOutputs(
 
 // resolveComponentInputs evaluates the inputs block of a component reference
 // in the scenario's scope, returning values to use as the component's var.* namespace.
+//
+// Validates three contract properties of the component:
+//   - every input key matches a declared variable (no stray inputs);
+//   - every required (no-default) declared variable has an input or default;
+//   - every input value coerces to the declared variable's type.
+//
+// These checks turn silent "the input was ignored" / "the type drifted"
+// bugs into authoring errors raised before the component's actions run.
 func (e *Engine) resolveComponentInputs(
 	comp *parser.ParsedComponent,
 	scenarioVars map[string]cty.Value,
 	resolved map[string]map[string]cty.Value,
 ) (map[string]cty.Value, error) {
+	declsByName := make(map[string]*parser.VariableBlock, len(comp.Def.Variables))
+	for _, v := range comp.Def.Variables {
+		declsByName[v.Name] = v
+	}
+	compKey := comp.Ref.Type + "." + comp.Ref.Name
+
 	result := make(map[string]cty.Value)
 
+	// Apply coerced defaults first so inputs can override.
 	for _, v := range comp.Def.Variables {
-		if v.Default != nil {
-			val, diags := v.Default.Value(&hcl.EvalContext{})
-			if diags.HasErrors() {
-				return nil, fmt.Errorf("evaluating default for %q: %s", v.Name, diags.Error())
-			}
-			result[v.Name] = val
+		declaredType, err := parser.ResolveVariableType(v)
+		if err != nil {
+			return nil, fmt.Errorf("component %q variable %q: %w", compKey, v.Name, err)
 		}
+		defaultExpr, err := parser.VariableDefault(v)
+		if err != nil {
+			return nil, fmt.Errorf("component %q variable %q: %w", compKey, v.Name, err)
+		}
+		if defaultExpr == nil {
+			continue
+		}
+		val, diags := defaultExpr.Value(&hcl.EvalContext{})
+		if diags.HasErrors() {
+			return nil, fmt.Errorf("component %q variable %q default: %s",
+				compKey, v.Name, diags.Error())
+		}
+		coerced, err := coerceVar(val, declaredType)
+		if err != nil {
+			return nil, fmt.Errorf("component %q variable %q default: %w", compKey, v.Name, err)
+		}
+		result[v.Name] = coerced
 	}
 
 	if comp.Ref.Inputs != nil {
@@ -299,12 +329,57 @@ func (e *Engine) resolveComponentInputs(
 		var wrapper inputsWrapper
 		diags := gohcl.DecodeBody(comp.Ref.Inputs, scenarioCtx, &wrapper)
 		if diags.HasErrors() {
-			return nil, fmt.Errorf("decoding component inputs: %s", diags.Error())
+			return nil, fmt.Errorf("component %q inputs: %s", compKey, diags.Error())
 		}
-		for k, v := range wrapper.Inputs {
-			result[k] = v
+		for name, val := range wrapper.Inputs {
+			decl, ok := declsByName[name]
+			if !ok {
+				return nil, fmt.Errorf(
+					"component %q: input %q is not a declared variable on component %q",
+					compKey, name, comp.Def.Name)
+			}
+			declaredType, err := parser.ResolveVariableType(decl)
+			if err != nil {
+				return nil, fmt.Errorf("component %q variable %q: %w", compKey, name, err)
+			}
+			coerced, err := coerceVar(val, declaredType)
+			if err != nil {
+				return nil, fmt.Errorf("component %q input %q: %w", compKey, name, err)
+			}
+			result[name] = coerced
+		}
+	}
+
+	// Every declared variable must have either a default or an input.
+	for name, decl := range declsByName {
+		if _, present := result[name]; present {
+			continue
+		}
+		defaultExpr, err := parser.VariableDefault(decl)
+		if err != nil {
+			return nil, err
+		}
+		if defaultExpr == nil {
+			return nil, fmt.Errorf(
+				"component %q: required variable %q has no default and no input",
+				compKey, name)
 		}
 	}
 
 	return result, nil
+}
+
+// coerceVar is the engine-side twin of the parser's coerceToType.
+// Kept local rather than exporting from parser so the engine has
+// a single concept ("coerce against declared type, dynamic = accept
+// as-is") without worrying about cyclic imports.
+func coerceVar(val cty.Value, declared cty.Type) (cty.Value, error) {
+	if declared == cty.DynamicPseudoType {
+		return val, nil
+	}
+	coerced, err := convert.Convert(val, declared)
+	if err != nil {
+		return cty.NilVal, fmt.Errorf("type mismatch: %w", err)
+	}
+	return coerced, nil
 }

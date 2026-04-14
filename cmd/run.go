@@ -41,7 +41,7 @@ func newRunCmd() *cobra.Command {
 			// fail. If we configured before deferring Close, a
 			// Configure error would leak the already-started
 			// providers.
-			reg, err := registerProviders(ps)
+			reg, err := registerProviders(ps, providerModeRun)
 			if err != nil {
 				return fmt.Errorf("registering providers: %w", err)
 			}

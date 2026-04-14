@@ -26,6 +26,15 @@ import (
 // from a testdata directory that the go toolchain treats specially.
 func TestMain(m *testing.M) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		// The schema subcommand exits 0 after printing the schema
+		// as JSON — mimics what a real plan-mode binary does for
+		// LoadSchema. Any other invocation falls through to the
+		// JSON-Lines loop so Spawn-based tests still work.
+		if len(os.Args) > 1 && os.Args[1] == "schema" {
+			raw, _ := json.Marshal(echoSchema())
+			fmt.Fprintf(os.Stdout, "%s\n", raw)
+			return
+		}
 		runEchoHelper()
 		return
 	}
@@ -103,6 +112,49 @@ func TestCloseIsIdempotentViaGracefulExit(t *testing.T) {
 	p := spawnHelper(t)
 	if err := p.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
+	}
+}
+
+// TestLoadSchemaViaSubcommand exercises the plan-mode schema
+// probe. The helper binary, invoked with "schema", prints the
+// echoSchema JSON on stdout and exits; LoadSchema decodes it into
+// a SchemaProvider without keeping a subprocess alive.
+func TestLoadSchemaViaSubcommand(t *testing.T) {
+	os.Setenv("GO_WANT_HELPER_PROCESS", "1")
+	t.Cleanup(func() { os.Unsetenv("GO_WANT_HELPER_PROCESS") })
+
+	p, err := LoadSchema(os.Args[0])
+	if err != nil {
+		t.Fatalf("LoadSchema: %v", err)
+	}
+	s := p.Schema()
+	if s.Name != "echo" {
+		t.Errorf("schema name: got %q want echo", s.Name)
+	}
+	if _, ok := s.Actions["echo"]; !ok {
+		t.Errorf("missing echo action in schema: %+v", s.Actions)
+	}
+
+	// Configure and Execute must refuse — plan can't accidentally
+	// reach past the schema pass into live provider work.
+	if err := p.Configure(context.Background(), nil); err == nil {
+		t.Error("Configure should error for plan-mode SchemaProvider")
+	}
+	if _, err := p.Execute(context.Background(), "echo", map[string]cty.Value{}); err == nil {
+		t.Error("Execute should error for plan-mode SchemaProvider")
+	}
+	if err := p.Close(); err != nil {
+		t.Errorf("Close should be a no-op, got %v", err)
+	}
+}
+
+// TestLoadSchemaMissingBinary surfaces the error from Run when the
+// binary doesn't exist. The error message must carry the path so
+// scenario authors can locate the problem.
+func TestLoadSchemaMissingBinary(t *testing.T) {
+	_, err := LoadSchema("/nonexistent/orchard-external-test-binary")
+	if err == nil {
+		t.Fatal("expected LoadSchema to fail for missing binary")
 	}
 }
 

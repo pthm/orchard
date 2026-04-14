@@ -2,6 +2,7 @@ package graph
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/hashicorp/hcl/v2"
 	"github.com/pthm/orchard/internal/parser"
@@ -60,7 +61,7 @@ func Build(ps *parser.ParsedScenario) (*Graph, error) {
 	// Register scenario-level actions.
 	for _, action := range ps.Scenario.Actions {
 		id := NodeID(fmt.Sprintf("action.%s.%s", action.Type, action.Name))
-		alias, body, err := extractActionProviderAlias(action.Remain)
+		reserved, body, err := extractReservedActionAttrs(action.Remain, "")
 		if err != nil {
 			return nil, fmt.Errorf("action %s: %w", id, err)
 		}
@@ -69,7 +70,8 @@ func Build(ps *parser.ParsedScenario) (*Graph, error) {
 			Kind:          ActionNode,
 			ActionType:    action.Type,
 			Body:          body,
-			ProviderAlias: alias,
+			ProviderAlias: reserved.ProviderAlias,
+			Dependencies:  reserved.DependsOn,
 		}); err != nil {
 			return nil, err
 		}
@@ -83,7 +85,7 @@ func Build(ps *parser.ParsedScenario) (*Graph, error) {
 		internalActionIDs := make([]NodeID, 0, len(comp.Def.Actions))
 		for _, action := range comp.Def.Actions {
 			actionID := NodeID(fmt.Sprintf("component.%s.action.%s.%s", key, action.Type, action.Name))
-			alias, body, err := extractActionProviderAlias(action.Remain)
+			reserved, body, err := extractReservedActionAttrs(action.Remain, key)
 			if err != nil {
 				return nil, fmt.Errorf("action %s: %w", actionID, err)
 			}
@@ -93,7 +95,8 @@ func Build(ps *parser.ParsedScenario) (*Graph, error) {
 				ActionType:    action.Type,
 				Body:          body,
 				ComponentKey:  key,
-				ProviderAlias: alias,
+				ProviderAlias: reserved.ProviderAlias,
+				Dependencies:  reserved.DependsOn,
 			}); err != nil {
 				return nil, err
 			}
@@ -258,42 +261,121 @@ func traversalAttr(t hcl.Traverser) (string, bool) {
 
 // reservedActionSchema is the body-schema used to pull off orchard-
 // level attributes from an action body before handing the leftover
-// to a provider's own schema validation. Today only `provider` is
-// reserved; `depends_on`, `timeout`, and retry controls will join
-// it in Milestone 3.
+// to a provider's own schema validation. `timeout` and retry
+// controls will join it in the rest of Milestone 3.
 var reservedActionSchema = &hcl.BodySchema{
 	Attributes: []hcl.AttributeSchema{
 		{Name: "provider"},
+		{Name: "depends_on"},
 	},
 }
 
-// extractActionProviderAlias pulls the reserved `provider = "<alias>"`
-// attribute off an action body and returns the alias together with a
-// leftover body that no longer contains it. Providers' own schemas
-// never see `provider`, so their strict attribute validation works
-// without knowing about orchard-reserved names.
+// reservedActionAttrs bundles the attributes orchard owns on an
+// action body before schema validation kicks in. Every field is
+// optional; callers check for zero values.
+type reservedActionAttrs struct {
+	// ProviderAlias is the scenario-local provider name picked by
+	// a `provider = "<alias>"` attribute. Empty means "let the
+	// engine route automatically" (which works when exactly one
+	// registered provider offers the action type).
+	ProviderAlias string
+
+	// DependsOn lists extra graph dependencies declared explicitly
+	// via `depends_on = [action.X.Y, component.A.B]`. Data
+	// dependencies are already inferred from expression references
+	// in the body, so depends_on is for side-effect ordering only
+	// — the common case is "run after this other thing, even
+	// though I don't read any of its outputs".
+	DependsOn []NodeID
+}
+
+// extractReservedActionAttrs pulls orchard-reserved attributes off
+// an action body and returns a leftover body that no longer
+// contains them, plus the structured attributes. Providers' own
+// schemas never see the reserved names, so their strict attribute
+// validation works without knowing about orchard internals.
 //
-// The value must be a string literal; expressions like `var.alias`
-// are rejected for now — routing needs the alias resolved before
-// the engine would evaluate scenario variables in attr contexts.
-func extractActionProviderAlias(body hcl.Body) (string, hcl.Body, error) {
+// componentKey is "" for scenario-level actions and the component's
+// instance key (e.g. "merchant.base") for actions declared inside
+// a component. The scoping is used when translating depends_on
+// traversals to NodeIDs — inside a component, `action.sql.foo`
+// refers to the component's internal action of that name.
+func extractReservedActionAttrs(body hcl.Body, componentKey string) (reservedActionAttrs, hcl.Body, error) {
+	var out reservedActionAttrs
 	if body == nil {
-		return "", nil, nil
+		return out, nil, nil
 	}
 	content, remain, diags := body.PartialContent(reservedActionSchema)
 	if diags.HasErrors() {
-		return "", nil, fmt.Errorf("reading reserved attributes: %s", diags.Error())
+		return out, nil, fmt.Errorf("reading reserved attributes: %s", diags.Error())
 	}
-	attr, ok := content.Attributes["provider"]
-	if !ok {
-		return "", remain, nil
+
+	if attr, ok := content.Attributes["provider"]; ok {
+		val, diags := attr.Expr.Value(nil)
+		if diags.HasErrors() {
+			return out, nil, fmt.Errorf(`provider = ...: %s`, diags.Error())
+		}
+		if val.Type().FriendlyName() != "string" {
+			return out, nil, fmt.Errorf(`provider must be a string literal, got %s`, val.Type().FriendlyName())
+		}
+		out.ProviderAlias = val.AsString()
 	}
-	val, diags := attr.Expr.Value(nil)
-	if diags.HasErrors() {
-		return "", nil, fmt.Errorf(`provider = ...: %s`, diags.Error())
+
+	if attr, ok := content.Attributes["depends_on"]; ok {
+		deps, err := extractDependsOnRefs(attr.Expr, componentKey)
+		if err != nil {
+			return out, nil, fmt.Errorf("depends_on: %w", err)
+		}
+		out.DependsOn = deps
 	}
-	if val.Type().FriendlyName() != "string" {
-		return "", nil, fmt.Errorf(`provider must be a string literal, got %s`, val.Type().FriendlyName())
+
+	return out, remain, nil
+}
+
+// extractDependsOnRefs turns the RHS of `depends_on = [...]` into
+// a slice of NodeIDs. The expression must be a tuple/list of
+// traversals against the `action.*` or `component.*` namespaces;
+// anything else (string literals, variable references, function
+// calls) is rejected because graph dependencies need resolution
+// to concrete node IDs at parse time, not runtime.
+func extractDependsOnRefs(expr hcl.Expression, componentKey string) ([]NodeID, error) {
+	// Every traversal inside the expression contributes a dep.
+	// Using Expression.Variables() works uniformly for tuple
+	// constructors, and for the degenerate single-value case the
+	// user might write (depends_on = action.sql.foo).
+	var deps []NodeID
+	seen := make(map[NodeID]bool)
+	for _, trav := range expr.Variables() {
+		id, ok := traversalToNodeID(trav, componentKey)
+		if !ok {
+			return nil, fmt.Errorf("entry %q does not reference an action or component node", formatTraversal(trav))
+		}
+		if !seen[id] {
+			seen[id] = true
+			deps = append(deps, id)
+		}
 	}
-	return val.AsString(), remain, nil
+	if len(deps) == 0 {
+		return nil, fmt.Errorf("empty list — remove the attribute if no deps are needed")
+	}
+	return deps, nil
+}
+
+// formatTraversal renders an hcl.Traversal back to dotted form
+// (`action.sql.foo.id`) for error messages. Purely cosmetic —
+// `trav[0].SourceRange().String()` would point at source but
+// isn't meaningful for scripted errors.
+func formatTraversal(trav hcl.Traversal) string {
+	if len(trav) == 0 {
+		return "<empty>"
+	}
+	parts := []string{trav.RootName()}
+	for _, step := range trav[1:] {
+		if a, ok := step.(hcl.TraverseAttr); ok {
+			parts = append(parts, a.Name)
+		} else {
+			parts = append(parts, "?")
+		}
+	}
+	return strings.Join(parts, ".")
 }

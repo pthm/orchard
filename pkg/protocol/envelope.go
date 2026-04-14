@@ -9,10 +9,18 @@ import (
 )
 
 // Method names understood by the provider protocol.
+//
+// The describe/configure split mirrors Terraform's two-phase handshake:
+// a provider must be able to advertise its schema before it has been
+// configured, because callers like `orchard plan` need schemas to
+// type-check scenarios without opening connections to target systems.
+// Bundling both into a single "initialize" would force every plan
+// invocation to supply real credentials.
 const (
-	MethodInitialize = "initialize"
-	MethodExecute    = "execute"
-	MethodShutdown   = "shutdown"
+	MethodDescribe  = "describe"
+	MethodConfigure = "configure"
+	MethodExecute   = "execute"
+	MethodShutdown  = "shutdown"
 )
 
 // Request is a single message from Orchard to a provider.

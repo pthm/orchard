@@ -324,7 +324,14 @@ action "sql" "warm_cache" {
 
 ### Plan-time Validation
 
-`orchard plan` instantiates every declared provider for schemas only — no `Configure`, no connections — and validates every action body in the graph against its provider's declared schema. Unknown attributes, missing required fields, and action types without a matching provider are caught here with HCL source coordinates, long before the first INSERT runs.
+`orchard plan` instantiates every declared provider for schemas only — no `Configure`, no connections — and runs two validation passes before rendering:
+
+1. **Structural** (`Engine.ValidateGraph`). Walks every action body against its provider's declared attribute schema. Catches unknown attributes, missing required fields, and action types without a matching provider. HCL source coordinates land in the error message.
+2. **Reference type-check** (`Engine.ValidateReferences`). Builds a typed eval context — `var.*` with real values, each `action.<type>.<name>` as a typed-but-unknown cty value based on the provider's declared output shape — and evaluates every scenario expression (action attributes, outputs, component inputs) against it. HCL's type-checker flags references that don't exist (`action.X.Y.typo`), attribute access on a primitive (`.status.foo` where status is a number), and mismatched types.
+
+The same two passes also run at the start of `orchard run`, before any provider `Configure` opens a connection. A typo-riddled scenario fails fast without opening databases or spawning subprocesses.
+
+Coverage caveats: actions with `output { type = any }` (today: `postgres.sql`) are typed as `cty.DynamicPseudoType`, which HCL allows any attribute access against — typos there remain runtime errors. Component outputs are also treated as dynamic; type-propagating through component output expressions is future work.
 
 ### Writing a Provider
 
@@ -493,7 +500,7 @@ The engine wraps `provider.Execute` in `context.WithTimeout`. On breach the erro
 ### Execution Phases
 
 1. **Parse** — Load HCL files, structurally decode scenarios and components, resolve component source paths, merge variable defaults with CLI overrides, extract `required_providers` and evaluate each `provider` block against the variable context.
-2. **Plan** — Build the dependency graph from expression references. Topologically sort nodes. Detect cycles. Register providers for schemas only (no `Configure`) and validate every action body against its provider's declared schema — unknown attributes, missing required fields, and unrouted action types are rejected here with HCL source coordinates.
+2. **Plan** — Build the dependency graph from expression references. Topologically sort nodes. Detect cycles. Register providers for schemas only (no `Configure`). Run `Engine.ValidateGraph` (structural: unknown attributes, missing required fields, unrouted action types) and `Engine.ValidateReferences` (typed eval context: reference typos, bad attribute access on primitives, mismatched types). Both passes attach HCL source coordinates to errors.
 3. **Execute** — Configure every provider with its resolved config. Walk the topological order. For each node: build an `EvalContext` from resolved upstream outputs, evaluate the node's deferred expressions, coerce attrs to their declared types, dispatch to the appropriate provider, capture outputs.
 4. **Output** — Evaluate and display scenario-level outputs.
 5. **Close** — Close providers in reverse registration order. External subprocesses receive `shutdown` and are waited on (force-killed after a timeout if unresponsive).
@@ -843,7 +850,7 @@ Rebuild the action layer around a language-agnostic plugin model so third partie
 | Plan-time validation of scenario output references | Done |
 | Plan-time validation of component inputs (static keys + required check) | Done |
 
-### Milestone 3: Action Ergonomics and Routing
+### Milestone 3: Action Ergonomics and Routing — COMPLETE
 
 Fill in the remaining action-layer features that were in the original Milestone 2 before the plugin refactor, plus the provider-routing work that the current "unique action name across providers" model forecloses.
 
@@ -852,11 +859,13 @@ Fill in the remaining action-layer features that were in the original Milestone 
 | `depends_on` explicit dependency support | Done |
 | Action-level `timeout = "..."` | Done |
 | Shell command builtin (`builtin/exec`, `action "run"`) | Done |
-| Action retry block | Not started |
-| Plan-time reference type-checking (output types → eval context) | Not started |
+| Action `retry { ... }` block (constant / linear / exponential backoff, max_delay cap) | Done |
+| Plan-time reference type-checking (output types → typed eval context) | Done |
 | Dotted action types (`action "db.insert"`) | Deferred — see below |
 
-**Reserved action attributes.** `provider`, `depends_on`, and `timeout` are now the three orchard-reserved attributes stripped from action bodies before provider schema validation runs. Retry controls will join them as a nested block (`retry { ... }`) rather than a flat attribute. The reservation mechanism lives in one place (`internal/graph/graph.go`), so adding the next one is a localised change.
+**Reserved action attributes and blocks.** Four items now live under orchard's reservation namespace, stripped from action bodies before provider schema validation runs: `provider = "<alias>"`, `depends_on = [...]`, `timeout = "..."`, and the `retry { ... }` block. The reservation mechanism sits in one place (`internal/graph/graph.go`), so any future addition is a localised change.
+
+**Plan-time reference type-checking.** `orchard plan` (and `orchard run` before Configure) now builds a typed eval context — `var.*` with resolved values, each `action.<type>.<name>` as `cty.UnknownVal` of the provider's declared output type — and walks every scenario expression against it. Typos like `action.request.fetch.bdy` surface as HCL "Unsupported attribute" errors with source coordinates, not at runtime. Actions whose provider declares `output { type = any }` (postgres.sql today) remain dynamic; those typos stay runtime errors until the provider narrows its schema.
 
 **Routing today.** The engine routes actions by the scenario's local provider alias. `required_providers { db = { source = "builtin/postgres" } }` registers the postgres provider under the name `db`; `provider "db" {}` configures it; and an action body can pick it explicitly with `provider = "db"`. When only one registered provider offers a given action type, the action body can omit `provider =` and the engine resolves it automatically. When two or more providers offer the same action type, the engine returns a clear error listing the candidates and pointing at the `provider = "<alias>"` escape.
 
@@ -971,6 +980,9 @@ internal/
     evalattrs.go                Schema-driven HCL body → map[string]cty.Value with
                                 coercion to declared types and defaults from schema
     validate.go                 Engine.ValidateGraph — structural schema check, no eval
+    validate_refs.go            Engine.ValidateReferences — typed eval context,
+                                walks scenario expressions and catches reference typos
+                                + type mismatches against provider output schemas
     context.go                  Build nested cty.ObjectVal EvalContext from resolved outputs
 
   cli/                          CLI-only helpers, kept out of engine/
@@ -1033,7 +1045,7 @@ test/
 
 **JSON Lines over stdio for external providers** — Not gRPC. Not custom binary. The smallest transport that supports multi-language providers, matching what LSP, DAP, and MCP all converged on. Borrowed from Terraform's plugin model (two-phase describe/configure handshake, per-provider schema advertisement) without the protobuf toolchain cost.
 
-**Plan-time schema validation** — `orchard plan` instantiates providers for schemas only and runs structural validation (unknown attrs, missing required fields, unrouted action types) against every action body before any `Configure` runs. Catches typos without opening database connections or making network calls.
+**Plan-time schema validation** — `orchard plan` instantiates providers for schemas only and runs structural validation (unknown attrs, missing required fields, unrouted action types) against every action body before any `Configure` runs. Catches typos without opening database connections or making network calls. A second pass, `Engine.ValidateReferences`, builds a typed eval context (variables resolved, node outputs as typed-but-unknown cty values) and walks every scenario expression — HCL's own type-checker then flags reference typos, attribute access on the wrong type, and undeclared variables. Both passes run at the start of `orchard run` too, so even if the user skipped `plan`, a typo-riddled scenario fails before Configure opens anything.
 
 **Provider sources are scheme-prefixed strings** — `builtin/<name>` for compiled-in, `exec:<path>` for subprocess. The scheme switch lives in `cmd/registry.go` and stays open for future schemes (remote registries, OCI-distributed binaries) without touching the engine or protocol.
 

@@ -721,10 +721,16 @@ Rebuild the action layer around a language-agnostic plugin model so third partie
 | Postgres builtin ported onto the new interface | Done |
 | HTTP builtin (status/body/headers outputs) | Done |
 | Cross-provider integration coverage (FK chain + external echo) | Done |
+| Typed variables (`type = ...`) with default/override coercion | Done |
+| Strict component inputs (reject undeclared, require required) | Done |
+| Deterministic execution and plan ordering | Done |
+| Presentation layer separated from engine (Reporter interface) | Done |
+| Context-aware external providers (Execute/Close bounded by ctx) | Done |
+| Duplicate scenario element detection (variables, actions, outputs, components) | Done |
 
-### Milestone 3: Action Ergonomics
+### Milestone 3: Action Ergonomics and Routing
 
-Fill in the remaining action-layer features that were in the original Milestone 2 before the plugin refactor.
+Fill in the remaining action-layer features that were in the original Milestone 2 before the plugin refactor, plus the provider-routing work that the current "unique action name across providers" model forecloses.
 
 | Feature | Status |
 |---------|--------|
@@ -733,6 +739,9 @@ Fill in the remaining action-layer features that were in the original Milestone 
 | Action-level timeout support | Not started |
 | Action retry support | Not started |
 | Plan-time reference type-checking (output types → eval context) | Not started |
+| Action routing by local provider alias (dotted `provider.action` form) | Not started |
+
+**Known limitation — action routing.** Today the engine builds a flat `action-name → provider` map keyed on the provider's *schema* name, and refuses to start when two providers expose the same action name. That works for the small builtin set but blocks a realistic plugin ecosystem: two database providers both named `sql`, multiple HTTP clients both named `request`, vendor-shipped providers colliding on generic verbs. The fix is to route by the *local* provider name the scenario chose in `required_providers` and adopt a dotted access form (`action "postgres.sql" "x"`), with the bare form as sugar only when there's a single candidate. That requires a scenario migration and is deliberately scoped to its own change rather than tacking onto this milestone.
 
 ### Milestone 4: Schema-Aware Database Provider
 

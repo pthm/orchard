@@ -5,6 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/pthm/orchard/internal/engine"
 	"github.com/pthm/orchard/internal/graph"
 	"github.com/pthm/orchard/internal/parser"
 )
@@ -12,7 +13,7 @@ import (
 func newPlanCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "plan <scenario>",
-		Short: "Show the execution plan for a scenario",
+		Short: "Validate a scenario and show its execution plan",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ps, err := parser.LoadScenario(args[0], varFlags)
@@ -22,7 +23,6 @@ func newPlanCmd() *cobra.Command {
 
 			fmt.Printf("Scenario: %s\n\n", ps.Scenario.Name)
 
-			// Print variables.
 			if len(ps.Variables) > 0 {
 				fmt.Println("Variables:")
 				for name, val := range ps.Variables {
@@ -36,7 +36,23 @@ func newPlanCmd() *cobra.Command {
 				return fmt.Errorf("building graph: %w", err)
 			}
 
-			// Print execution order.
+			// Register providers for schemas only; do not Configure.
+			// Plan must not open database connections or make external
+			// calls — it is a read-only type-checking pass.
+			reg, err := registerProviders(ps)
+			if err != nil {
+				return fmt.Errorf("initializing providers: %w", err)
+			}
+
+			eng, err := engine.New(reg)
+			if err != nil {
+				return fmt.Errorf("building engine: %w", err)
+			}
+
+			if err := eng.ValidateGraph(g); err != nil {
+				return fmt.Errorf("validation failed: %w", err)
+			}
+
 			fmt.Println("Execution order:")
 			for i, nodeID := range g.Order {
 				node := g.Nodes[nodeID]
@@ -51,7 +67,6 @@ func newPlanCmd() *cobra.Command {
 				fmt.Printf("  %d. [%s] %s%s\n", i+1, kind, nodeID, deps)
 			}
 
-			// Print outputs.
 			if len(ps.Scenario.Outputs) > 0 {
 				fmt.Println("\nOutputs:")
 				for _, output := range ps.Scenario.Outputs {
@@ -59,6 +74,7 @@ func newPlanCmd() *cobra.Command {
 				}
 			}
 
+			fmt.Println("\nPlan is valid.")
 			return nil
 		},
 	}

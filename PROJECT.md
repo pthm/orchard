@@ -181,6 +181,35 @@ These references serve double duty:
 1. **Dependency graph construction** — at parse time, Orchard inspects all expressions for variable references (using HCL's `Expression.Variables()`) to build an implicit execution graph. If action B references `action.sql.A.id`, then A must execute before B.
 2. **Value resolution** — at execution time, after upstream nodes have executed, their outputs are placed into an `EvalContext` and downstream expressions are evaluated against it.
 
+### Variables and Types
+
+Variable blocks accept a `type` constraint using HCL's native type-expression syntax:
+
+```hcl
+variable "merchant_name" {
+  type    = string
+  default = "Acme Corp"
+}
+
+variable "transaction_count" {
+  type    = number
+  default = 10
+}
+
+variable "tags" {
+  type    = list(string)
+  default = []
+}
+```
+
+Types are optional. A variable without a `type` accepts any value the default or override produces (`cty.DynamicPseudoType`). When a type is declared:
+
+- **Defaults** are coerced to the declared type at load time; a mismatch is a parse-time error, not a runtime surprise.
+- **CLI overrides** are HCL-parsed against the declared type. `--var count=42` produces a number, `--var flag=true` produces a bool, `--var tags=["a","b"]` produces a list. String-typed (or untyped) variables take the raw override verbatim, so `--var name=Acme Corp` still works without quoting.
+- **Component inputs** are coerced to the declared type of the matching component variable. Stray inputs with no matching variable are rejected; required variables with no default that receive no input are rejected.
+
+Error messages identify the offending variable, the declared type, and the value that failed to coerce.
+
 ### Two-Pass HCL Evaluation
 
 This is the core architectural decision. HCL expressions cannot be fully evaluated at parse time because their values depend on execution results (e.g., a database-generated ID). Orchard uses a two-pass approach:
@@ -381,14 +410,7 @@ action "db.insert" "merchant" {
 
 Dependencies are inferred automatically from expression references. When an action references `component.merchant.base.id`, Orchard knows that the merchant component must complete before that action can run. No explicit ordering is required for most cases.
 
-An explicit `depends_on` escape hatch is available for side-effect dependencies that don't involve data references:
-
-```hcl
-action "http" "reindex" {
-  depends_on = [action.sql.seed_data]
-  ...
-}
-```
+A `depends_on` escape hatch for side-effect-only dependencies (actions that must run after another action without reading its outputs) is planned in Milestone 3 and not yet wired.
 
 ### Execution Phases
 
@@ -402,10 +424,12 @@ action "http" "reindex" {
 
 Orchard aims for reproducible runs:
 
-- Seeded random generators for deterministic data generation
-- Stable IDs where possible
-- Explicit timestamp control
-- Controllable execution ordering via the dependency graph
+- **Deterministic execution order.** Kahn's topological sort emits siblings in lexicographic order of their node IDs, so same graph → same walk, run after run. Provider registration iterates `required_providers` in sorted order; scenario outputs and variables print alphabetically.
+- **Deterministic close order.** Providers close in reverse registration order. Subprocess shutdown is bounded by a single deadline across the graceful RPC and the process wait — a hung provider cannot wedge orchard's exit.
+- **Fail-fast on authoring collisions.** Duplicate variable names, action `(type, name)` pairs, component instance keys, output names, and provider blocks are rejected at parse time rather than silently overwriting.
+- **Seeded random generators** for data generation (planned; individual providers responsible).
+- **Stable IDs** where possible (planned; tied to Milestone 5's run-record model).
+- **Explicit timestamp control** (planned; HCL `now()` and clock-freeze in Milestone 7).
 
 ---
 
@@ -691,17 +715,26 @@ The core execution pipeline: parse HCL scenarios and components, build a depende
 | `orchard plan` — parse, graph, print execution order | Done |
 | `orchard list` — scan directories for scenario files | Done |
 | Provider registry and interface | Done |
-| Configuration: DSN resolution (flag / env / default) | Done |
-| Example scenarios (basic + with_component) | Done |
+| DSN resolution via CLI flag / env var / default | Done, then superseded in Milestone 2 by scenario-declared `provider "postgres" { dsn = var.dsn }` |
+| Example scenarios (basic + with_component) | Done, then moved into `test/integration/testdata/` |
 | Unit tests for parser, graph, and engine | Done |
 
 **What works today:**
 
 ```bash
-orchard plan examples/basic/scenario.hcl              # prints DAG
-orchard plan examples/basic/scenario.hcl --var merchant_name=Override
-orchard list examples/                                 # finds scenarios
-orchard run examples/basic/scenario.hcl --dsn postgres://...  # executes against Postgres
+# Plan — parses, builds the DAG, validates every action body against its
+# provider's declared schema. No database or network access.
+orchard plan path/to/scenario.hcl
+
+# With variable overrides (typed against the scenario's variable declarations).
+orchard plan path/to/scenario.hcl --var merchant_name=Override --var count=50
+
+# Execute against Postgres. Connection info lives in the scenario's
+# `provider "postgres" { dsn = var.dsn }` block; --var feeds the DSN in.
+orchard run path/to/scenario.hcl --var dsn=postgres://...
+
+# List scenario files under a directory.
+orchard list path/to/dir/
 ```
 
 ### Milestone 2: Provider Plugin System — COMPLETE
@@ -786,11 +819,10 @@ Harden the tool for real-world use and improve the authoring experience.
 | Feature | Status |
 |---------|--------|
 | Scenario and component `description` and `tags` metadata | Not started |
-| Improved error messages with HCL source locations | Not started |
+| Improved error messages with HCL source locations | Partial — parser/plan errors carry HCL coordinates; runtime errors don't yet |
 | Dry-run mode (plan with expression evaluation but no execution) | Not started |
 | Execution logging with structured output | Not started |
 | Multiple scenarios per file support | Not started |
-| Scenario-level variables with type validation | Not started |
 | HCL function library (`sqlstring`, `uuid`, `timestamp`, etc.) | Not started |
 | Parallel execution of independent nodes | Not started |
 | Transaction wrapping for atomic scenario execution | Not started |
@@ -900,6 +932,12 @@ test/
 **Plan-time schema validation** — `orchard plan` instantiates providers for schemas only and runs structural validation (unknown attrs, missing required fields, unrouted action types) against every action body before any `Configure` runs. Catches typos without opening database connections or making network calls.
 
 **Provider sources are scheme-prefixed strings** — `builtin/<name>` for compiled-in, `exec:<path>` for subprocess. The scheme switch lives in `cmd/registry.go` and stays open for future schemes (remote registries, OCI-distributed binaries) without touching the engine or protocol.
+
+**Typed variables, coerced at the boundary** — `variable "foo" { type = number }` is enforced. Defaults coerce at parse time, CLI overrides HCL-parse against the declared type, and component inputs coerce when crossing the module boundary. A typo like `inputs = { naem = var.x }` fails with "undeclared input \"naem\" on component c" before anything runs. Runtime receives well-typed values.
+
+**Context-bounded subprocess lifecycle** — `external.Client.Roundtrip` takes a `context.Context`; both the write and read run in one goroutine selected against `ctx.Done`. On cancellation the client poisons itself — subsequent calls fail fast — so there's never more than one goroutine reading the pipe. `Provider.Close` wraps the shutdown RPC and the process wait in a single `context.WithTimeout(shutdownTimeout)`, capping total teardown time regardless of which half hangs.
+
+**Presentation outside the engine** — `engine.Execute` emits progress through a tiny `Reporter` interface with a `NopReporter` default. `cmd/` installs a stdout reporter; integration tests get silence for free. The engine has no direct opinion on stdout, logging, or formatting.
 
 ### Dependencies
 

@@ -61,6 +61,7 @@ func newRunCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("building engine: %w", err)
 			}
+			eng.SetReporter(stdoutReporter{})
 
 			fmt.Println("Executing...")
 			result, err := eng.Execute(ctx, ps, g)
@@ -84,6 +85,15 @@ func newRunCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// stdoutReporter prints a "✓ nodeID" line per completed node. The
+// engine itself is mute by default; presentation lives in cmd/.
+type stdoutReporter struct{}
+
+// NodeCompleted implements engine.Reporter.
+func (stdoutReporter) NodeCompleted(nodeID string) {
+	fmt.Printf("  ✓ %s\n", nodeID)
 }
 
 func formatCtyValue(v cty.Value) string {

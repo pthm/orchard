@@ -31,6 +31,8 @@ params:
   BookTheme: light
   BookToC: true
   BookSection: docs
+  BookLogo: orchard_logo.png
+  BookFavicon: favicon.svg
   BookRepo: https://github.com/pthm/orchard
   BookEditLink: "{{ .Site.Params.BookRepo }}/edit/main/docs/content/{{ .Path }}"
   BookEditLinkText: Edit this page

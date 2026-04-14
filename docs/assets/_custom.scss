@@ -180,6 +180,38 @@ label, input, select, textarea {
   line-height: 1.5;
 }
 
+/* Brand (top-left of sidebar) — logo-only, wordmark hidden. */
+.book-brand {
+  margin: 0 0 2rem;
+}
+.book-brand a {
+  display: inline-flex;
+  align-items: center;
+  color: inherit;
+  text-decoration: none;
+}
+.book-brand img {
+  width: auto;
+  height: 2.25rem;
+  max-width: 100%;
+  display: block;
+  /* Source PNG is 15578x3011 — let the browser downscale crisply. */
+  image-rendering: auto;
+}
+.book-brand span {
+  /* Site title stays in the <title> tag for accessibility but is hidden
+     visually now that the logo carries the brand. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* Sidebar — muted beige surface, ink text. */
 .book-menu .book-menu-content {
   background: transparent;
@@ -228,6 +260,40 @@ hr {
   border: none;
   border-top: 1px solid rgba(153, 173, 122, 0.4);
   margin: 2.25rem 0;
+}
+
+/* Site footer — left-aligned, quiet, sits below page content. */
+.book-site-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.35rem;
+  margin-top: 4rem;
+  padding: 1.5rem 0 0.5rem;
+  border-top: 1px solid rgba(153, 173, 122, 0.3);
+  font-family: $font-body;
+  font-size: 0.85rem;
+  color: rgba(28, 28, 26, 0.55);
+  letter-spacing: 0.01em;
+}
+.book-site-footer-bridge {
+  display: inline-flex;
+  align-items: center;
+  color: #546B41;
+}
+.book-site-footer-bridge svg {
+  width: 1.25em;
+  height: 1.25em;
+  display: block;
+}
+.book-site-footer a {
+  color: #546B41;
+  text-decoration: none;
+}
+.book-site-footer a:hover {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
 }
 
 /* Tables — readable, beige header. */

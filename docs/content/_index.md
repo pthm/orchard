@@ -28,4 +28,7 @@ rows, calling APIs, running scripts, and wiring outputs between steps automatica
 
 - [Getting started](docs/getting-started/) — install the CLI and run your first scenario
 - [Concepts](docs/concepts/) — scenarios, components, providers, and how they fit together
-- [Reference](docs/reference/) — HCL schema, built-in providers, CLI flags
+- [Providers](docs/providers/) — reference documentation for built-in providers
+- [Guides](docs/guides/) — worked examples: demo data, UAT, local dev, integration testing
+- [Extending](docs/extending/) — build your own provider
+- [Reference](docs/reference/) — HCL schema, CLI, expressions

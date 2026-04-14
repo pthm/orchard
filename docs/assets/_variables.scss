@@ -3,6 +3,7 @@
  * so these win over the theme's !default values.
  */
 
-// Narrower container — 16rem menu + article + 16rem toc fits comfortably
-// inside 76rem while keeping a generous outer gutter on wide displays.
-$container-max-width: 76rem;
+// Wider container so body content has room to breathe when the right-hand
+// TOC is visible. 16rem menu + body + 16rem toc + padding fits comfortably
+// inside 96rem on typical desktop displays.
+$container-max-width: 96rem;

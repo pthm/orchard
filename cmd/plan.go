@@ -51,6 +51,9 @@ func newPlanCmd() *cobra.Command {
 			if err := eng.ValidateGraph(g); err != nil {
 				return fmt.Errorf("validation failed: %w", err)
 			}
+			if err := eng.ValidateReferences(ps, g); err != nil {
+				return fmt.Errorf("validation failed: %w", err)
+			}
 
 			// Provide a route resolver so each action header can name
 			// the provider that will handle it. Falls back to empty

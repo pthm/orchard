@@ -59,6 +59,19 @@ func newRunCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("building engine: %w", err)
 			}
+
+			// Fail fast on structural and reference errors before the
+			// providers do any real work. These are the same checks
+			// `orchard plan` performs, so a valid plan run here is a
+			// no-op but catches authoring mistakes cheaply when the
+			// user skipped plan.
+			if err := eng.ValidateGraph(g); err != nil {
+				return fmt.Errorf("validation failed: %w", err)
+			}
+			if err := eng.ValidateReferences(ps, g); err != nil {
+				return fmt.Errorf("validation failed: %w", err)
+			}
+
 			eng.SetReporter(reporter.Select(reporter.Options{
 				Out:        cmd.OutOrStdout(),
 				ForcePlain: noColorFlag,

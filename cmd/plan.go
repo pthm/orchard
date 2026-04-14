@@ -48,6 +48,13 @@ func newPlanCmd() *cobra.Command {
 				return fmt.Errorf("building engine: %w", err)
 			}
 
+			// Surface provider-config typos at plan time — run catches
+			// these too, but only after Configure has already opened
+			// connections. Plan is the right layer for the cheap
+			// schema-only check.
+			if err := reg.ValidateConfigs(ps.ProviderConfigs); err != nil {
+				return fmt.Errorf("validation failed: %w", err)
+			}
 			if err := eng.ValidateGraph(g); err != nil {
 				return fmt.Errorf("validation failed: %w", err)
 			}

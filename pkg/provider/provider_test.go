@@ -18,6 +18,7 @@ import (
 type stubProvider struct {
 	mu            sync.Mutex
 	name          string
+	configSchema  map[string]protocol.AttrSchema
 	configErr     error
 	closeErr      error
 	configured    bool
@@ -32,6 +33,7 @@ type stubProvider struct {
 func (s *stubProvider) Schema() protocol.ProviderSchema {
 	return protocol.ProviderSchema{
 		Name: s.name, Version: "1", Protocol: protocol.ProtocolVersion,
+		Config: s.configSchema,
 		Actions: map[string]protocol.ActionSchema{
 			"noop": {Attrs: map[string]protocol.AttrSchema{}},
 		},
@@ -132,7 +134,10 @@ func TestRegistryRejectsEmptySchemaName(t *testing.T) {
 // postgres instance under the key "db".
 func TestRegistryAliasedProvider(t *testing.T) {
 	r := NewRegistry()
-	p := &stubProvider{name: "a"} // schema name is "a"
+	p := &stubProvider{
+		name:         "a",
+		configSchema: map[string]protocol.AttrSchema{"key": {Type: "string"}},
+	}
 	if err := r.Register("alias_one", p); err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +162,10 @@ func TestRegistryAliasedProvider(t *testing.T) {
 
 func TestRegistryConfigureDispatches(t *testing.T) {
 	r := NewRegistry()
-	a := &stubProvider{name: "a"}
+	a := &stubProvider{
+		name:         "a",
+		configSchema: map[string]protocol.AttrSchema{"key": {Type: "string"}},
+	}
 	b := &stubProvider{name: "b"}
 	_ = r.Register("a", a)
 	_ = r.Register("b", b)
@@ -258,5 +266,105 @@ func TestRegistryCloseCollectsErrors(t *testing.T) {
 	msg := err.Error()
 	if !strings.Contains(msg, "boom1") || !strings.Contains(msg, "boom2") {
 		t.Fatalf("expected both close errors in message, got %q", msg)
+	}
+}
+
+// TestValidateConfigsRejectsUnknownAttr: a typo in a provider config
+// block (dsn vs dsnn) now surfaces at plan time instead of being
+// silently handed to the provider's Configure.
+func TestValidateConfigsRejectsUnknownAttr(t *testing.T) {
+	r := NewRegistry()
+	p := &stubProvider{
+		name:         "db",
+		configSchema: map[string]protocol.AttrSchema{"dsn": {Type: "string", Required: true}},
+	}
+	_ = r.Register("db", p)
+
+	err := r.ValidateConfigs(map[string]map[string]cty.Value{
+		"db": {"dsnn": cty.StringVal("postgres://...")},
+	})
+	if err == nil {
+		t.Fatal("expected unknown-attribute error")
+	}
+	if !strings.Contains(err.Error(), "dsnn") {
+		t.Errorf("error should name the typo: %v", err)
+	}
+}
+
+// TestValidateConfigsRequiredMissing: a required attribute must be
+// present, and the error must name the missing one so authors don't
+// have to dig through the provider source to learn what's expected.
+func TestValidateConfigsRequiredMissing(t *testing.T) {
+	r := NewRegistry()
+	p := &stubProvider{
+		name:         "db",
+		configSchema: map[string]protocol.AttrSchema{"dsn": {Type: "string", Required: true}},
+	}
+	_ = r.Register("db", p)
+
+	err := r.ValidateConfigs(map[string]map[string]cty.Value{"db": {}})
+	if err == nil {
+		t.Fatal("expected missing-required error")
+	}
+	if !strings.Contains(err.Error(), "dsn") {
+		t.Errorf("error should name the missing attr: %v", err)
+	}
+}
+
+// TestValidateConfigsCoerces: string-typed attrs that arrive as other
+// cty types get coerced by the registry before reaching the provider.
+// Matches the action-attr behavior from evalAttrs.
+func TestValidateConfigsCoerces(t *testing.T) {
+	r := NewRegistry()
+	p := &stubProvider{
+		name:         "svc",
+		configSchema: map[string]protocol.AttrSchema{"port": {Type: "number"}},
+	}
+	_ = r.Register("svc", p)
+
+	if err := r.Configure(context.Background(), map[string]map[string]cty.Value{
+		"svc": {"port": cty.StringVal("8080")},
+	}); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if p.configCalls != 1 {
+		t.Fatalf("Configure never reached the provider")
+	}
+}
+
+// TestValidateConfigsNoSchemaRejectsInput: a provider with no config
+// schema accepts no config. Tolerating extras here would let a typo
+// like `provider "http" { baseurl = ... }` (real attr: base_url)
+// silently do nothing.
+func TestValidateConfigsNoSchemaRejectsInput(t *testing.T) {
+	r := NewRegistry()
+	_ = r.Register("x", &stubProvider{name: "x"})
+
+	err := r.ValidateConfigs(map[string]map[string]cty.Value{
+		"x": {"anything": cty.StringVal("v")},
+	})
+	if err == nil {
+		t.Fatal("expected rejection")
+	}
+}
+
+// TestValidateConfigsAppliesDefaults: optional attrs with declared
+// defaults reach the provider with the default value when the
+// scenario omits them.
+func TestValidateConfigsAppliesDefaults(t *testing.T) {
+	r := NewRegistry()
+	p := &stubProvider{
+		name: "svc",
+		configSchema: map[string]protocol.AttrSchema{
+			"region": {Type: "string", Default: []byte(`"us-east-1"`)},
+		},
+	}
+	_ = r.Register("svc", p)
+
+	if err := r.Configure(context.Background(), nil); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if len(p.sawConfigKeys) != 1 || p.sawConfigKeys[0] != "region" {
+		t.Errorf("expected default region to reach provider, got %v", p.sawConfigKeys)
 	}
 }

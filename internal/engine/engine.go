@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/gohcl"
@@ -48,20 +49,75 @@ type Engine struct {
 
 // Reporter receives observability events from the engine's
 // execution loop. The engine has no opinion on how events are
-// surfaced — CLI spinners, structured logs, test-silence, or a
-// future TUI all implement this interface. Scenarios can take
-// minutes to run; making this hook pluggable keeps the engine
-// independent of presentation.
+// surfaced — CLI, structured logs, test-silence, or a future TUI
+// all implement this interface. Scenarios can take minutes to
+// run; making this hook pluggable keeps the engine independent
+// of presentation.
+//
+// All methods are best-effort. The engine never checks return
+// values; Reporter implementations must not block or fail the
+// run. A Reporter implementation should handle concurrent calls
+// only if the caller wires one into a concurrent engine — today
+// the engine is single-threaded and emits events serially.
 type Reporter interface {
-	NodeCompleted(nodeID string)
+	// RunStarted fires once, before any node executes. scenario is
+	// the name from the top-level scenario block.
+	RunStarted(scenario string)
+
+	// NodeStarted fires just before a node's action runs. Component
+	// nodes also emit this so reporters can show component-level
+	// progress alongside action progress. The id is the fully-
+	// qualified graph node id (e.g. "action.sql.create" or
+	// "component.merchant.base").
+	NodeStarted(nodeID string)
+
+	// NodeCompleted fires after a node finishes successfully.
+	// duration measures wall-clock time spent in the node's own
+	// work (action execute, or component output resolution) —
+	// upstream wait time is excluded.
+	NodeCompleted(nodeID string, duration time.Duration)
+
+	// NodeFailed fires when a node returns an error. The engine
+	// returns that error to the caller too; this gives the
+	// reporter a chance to present it with context (the node id
+	// that failed) before the caller unwinds.
+	NodeFailed(nodeID string, err error)
+
+	// RunCompleted fires once, after the last node is done and
+	// scenario outputs have been evaluated. ok is false when the
+	// run aborted part-way.
+	RunCompleted(summary RunSummary)
+}
+
+// RunSummary is the end-of-run event payload.
+type RunSummary struct {
+	Scenario   string
+	Outputs    map[string]cty.Value
+	Duration   time.Duration
+	Succeeded  int
+	Failed     int
+	OK         bool
+	Err        error // non-nil when the run aborted
 }
 
 // NopReporter discards all events. Engine uses it by default so
 // callers that do not care about progress pay zero cost.
 type NopReporter struct{}
 
+// RunStarted implements Reporter.
+func (NopReporter) RunStarted(string) {}
+
+// NodeStarted implements Reporter.
+func (NopReporter) NodeStarted(string) {}
+
 // NodeCompleted implements Reporter.
-func (NopReporter) NodeCompleted(string) {}
+func (NopReporter) NodeCompleted(string, time.Duration) {}
+
+// NodeFailed implements Reporter.
+func (NopReporter) NodeFailed(string, error) {}
+
+// RunCompleted implements Reporter.
+func (NopReporter) RunCompleted(RunSummary) {}
 
 // actionRoute records one (provider, action) candidate for a
 // given scenario action type. When multiple candidates exist for
@@ -170,6 +226,23 @@ func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *grap
 	// the inputs.
 	compVars := make(map[string]map[string]cty.Value)
 
+	runStart := time.Now()
+	e.reporter.RunStarted(ps.Scenario.Name)
+	succeeded := 0
+
+	reportFailure := func(nodeID string, err error) error {
+		e.reporter.NodeFailed(nodeID, err)
+		e.reporter.RunCompleted(RunSummary{
+			Scenario:  ps.Scenario.Name,
+			Duration:  time.Since(runStart),
+			Succeeded: succeeded,
+			Failed:    1,
+			OK:        false,
+			Err:       err,
+		})
+		return err
+	}
+
 	for _, nodeID := range g.Order {
 		node := g.Nodes[nodeID]
 
@@ -179,25 +252,34 @@ func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *grap
 				if _, ok := compVars[node.ComponentKey]; !ok {
 					vars, err := e.resolveComponentInputs(ps.Components[node.ComponentKey], ps.Variables, resolved)
 					if err != nil {
-						return nil, fmt.Errorf("resolving inputs for component %q: %w", node.ComponentKey, err)
+						return nil, reportFailure(string(nodeID),
+							fmt.Errorf("resolving inputs for component %q: %w", node.ComponentKey, err))
 					}
 					compVars[node.ComponentKey] = vars
 				}
 			}
+			e.reporter.NodeStarted(string(nodeID))
+			start := time.Now()
 			outputs, err := e.executeAction(ctx, node, ps.Variables, compVars, resolved)
 			if err != nil {
-				return nil, fmt.Errorf("executing %s: %w", nodeID, err)
+				return nil, reportFailure(string(nodeID),
+					fmt.Errorf("executing %s: %w", nodeID, err))
 			}
 			resolved[string(nodeID)] = outputs
-			e.reporter.NodeCompleted(string(nodeID))
+			e.reporter.NodeCompleted(string(nodeID), time.Since(start))
+			succeeded++
 
 		case graph.ComponentNode:
+			e.reporter.NodeStarted(string(nodeID))
+			start := time.Now()
 			outputs, err := e.resolveComponentOutputs(node, ps, compVars, resolved)
 			if err != nil {
-				return nil, fmt.Errorf("resolving outputs for %s: %w", nodeID, err)
+				return nil, reportFailure(string(nodeID),
+					fmt.Errorf("resolving outputs for %s: %w", nodeID, err))
 			}
 			resolved[string(nodeID)] = outputs
-			e.reporter.NodeCompleted(string(nodeID))
+			e.reporter.NodeCompleted(string(nodeID), time.Since(start))
+			succeeded++
 		}
 	}
 
@@ -207,10 +289,19 @@ func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *grap
 	for _, output := range ps.Scenario.Outputs {
 		val, diags := output.Value.Value(evalCtx)
 		if diags.HasErrors() {
-			return nil, fmt.Errorf("evaluating output %q: %s", output.Name, diags.Error())
+			err := fmt.Errorf("evaluating output %q: %s", output.Name, diags.Error())
+			return nil, reportFailure("output."+output.Name, err)
 		}
 		scenarioOutputs[output.Name] = val
 	}
+
+	e.reporter.RunCompleted(RunSummary{
+		Scenario:  ps.Scenario.Name,
+		Outputs:   scenarioOutputs,
+		Duration:  time.Since(runStart),
+		Succeeded: succeeded,
+		OK:        true,
+	})
 
 	return &Result{Outputs: scenarioOutputs}, nil
 }

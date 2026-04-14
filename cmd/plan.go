@@ -2,10 +2,10 @@ package cmd
 
 import (
 	"fmt"
-	"sort"
 
 	"github.com/spf13/cobra"
 
+	"github.com/pthm/orchard/internal/cli/planview"
 	"github.com/pthm/orchard/internal/engine"
 	"github.com/pthm/orchard/internal/graph"
 	"github.com/pthm/orchard/internal/parser"
@@ -20,21 +20,6 @@ func newPlanCmd() *cobra.Command {
 			ps, err := parser.LoadScenario(args[0], varFlags)
 			if err != nil {
 				return fmt.Errorf("loading scenario: %w", err)
-			}
-
-			fmt.Printf("Scenario: %s\n\n", ps.Scenario.Name)
-
-			if len(ps.Variables) > 0 {
-				names := make([]string, 0, len(ps.Variables))
-				for name := range ps.Variables {
-					names = append(names, name)
-				}
-				sort.Strings(names)
-				fmt.Println("Variables:")
-				for _, name := range names {
-					fmt.Printf("  %s = %s\n", name, formatCtyValue(ps.Variables[name]))
-				}
-				fmt.Println()
 			}
 
 			g, err := graph.Build(ps)
@@ -54,7 +39,7 @@ func newPlanCmd() *cobra.Command {
 			}
 			defer func() {
 				if closeErr := reg.Close(); closeErr != nil {
-					fmt.Printf("warning: %v\n", closeErr)
+					fmt.Fprintf(cmd.ErrOrStderr(), "warning: %v\n", closeErr)
 				}
 			}()
 
@@ -67,28 +52,9 @@ func newPlanCmd() *cobra.Command {
 				return fmt.Errorf("validation failed: %w", err)
 			}
 
-			fmt.Println("Execution order:")
-			for i, nodeID := range g.Order {
-				node := g.Nodes[nodeID]
-				deps := ""
-				if len(node.Dependencies) > 0 {
-					deps = fmt.Sprintf(" (depends on: %v)", node.Dependencies)
-				}
-				kind := "action"
-				if node.Kind == graph.ComponentNode {
-					kind = "component"
-				}
-				fmt.Printf("  %d. [%s] %s%s\n", i+1, kind, nodeID, deps)
-			}
-
-			if len(ps.Scenario.Outputs) > 0 {
-				fmt.Println("\nOutputs:")
-				for _, output := range ps.Scenario.Outputs {
-					fmt.Printf("  %s\n", output.Name)
-				}
-			}
-
-			fmt.Println("\nPlan is valid.")
+			out := cmd.OutOrStdout()
+			planview.Render(out, ps, g)
+			planview.RenderSuccess(out)
 			return nil
 		},
 	}

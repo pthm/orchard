@@ -5,9 +5,12 @@ import (
 	"path/filepath"
 
 	"github.com/hashicorp/hcl/v2"
+	"github.com/hashicorp/hcl/v2/ext/typeexpr"
 	"github.com/hashicorp/hcl/v2/gohcl"
 	"github.com/hashicorp/hcl/v2/hclparse"
+	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/zclconf/go-cty/cty"
+	"github.com/zclconf/go-cty/cty/convert"
 )
 
 // ParsedScenario holds the structurally-decoded scenario with deferred expressions.
@@ -297,25 +300,151 @@ func validateComponentUniqueness(c *ComponentDefBlock) error {
 
 func resolveVariables(blocks []*VariableBlock, overrides map[string]string) (map[string]cty.Value, error) {
 	result := make(map[string]cty.Value)
-
-	// Evaluate defaults with a minimal context (no dependencies).
 	ctx := &hcl.EvalContext{}
 
 	for _, v := range blocks {
+		declaredType, err := ResolveVariableType(v)
+		if err != nil {
+			return nil, fmt.Errorf("variable %q: %w", v.Name, err)
+		}
+
 		if override, ok := overrides[v.Name]; ok {
-			result[v.Name] = cty.StringVal(override)
+			val, err := parseOverride(override, declaredType)
+			if err != nil {
+				return nil, fmt.Errorf("variable %q: %w", v.Name, err)
+			}
+			result[v.Name] = val
 			continue
 		}
-		if v.Default != nil {
-			val, diags := v.Default.Value(ctx)
+
+		defaultExpr, err := VariableDefault(v)
+		if err != nil {
+			return nil, err
+		}
+		if defaultExpr != nil {
+			val, diags := defaultExpr.Value(ctx)
 			if diags.HasErrors() {
 				return nil, fmt.Errorf("evaluating default for %q: %s", v.Name, diags.Error())
 			}
-			result[v.Name] = val
-		} else {
-			return nil, fmt.Errorf("variable %q has no default and no override provided", v.Name)
+			coerced, err := coerceToType(val, declaredType)
+			if err != nil {
+				return nil, fmt.Errorf("default for %q: %w", v.Name, err)
+			}
+			result[v.Name] = coerced
+			continue
 		}
+
+		return nil, fmt.Errorf("variable %q has no default and no override provided", v.Name)
 	}
 
 	return result, nil
+}
+
+// variableBodySchema is the hcl.BodySchema for a variable block's
+// inner attributes. Decoding with this schema lets us distinguish
+// genuinely-absent attributes from ones set to `null`, which gohcl's
+// `,optional` handling collapses together.
+var variableBodySchema = &hcl.BodySchema{
+	Attributes: []hcl.AttributeSchema{
+		{Name: "type"},
+		{Name: "default"},
+		{Name: "description"},
+	},
+}
+
+// variableParts holds the decoded attributes of a variable block.
+type variableParts struct {
+	typeExpr    hcl.Expression // nil when absent
+	defaultExpr hcl.Expression // nil when absent
+	description string         // empty when absent
+}
+
+func decodeVariable(v *VariableBlock) (variableParts, error) {
+	content, diags := v.Body.Content(variableBodySchema)
+	if diags.HasErrors() {
+		return variableParts{}, fmt.Errorf("variable %q: %s", v.Name, diags.Error())
+	}
+	var p variableParts
+	if a, ok := content.Attributes["type"]; ok {
+		p.typeExpr = a.Expr
+	}
+	if a, ok := content.Attributes["default"]; ok {
+		p.defaultExpr = a.Expr
+	}
+	if a, ok := content.Attributes["description"]; ok {
+		val, diags := a.Expr.Value(nil)
+		if diags.HasErrors() {
+			return variableParts{}, fmt.Errorf("variable %q description: %s", v.Name, diags.Error())
+		}
+		if val.Type() == cty.String {
+			p.description = val.AsString()
+		}
+	}
+	return p, nil
+}
+
+// ResolveVariableType parses the variable's `type` HCL expression
+// (e.g. `string`, `list(number)`, `object({id=number})`) into a
+// cty.Type. A variable with no declared type is treated as
+// cty.DynamicPseudoType — any value shape is accepted.
+func ResolveVariableType(v *VariableBlock) (cty.Type, error) {
+	p, err := decodeVariable(v)
+	if err != nil {
+		return cty.NilType, err
+	}
+	if p.typeExpr == nil {
+		return cty.DynamicPseudoType, nil
+	}
+	t, diags := typeexpr.TypeConstraint(p.typeExpr)
+	if diags.HasErrors() {
+		return cty.NilType, fmt.Errorf("type: %s", diags.Error())
+	}
+	return t, nil
+}
+
+// VariableDefault returns the variable's default-value expression,
+// or nil if the variable declared no default. A variable that
+// explicitly sets `default = null` is treated as having a default
+// (typed null); only genuinely-absent defaults return nil.
+func VariableDefault(v *VariableBlock) (hcl.Expression, error) {
+	p, err := decodeVariable(v)
+	if err != nil {
+		return nil, err
+	}
+	return p.defaultExpr, nil
+}
+
+// coerceToType converts val to the declared type. A dynamic
+// (undeclared) type accepts the value verbatim.
+func coerceToType(val cty.Value, declared cty.Type) (cty.Value, error) {
+	if declared == cty.DynamicPseudoType {
+		return val, nil
+	}
+	coerced, err := convert.Convert(val, declared)
+	if err != nil {
+		return cty.NilVal, fmt.Errorf("type mismatch: %w", err)
+	}
+	return coerced, nil
+}
+
+// parseOverride turns a CLI --var override string into a cty.Value
+// compatible with the variable's declared type. String-typed (or
+// untyped) variables take the raw string verbatim, which keeps the
+// common `--var name=Acme` case working without quoting. Other
+// types parse the override through HCL's expression grammar, so
+// `--var count=42`, `--var flag=true`, and `--var tags=["a","b"]`
+// all work as expected.
+func parseOverride(raw string, declared cty.Type) (cty.Value, error) {
+	if declared == cty.DynamicPseudoType || declared == cty.String {
+		return cty.StringVal(raw), nil
+	}
+	expr, diags := hclsyntax.ParseExpression([]byte(raw), "<override>", hcl.Pos{Line: 1, Column: 1})
+	if diags.HasErrors() {
+		return cty.NilVal, fmt.Errorf("parse override %q: %s", raw, diags.Error())
+	}
+	val, diags := expr.Value(nil)
+	if diags.HasErrors() {
+		return cty.NilVal, fmt.Errorf("evaluate override %q: %s", raw, diags.Error())
+	}
+	return coerceToType(val, declared)
 }

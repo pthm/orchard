@@ -73,11 +73,17 @@ type ActionBlock struct {
 	Remain hcl.Body `hcl:",remain"`
 }
 
-// VariableBlock represents: variable "name" { type = string; default = "value" }
+// VariableBlock represents: variable "name" { type = <typeexpr>, default = <value>, description = "..." }.
+//
+// Body captures the block's attributes as-is (via gohcl's
+// `,remain`). We decode type/default/description manually in the
+// parser rather than relying on gohcl's optional hcl.Expression
+// handling, which synthesizes a cty.NullVal placeholder for absent
+// optional fields — making "absent default" and "default = null"
+// indistinguishable.
 type VariableBlock struct {
-	Name    string         `hcl:"name,label"`
-	Default hcl.Expression `hcl:"default,optional"`
-	Remain  hcl.Body       `hcl:",remain"`
+	Name string   `hcl:"name,label"`
+	Body hcl.Body `hcl:",remain"`
 }
 
 // OutputBlock represents: output "name" { value = <expr> }

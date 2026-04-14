@@ -1,0 +1,8 @@
+/*
+ * Override hugo-book SCSS variables here. Imported after _defaults.scss,
+ * so these win over the theme's !default values.
+ */
+
+// Narrower container — 16rem menu + article + 16rem toc fits comfortably
+// inside 76rem while keeping a generous outer gutter on wide displays.
+$container-max-width: 76rem;

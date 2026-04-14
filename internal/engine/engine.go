@@ -329,6 +329,47 @@ func (e *Engine) executeAction(
 	compVars map[string]map[string]cty.Value,
 	resolved map[string]map[string]cty.Value,
 ) (map[string]cty.Value, error) {
+	if node.Retry == nil {
+		return e.executeActionOnce(ctx, node, vars, compVars, resolved)
+	}
+
+	// Retry loop. Each attempt runs with its own per-action
+	// timeout (not a cumulative deadline across attempts) — the
+	// common use case for retry is "each call should finish in
+	// 30s, give me up to 3 tries", not "spread 30s across tries".
+	var lastErr error
+	for attempt := 1; attempt <= node.Retry.MaxAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		outputs, err := e.executeActionOnce(ctx, node, vars, compVars, resolved)
+		if err == nil {
+			return outputs, nil
+		}
+		lastErr = err
+		if attempt == node.Retry.MaxAttempts {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(computeRetryDelay(node.Retry, attempt)):
+		}
+	}
+	return nil, fmt.Errorf("action %s failed after %d attempts: %w",
+		node.ID, node.Retry.MaxAttempts, lastErr)
+}
+
+// executeActionOnce runs exactly one attempt of a node against
+// its provider. Factored out so the retry wrapper can invoke it
+// in a loop without duplicating the route/eval/timeout plumbing.
+func (e *Engine) executeActionOnce(
+	ctx context.Context,
+	node *graph.Node,
+	vars map[string]cty.Value,
+	compVars map[string]map[string]cty.Value,
+	resolved map[string]map[string]cty.Value,
+) (map[string]cty.Value, error) {
 	route, err := e.resolveRoute(node.ActionType, node.ProviderAlias)
 	if err != nil {
 		return nil, err
@@ -369,6 +410,34 @@ func (e *Engine) executeAction(
 		return nil, err
 	}
 	return outputs, nil
+}
+
+// computeRetryDelay returns the wait between attempt N and
+// attempt N+1, given a retry configuration. Attempt numbers are
+// 1-indexed — the first attempt runs immediately, the delay
+// applies between attempt and the next one.
+func computeRetryDelay(cfg *graph.RetryConfig, attempt int) time.Duration {
+	var d time.Duration
+	switch cfg.Backoff {
+	case graph.BackoffConstant:
+		d = cfg.Delay
+	case graph.BackoffLinear:
+		d = cfg.Delay * time.Duration(attempt)
+	case graph.BackoffExponential:
+		// delay * 2^(attempt-1). Guards against negative shift when
+		// attempt is spuriously zero (should never happen).
+		shift := attempt - 1
+		if shift < 0 {
+			shift = 0
+		}
+		d = cfg.Delay << shift
+	default:
+		d = cfg.Delay
+	}
+	if cfg.MaxDelay > 0 && d > cfg.MaxDelay {
+		d = cfg.MaxDelay
+	}
+	return d
 }
 
 // buildNodeEvalContext creates an EvalContext appropriate for the node.

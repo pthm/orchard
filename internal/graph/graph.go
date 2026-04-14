@@ -3,6 +3,7 @@ package graph
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/hashicorp/hcl/v2"
 	"github.com/pthm/orchard/internal/parser"
@@ -34,6 +35,10 @@ type Node struct {
 	// the scenario does not specify one; the engine's routing then
 	// requires exactly one candidate to be unambiguous.
 	ProviderAlias string
+	// Timeout bounds the action's execute call. Zero means no
+	// engine-imposed deadline (the caller's ctx still applies).
+	// Set via `timeout = "30s"` in the action body.
+	Timeout time.Duration
 }
 
 // Graph holds the dependency graph built from a parsed scenario.
@@ -72,6 +77,7 @@ func Build(ps *parser.ParsedScenario) (*Graph, error) {
 			Body:          body,
 			ProviderAlias: reserved.ProviderAlias,
 			Dependencies:  reserved.DependsOn,
+			Timeout:       reserved.Timeout,
 		}); err != nil {
 			return nil, err
 		}
@@ -97,6 +103,7 @@ func Build(ps *parser.ParsedScenario) (*Graph, error) {
 				ComponentKey:  key,
 				ProviderAlias: reserved.ProviderAlias,
 				Dependencies:  reserved.DependsOn,
+				Timeout:       reserved.Timeout,
 			}); err != nil {
 				return nil, err
 			}
@@ -261,12 +268,13 @@ func traversalAttr(t hcl.Traverser) (string, bool) {
 
 // reservedActionSchema is the body-schema used to pull off orchard-
 // level attributes from an action body before handing the leftover
-// to a provider's own schema validation. `timeout` and retry
-// controls will join it in the rest of Milestone 3.
+// to a provider's own schema validation. Retry controls will join
+// it in the rest of Milestone 3.
 var reservedActionSchema = &hcl.BodySchema{
 	Attributes: []hcl.AttributeSchema{
 		{Name: "provider"},
 		{Name: "depends_on"},
+		{Name: "timeout"},
 	},
 }
 
@@ -287,6 +295,13 @@ type reservedActionAttrs struct {
 	// — the common case is "run after this other thing, even
 	// though I don't read any of its outputs".
 	DependsOn []NodeID
+
+	// Timeout is the deadline the engine wraps around the action's
+	// Execute call. Zero means "no timeout; provider controls its
+	// own deadlines" (most providers use the caller's ctx plus
+	// their own library defaults). The scenario writes Go-style
+	// duration strings: `timeout = "30s"`, `timeout = "2m"`.
+	Timeout time.Duration
 }
 
 // extractReservedActionAttrs pulls orchard-reserved attributes off
@@ -327,6 +342,25 @@ func extractReservedActionAttrs(body hcl.Body, componentKey string) (reservedAct
 			return out, nil, fmt.Errorf("depends_on: %w", err)
 		}
 		out.DependsOn = deps
+	}
+
+	if attr, ok := content.Attributes["timeout"]; ok {
+		val, diags := attr.Expr.Value(nil)
+		if diags.HasErrors() {
+			return out, nil, fmt.Errorf(`timeout = ...: %s`, diags.Error())
+		}
+		if val.Type().FriendlyName() != "string" {
+			return out, nil, fmt.Errorf(`timeout must be a string duration like "30s", got %s`, val.Type().FriendlyName())
+		}
+		raw := val.AsString()
+		d, err := time.ParseDuration(raw)
+		if err != nil {
+			return out, nil, fmt.Errorf(`timeout %q is not a valid Go duration (want "30s", "2m", "500ms", ...): %w`, raw, err)
+		}
+		if d < 0 {
+			return out, nil, fmt.Errorf(`timeout %q must be positive`, raw)
+		}
+		out.Timeout = d
 	}
 
 	return out, remain, nil

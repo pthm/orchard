@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -344,7 +345,30 @@ func (e *Engine) executeAction(
 		return nil, err
 	}
 
-	return p.Execute(ctx, route.actionName, attrs)
+	// Apply the action-level timeout (if any) on top of the
+	// caller's ctx. Providers that respect ctx will see the
+	// deadline; ones that ignore it will run to completion and
+	// leak an unavoidable grace-period goroutine — documented
+	// behaviour.
+	execCtx := ctx
+	if node.Timeout > 0 {
+		var cancel context.CancelFunc
+		execCtx, cancel = context.WithTimeout(ctx, node.Timeout)
+		defer cancel()
+	}
+
+	outputs, err := p.Execute(execCtx, route.actionName, attrs)
+	if err != nil {
+		// Rewrite deadline-exceeded to name the action and the
+		// timeout that fired — generic "context deadline exceeded"
+		// buries the signal scenario authors need.
+		if errors.Is(err, context.DeadlineExceeded) && node.Timeout > 0 {
+			return nil, fmt.Errorf("action %s exceeded timeout %s: %w",
+				node.ID, node.Timeout, err)
+		}
+		return nil, err
+	}
+	return outputs, nil
 }
 
 // buildNodeEvalContext creates an EvalContext appropriate for the node.

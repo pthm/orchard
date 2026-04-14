@@ -28,6 +28,11 @@ type Node struct {
 	// ComponentKey links component-scoped actions back to their parent.
 	// Empty for scenario-level actions.
 	ComponentKey string
+	// ProviderAlias is the scenario-local provider name picked via the
+	// `provider = "<alias>"` reserved action attribute. Empty when
+	// the scenario does not specify one; the engine's routing then
+	// requires exactly one candidate to be unambiguous.
+	ProviderAlias string
 }
 
 // Graph holds the dependency graph built from a parsed scenario.
@@ -55,11 +60,16 @@ func Build(ps *parser.ParsedScenario) (*Graph, error) {
 	// Register scenario-level actions.
 	for _, action := range ps.Scenario.Actions {
 		id := NodeID(fmt.Sprintf("action.%s.%s", action.Type, action.Name))
+		alias, body, err := extractActionProviderAlias(action.Remain)
+		if err != nil {
+			return nil, fmt.Errorf("action %s: %w", id, err)
+		}
 		if err := addNode(&Node{
-			ID:         id,
-			Kind:       ActionNode,
-			ActionType: action.Type,
-			Body:       action.Remain,
+			ID:            id,
+			Kind:          ActionNode,
+			ActionType:    action.Type,
+			Body:          body,
+			ProviderAlias: alias,
 		}); err != nil {
 			return nil, err
 		}
@@ -73,12 +83,17 @@ func Build(ps *parser.ParsedScenario) (*Graph, error) {
 		internalActionIDs := make([]NodeID, 0, len(comp.Def.Actions))
 		for _, action := range comp.Def.Actions {
 			actionID := NodeID(fmt.Sprintf("component.%s.action.%s.%s", key, action.Type, action.Name))
+			alias, body, err := extractActionProviderAlias(action.Remain)
+			if err != nil {
+				return nil, fmt.Errorf("action %s: %w", actionID, err)
+			}
 			if err := addNode(&Node{
-				ID:           actionID,
-				Kind:         ActionNode,
-				ActionType:   action.Type,
-				Body:         action.Remain,
-				ComponentKey: key,
+				ID:            actionID,
+				Kind:          ActionNode,
+				ActionType:    action.Type,
+				Body:          body,
+				ComponentKey:  key,
+				ProviderAlias: alias,
 			}); err != nil {
 				return nil, err
 			}
@@ -251,4 +266,46 @@ func traversalAttr(t hcl.Traverser) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+// reservedActionSchema is the body-schema used to pull off orchard-
+// level attributes from an action body before handing the leftover
+// to a provider's own schema validation. Today only `provider` is
+// reserved; `depends_on`, `timeout`, and retry controls will join
+// it in Milestone 3.
+var reservedActionSchema = &hcl.BodySchema{
+	Attributes: []hcl.AttributeSchema{
+		{Name: "provider"},
+	},
+}
+
+// extractActionProviderAlias pulls the reserved `provider = "<alias>"`
+// attribute off an action body and returns the alias together with a
+// leftover body that no longer contains it. Providers' own schemas
+// never see `provider`, so their strict attribute validation works
+// without knowing about orchard-reserved names.
+//
+// The value must be a string literal; expressions like `var.alias`
+// are rejected for now — routing needs the alias resolved before
+// the engine would evaluate scenario variables in attr contexts.
+func extractActionProviderAlias(body hcl.Body) (string, hcl.Body, error) {
+	if body == nil {
+		return "", nil, nil
+	}
+	content, remain, diags := body.PartialContent(reservedActionSchema)
+	if diags.HasErrors() {
+		return "", nil, fmt.Errorf("reading reserved attributes: %s", diags.Error())
+	}
+	attr, ok := content.Attributes["provider"]
+	if !ok {
+		return "", remain, nil
+	}
+	val, diags := attr.Expr.Value(nil)
+	if diags.HasErrors() {
+		return "", nil, fmt.Errorf(`provider = ...: %s`, diags.Error())
+	}
+	if val.Type().FriendlyName() != "string" {
+		return "", nil, fmt.Errorf(`provider must be a string literal, got %s`, val.Type().FriendlyName())
+	}
+	return val.AsString(), remain, nil
 }

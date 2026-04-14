@@ -57,7 +57,7 @@ func runWithSink(t *testing.T, scenarioPath string, vars map[string]string) (map
 		return nil, err
 	}
 	reg := provider.NewRegistry()
-	if err := reg.Register(sinkProvider{}); err != nil {
+	if err := reg.Register("sink", sinkProvider{}); err != nil {
 		return nil, err
 	}
 	eng, err := New(reg)

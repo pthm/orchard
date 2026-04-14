@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,7 +23,7 @@ func newListCmd() *cobra.Command {
 				dir = args[0]
 			}
 
-			scenarios, err := findScenarios(dir)
+			scenarios, err := findScenarios(dir, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
@@ -46,7 +47,7 @@ type scenarioInfo struct {
 	path string
 }
 
-func findScenarios(dir string) ([]scenarioInfo, error) {
+func findScenarios(dir string, warn io.Writer) ([]scenarioInfo, error) {
 	var scenarios []scenarioInfo
 	p := hclparse.NewParser()
 
@@ -63,6 +64,7 @@ func findScenarios(dir string) ([]scenarioInfo, error) {
 
 		file, diags := p.ParseHCLFile(path)
 		if diags.HasErrors() {
+			fmt.Fprintf(warn, "warning: skipping %s: %s\n", path, diags.Error())
 			return nil
 		}
 

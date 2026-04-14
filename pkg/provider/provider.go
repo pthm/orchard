@@ -18,9 +18,12 @@ package provider
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 
 	"github.com/zclconf/go-cty/cty"
+	"github.com/zclconf/go-cty/cty/convert"
 
 	"github.com/pthm/orchard/pkg/protocol"
 )
@@ -144,6 +147,11 @@ func (r *Registry) Names() []string {
 // subsequent calls to this method to return the same error without
 // re-running Configure on any provider.
 func (r *Registry) Configure(ctx context.Context, configs map[string]map[string]cty.Value) error {
+	coerced, err := r.validateAndCoerceConfigs(configs)
+	if err != nil {
+		return err
+	}
+
 	r.mu.Lock()
 	if r.configured {
 		r.mu.Unlock()
@@ -155,11 +163,125 @@ func (r *Registry) Configure(ctx context.Context, configs map[string]map[string]
 
 	for _, name := range order {
 		p := r.providers[name]
-		if err := p.Configure(ctx, configs[name]); err != nil {
+		if err := p.Configure(ctx, coerced[name]); err != nil {
 			return fmt.Errorf("configure provider %q: %w", name, err)
 		}
 	}
 	return nil
+}
+
+// ValidateConfigs runs the schema-driven validation that Configure
+// performs, without actually initializing any provider. `orchard
+// plan` uses this to surface config typos at plan time — Configure
+// itself is reserved for `orchard run`, since builtins like
+// postgres open a live connection there.
+//
+// The validation is strict: unknown attributes are rejected,
+// required-but-missing attributes are flagged, and every value is
+// coerced to its declared cty type. A provider with no config
+// schema accepts no attributes; passing one is an error.
+func (r *Registry) ValidateConfigs(configs map[string]map[string]cty.Value) error {
+	_, err := r.validateAndCoerceConfigs(configs)
+	return err
+}
+
+// validateAndCoerceConfigs returns per-provider config maps that
+// have been checked and coerced against each provider's schema.
+// Configure relies on this so providers receive canonical values;
+// ValidateConfigs re-uses the same pass to offer plan-time checks.
+func (r *Registry) validateAndCoerceConfigs(configs map[string]map[string]cty.Value) (map[string]map[string]cty.Value, error) {
+	r.mu.Lock()
+	order := append([]string{}, r.order...)
+	schemas := make(map[string]map[string]protocol.AttrSchema, len(r.providers))
+	for name, p := range r.providers {
+		schemas[name] = p.Schema().Config
+	}
+	r.mu.Unlock()
+
+	out := make(map[string]map[string]cty.Value, len(order))
+	for _, name := range order {
+		coerced, err := validateProviderConfig(schemas[name], configs[name])
+		if err != nil {
+			return nil, fmt.Errorf("provider %q config: %w", name, err)
+		}
+		out[name] = coerced
+	}
+	return out, nil
+}
+
+// validateProviderConfig enforces one provider's config schema.
+// Rejects unknown attributes, errors on missing required ones,
+// fills declared defaults when the attribute is omitted, and
+// coerces each supplied value to its declared type.
+//
+// An empty schema means the provider accepts no config. Scenarios
+// that still pass attributes trip the "unknown attribute" error
+// here rather than seeing their typo silently discarded.
+func validateProviderConfig(schema map[string]protocol.AttrSchema, raw map[string]cty.Value) (map[string]cty.Value, error) {
+	if len(schema) == 0 {
+		if len(raw) > 0 {
+			return nil, fmt.Errorf("provider accepts no config attributes, got %s",
+				sortedValueKeys(raw))
+		}
+		return map[string]cty.Value{}, nil
+	}
+
+	for name := range raw {
+		if _, ok := schema[name]; !ok {
+			return nil, fmt.Errorf("unknown attribute %q (declared: %s)",
+				name, sortedSchemaKeys(schema))
+		}
+	}
+
+	out := make(map[string]cty.Value, len(schema))
+	for name, attr := range schema {
+		declared, err := attr.CtyType()
+		if err != nil {
+			return nil, fmt.Errorf("schema type for %q: %w", name, err)
+		}
+		val, present := raw[name]
+		if !present {
+			if len(attr.Default) > 0 {
+				def, err := protocol.UnmarshalValue(attr.Default, declared)
+				if err != nil {
+					return nil, fmt.Errorf("default for %q: %w", name, err)
+				}
+				out[name] = def
+				continue
+			}
+			if attr.Required {
+				return nil, fmt.Errorf("missing required attribute %q", name)
+			}
+			continue
+		}
+		if declared != cty.DynamicPseudoType {
+			coerced, err := convert.Convert(val, declared)
+			if err != nil {
+				return nil, fmt.Errorf("attribute %q: %w", name, err)
+			}
+			val = coerced
+		}
+		out[name] = val
+	}
+	return out, nil
+}
+
+func sortedValueKeys(m map[string]cty.Value) string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, ", ")
+}
+
+func sortedSchemaKeys(m map[string]protocol.AttrSchema) string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, ", ")
 }
 
 // Close calls Close on every provider in reverse registration order.

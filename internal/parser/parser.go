@@ -63,6 +63,10 @@ func LoadScenario(path string, vars map[string]string) (*ParsedScenario, error) 
 		return nil, fmt.Errorf("no scenario block found in %s", path)
 	}
 
+	if err := validateScenarioUniqueness(sf.Scenario); err != nil {
+		return nil, err
+	}
+
 	// Resolve variables: defaults + CLI overrides.
 	resolved, err := resolveVariables(sf.Scenario.Variables, vars)
 	if err != nil {
@@ -203,7 +207,92 @@ func loadComponent(p *hclparse.Parser, path string) (*ComponentDefBlock, error) 
 		return nil, fmt.Errorf("no component block found in %s", path)
 	}
 
+	if err := validateComponentUniqueness(cf.Component); err != nil {
+		return nil, fmt.Errorf("component %s in %s: %w", cf.Component.Name, path, err)
+	}
+
 	return cf.Component, nil
+}
+
+// validateScenarioUniqueness refuses scenarios that contain duplicate
+// variable names, component instance keys, action keys, or output
+// names. Scenario authors rely on these being unique — the engine's
+// maps would silently overwrite otherwise, so the fail-fast happens
+// here with the full parsed block in hand.
+//
+// Duplicate provider blocks and duplicate required_providers entries
+// are caught inside evaluateProviderConfigs and extractRequiredProviders
+// respectively, so not repeated here.
+func validateScenarioUniqueness(s *ScenarioBlock) error {
+	seenVars := make(map[string]bool)
+	for _, v := range s.Variables {
+		if seenVars[v.Name] {
+			return fmt.Errorf("scenario %q: duplicate variable %q", s.Name, v.Name)
+		}
+		seenVars[v.Name] = true
+	}
+
+	seenActions := make(map[string]bool)
+	for _, a := range s.Actions {
+		key := a.Type + "." + a.Name
+		if seenActions[key] {
+			return fmt.Errorf("scenario %q: duplicate action %q", s.Name, key)
+		}
+		seenActions[key] = true
+	}
+
+	seenComponents := make(map[string]bool)
+	for _, c := range s.Components {
+		key := c.Type + "." + c.Name
+		if seenComponents[key] {
+			return fmt.Errorf("scenario %q: duplicate component instance %q", s.Name, key)
+		}
+		seenComponents[key] = true
+	}
+
+	seenOutputs := make(map[string]bool)
+	for _, o := range s.Outputs {
+		if seenOutputs[o.Name] {
+			return fmt.Errorf("scenario %q: duplicate output %q", s.Name, o.Name)
+		}
+		seenOutputs[o.Name] = true
+	}
+
+	return nil
+}
+
+// validateComponentUniqueness applies the same checks to a component
+// definition. A component's internal actions are namespaced under
+// the component's instance key when they reach the graph, so a
+// duplicate here would be remapped into a graph-level collision —
+// better to fail with the component name in the error.
+func validateComponentUniqueness(c *ComponentDefBlock) error {
+	seenVars := make(map[string]bool)
+	for _, v := range c.Variables {
+		if seenVars[v.Name] {
+			return fmt.Errorf("duplicate variable %q", v.Name)
+		}
+		seenVars[v.Name] = true
+	}
+
+	seenActions := make(map[string]bool)
+	for _, a := range c.Actions {
+		key := a.Type + "." + a.Name
+		if seenActions[key] {
+			return fmt.Errorf("duplicate action %q", key)
+		}
+		seenActions[key] = true
+	}
+
+	seenOutputs := make(map[string]bool)
+	for _, o := range c.Outputs {
+		if seenOutputs[o.Name] {
+			return fmt.Errorf("duplicate output %q", o.Name)
+		}
+		seenOutputs[o.Name] = true
+	}
+
+	return nil
 }
 
 func resolveVariables(blocks []*VariableBlock, overrides map[string]string) (map[string]cty.Value, error) {

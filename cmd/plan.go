@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/spf13/cobra"
 
@@ -24,9 +25,14 @@ func newPlanCmd() *cobra.Command {
 			fmt.Printf("Scenario: %s\n\n", ps.Scenario.Name)
 
 			if len(ps.Variables) > 0 {
+				names := make([]string, 0, len(ps.Variables))
+				for name := range ps.Variables {
+					names = append(names, name)
+				}
+				sort.Strings(names)
 				fmt.Println("Variables:")
-				for name, val := range ps.Variables {
-					fmt.Printf("  %s = %s\n", name, formatCtyValue(val))
+				for _, name := range names {
+					fmt.Printf("  %s = %s\n", name, formatCtyValue(ps.Variables[name]))
 				}
 				fmt.Println()
 			}

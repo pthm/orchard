@@ -33,7 +33,7 @@ func newPlanCmd() *cobra.Command {
 			// providers DO start subprocesses during Register (the
 			// describe handshake reads the schema), so Close still
 			// matters — defer it immediately.
-			reg, err := registerProviders(ps)
+			reg, err := registerProviders(ps, providerModePlan)
 			if err != nil {
 				return fmt.Errorf("registering providers: %w", err)
 			}

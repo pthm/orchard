@@ -1,10 +1,20 @@
 scenario "test_scenario" {
+  required_providers {
+    postgres = {
+      source = "builtin/postgres"
+    }
+  }
+
   variable "merchant_name" {
     default = "Acme Corp"
   }
 
   variable "region" {
     default = "us"
+  }
+
+  provider "postgres" {
+    dsn = "postgres://localhost:5432/test"
   }
 
   action "sql" "create_merchant" {

@@ -6,7 +6,6 @@ import (
 
 var (
 	varFlags map[string]string
-	dsnFlag  string
 )
 
 func NewRootCmd() *cobra.Command {
@@ -17,7 +16,6 @@ func NewRootCmd() *cobra.Command {
 	}
 
 	root.PersistentFlags().StringToStringVar(&varFlags, "var", nil, "Variable overrides (key=value)")
-	root.PersistentFlags().StringVar(&dsnFlag, "dsn", "", "PostgreSQL connection string")
 
 	root.AddCommand(newRunCmd())
 	root.AddCommand(newPlanCmd())

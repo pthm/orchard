@@ -1,17 +1,20 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
 	"github.com/zclconf/go-cty/cty"
 
-	"github.com/pthm/orchard/internal/config"
 	"github.com/pthm/orchard/internal/engine"
 	"github.com/pthm/orchard/internal/graph"
 	"github.com/pthm/orchard/internal/parser"
 	"github.com/pthm/orchard/pkg/provider"
-	"github.com/pthm/orchard/pkg/provider/postgres"
+
+	// Side-effect imports register builtin provider sources. Adding
+	// a new builtin provider is a one-line change here.
+	_ "github.com/pthm/orchard/pkg/provider/postgres"
 )
 
 func newRunCmd() *cobra.Command {
@@ -34,21 +37,9 @@ func newRunCmd() *cobra.Command {
 				return fmt.Errorf("building graph: %w", err)
 			}
 
-			// Build the provider registry and configure each provider
-			// before the engine starts executing. Configure establishes
-			// connections and validates credentials; failing here is
-			// cheaper than failing inside the first action.
-			reg := provider.NewRegistry()
-			if err := reg.Register(postgres.New()); err != nil {
-				return fmt.Errorf("registering postgres provider: %w", err)
-			}
-
-			dsn := config.ResolveDSN(dsnFlag)
-			configs := map[string]map[string]cty.Value{
-				"postgres": {"dsn": cty.StringVal(dsn)},
-			}
-			if err := reg.Configure(ctx, configs); err != nil {
-				return fmt.Errorf("configuring providers: %w", err)
+			reg, err := buildRegistry(ctx, ps)
+			if err != nil {
+				return fmt.Errorf("initializing providers: %w", err)
 			}
 			defer func() {
 				if closeErr := reg.Close(); closeErr != nil {
@@ -78,6 +69,27 @@ func newRunCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// buildRegistry instantiates and configures every provider declared
+// in the scenario's required_providers block. Each provider is
+// resolved through the builtin factory table; unknown sources fail
+// early with a clear error.
+func buildRegistry(ctx context.Context, ps *parser.ParsedScenario) (*provider.Registry, error) {
+	reg := provider.NewRegistry()
+	for name, spec := range ps.RequiredProviders {
+		p, err := provider.NewBuiltin(spec.Source)
+		if err != nil {
+			return nil, fmt.Errorf("provider %q: %w", name, err)
+		}
+		if err := reg.Register(p); err != nil {
+			return nil, fmt.Errorf("provider %q: %w", name, err)
+		}
+	}
+	if err := reg.Configure(ctx, ps.ProviderConfigs); err != nil {
+		return nil, err
+	}
+	return reg, nil
 }
 
 func formatCtyValue(v cty.Value) string {

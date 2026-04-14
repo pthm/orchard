@@ -20,8 +20,26 @@ type Engine struct {
 	// routes maps a scenario-level action type (the first label in
 	// `action "TYPE" "name" {}`) to the provider that owns it. Built
 	// once at construction time from registered providers' schemas.
-	routes map[string]actionRoute
+	routes   map[string]actionRoute
+	reporter Reporter
 }
+
+// Reporter receives observability events from the engine's
+// execution loop. The engine has no opinion on how events are
+// surfaced — CLI spinners, structured logs, test-silence, or a
+// future TUI all implement this interface. Scenarios can take
+// minutes to run; making this hook pluggable keeps the engine
+// independent of presentation.
+type Reporter interface {
+	NodeCompleted(nodeID string)
+}
+
+// NopReporter discards all events. Engine uses it by default so
+// callers that do not care about progress pay zero cost.
+type NopReporter struct{}
+
+// NodeCompleted implements Reporter.
+func (NopReporter) NodeCompleted(string) {}
 
 // actionRoute records which registered provider handles a given
 // scenario action type, and which of that provider's action names
@@ -42,12 +60,24 @@ type Result struct {
 // declare the same action name — that ambiguity must be resolved by
 // the caller (via an explicit provider choice in the scenario,
 // coming in a later milestone) before execution can proceed.
+//
+// The engine installs a NopReporter by default. Call SetReporter to
+// receive progress events.
 func New(registry *provider.Registry) (*Engine, error) {
 	routes, err := buildRoutes(registry)
 	if err != nil {
 		return nil, err
 	}
-	return &Engine{registry: registry, routes: routes}, nil
+	return &Engine{registry: registry, routes: routes, reporter: NopReporter{}}, nil
+}
+
+// SetReporter installs a Reporter for execution events. Call before
+// Execute; there is no synchronization around the reporter field.
+func (e *Engine) SetReporter(r Reporter) {
+	if r == nil {
+		r = NopReporter{}
+	}
+	e.reporter = r
 }
 
 func buildRoutes(registry *provider.Registry) (map[string]actionRoute, error) {
@@ -105,7 +135,7 @@ func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *grap
 				return nil, fmt.Errorf("executing %s: %w", nodeID, err)
 			}
 			resolved[string(nodeID)] = outputs
-			fmt.Printf("  ✓ %s\n", nodeID)
+			e.reporter.NodeCompleted(string(nodeID))
 
 		case graph.ComponentNode:
 			outputs, err := e.resolveComponentOutputs(node, ps, compVars, resolved)
@@ -113,7 +143,7 @@ func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *grap
 				return nil, fmt.Errorf("resolving outputs for %s: %w", nodeID, err)
 			}
 			resolved[string(nodeID)] = outputs
-			fmt.Printf("  ✓ %s\n", nodeID)
+			e.reporter.NodeCompleted(string(nodeID))
 		}
 	}
 

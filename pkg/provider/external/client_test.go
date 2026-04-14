@@ -3,11 +3,14 @@ package external
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/pthm/orchard/pkg/protocol"
 )
@@ -25,8 +28,13 @@ func newPipeClient(t *testing.T) (*Client, *bufio.Reader, io.WriteCloser, func()
 
 	c := NewClient(sToCReader, cToSWriter)
 	cleanup := func() {
+		// Close reader halves too — closing the writer unblocks
+		// future reads, but pending writes need the reader to close
+		// to unstick. Belt-and-braces, both directions.
 		cToSWriter.Close()
+		cToSReader.Close()
 		sToCWriter.Close()
+		sToCReader.Close()
 	}
 	return c, bufio.NewReader(cToSReader), sToCWriter, cleanup
 }
@@ -72,7 +80,7 @@ func TestClientRoundtripHappyPath(t *testing.T) {
 	}()
 
 	var result protocol.DescribeResult
-	if err := c.Roundtrip(protocol.MethodDescribe, protocol.DescribeParams{}, &result); err != nil {
+	if err := c.Roundtrip(context.Background(), protocol.MethodDescribe, protocol.DescribeParams{}, &result); err != nil {
 		t.Fatalf("Roundtrip: %v", err)
 	}
 	if result.Schema.Name != "x" {
@@ -96,7 +104,7 @@ func TestClientRoundtripErrorResponse(t *testing.T) {
 		})
 	}()
 
-	err := c.Roundtrip(protocol.MethodExecute, protocol.ExecuteParams{Action: "x"}, nil)
+	err := c.Roundtrip(context.Background(), protocol.MethodExecute, protocol.ExecuteParams{Action: "x"}, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -125,7 +133,7 @@ func TestClientRoundtripIDMismatch(t *testing.T) {
 		})
 	}()
 
-	err := c.Roundtrip(protocol.MethodDescribe, nil, nil)
+	err := c.Roundtrip(context.Background(), protocol.MethodDescribe, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("expected id-mismatch error, got %v", err)
 	}
@@ -146,7 +154,7 @@ func TestClientRoundtripNilResult(t *testing.T) {
 		})
 	}()
 
-	if err := c.Roundtrip(protocol.MethodShutdown, protocol.ShutdownParams{}, nil); err != nil {
+	if err := c.Roundtrip(context.Background(), protocol.MethodShutdown, protocol.ShutdownParams{}, nil); err != nil {
 		t.Fatalf("Roundtrip: %v", err)
 	}
 }
@@ -170,10 +178,10 @@ func TestClientIdsIncrement(t *testing.T) {
 		}()
 	}
 
-	if err := c.Roundtrip("a", nil, nil); err != nil {
+	if err := c.Roundtrip(context.Background(), "a", nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Roundtrip("b", nil, nil); err != nil {
+	if err := c.Roundtrip(context.Background(), "b", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	wg.Wait()
@@ -195,8 +203,47 @@ func TestClientRoundtripTruncatedResponse(t *testing.T) {
 	// Server died mid-response. ReadMessage surfaces
 	// io.ErrUnexpectedEOF; Roundtrip wraps it.
 	c, _ := newBufferClient(`{"id":1,"result":`)
-	err := c.Roundtrip("x", nil, nil)
-	if err == nil || !strings.Contains(err.Error(), "read response") {
-		t.Fatalf("expected read-response error, got %v", err)
+	err := c.Roundtrip(context.Background(), "x", nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "unexpected EOF") {
+		t.Fatalf("expected truncated-stream error, got %v", err)
+	}
+}
+
+func TestClientRoundtripContextCancellation(t *testing.T) {
+	// Server never responds. Roundtrip must honour the ctx deadline
+	// rather than blocking on the pipe forever.
+	c, _, _, cleanup := newPipeClient(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	err := c.Roundtrip(ctx, "hang", nil, nil)
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context.DeadlineExceeded, got %v", err)
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("Roundtrip should return near the deadline, took %v", elapsed)
+	}
+}
+
+func TestClientPoisonedAfterCancellation(t *testing.T) {
+	// Once a call has been abandoned mid-read, the client must refuse
+	// subsequent calls — a second reader against the same pipe would
+	// race the still-in-flight goroutine.
+	c, _, _, cleanup := newPipeClient(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := c.Roundtrip(ctx, "first", nil, nil); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("first call: expected deadline exceeded, got %v", err)
+	}
+
+	err := c.Roundtrip(context.Background(), "second", nil, nil)
+	if !errors.Is(err, ErrClientPoisoned) {
+		t.Fatalf("second call: expected ErrClientPoisoned, got %v", err)
 	}
 }

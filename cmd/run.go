@@ -36,15 +36,25 @@ func newRunCmd() *cobra.Command {
 				return fmt.Errorf("building graph: %w", err)
 			}
 
-			reg, err := buildRegistry(ctx, ps)
+			// Register first, defer Close, then Configure. This order
+			// matters: Spawn on an exec: source launches a subprocess
+			// during Register, and Configure on any provider can
+			// fail. If we configured before deferring Close, a
+			// Configure error would leak the already-started
+			// providers.
+			reg, err := registerProviders(ps)
 			if err != nil {
-				return fmt.Errorf("initializing providers: %w", err)
+				return fmt.Errorf("registering providers: %w", err)
 			}
 			defer func() {
 				if closeErr := reg.Close(); closeErr != nil {
 					fmt.Printf("warning: %v\n", closeErr)
 				}
 			}()
+
+			if err := reg.Configure(ctx, ps.ProviderConfigs); err != nil {
+				return fmt.Errorf("configuring providers: %w", err)
+			}
 
 			eng, err := engine.New(reg)
 			if err != nil {

@@ -38,11 +38,19 @@ func newPlanCmd() *cobra.Command {
 
 			// Register providers for schemas only; do not Configure.
 			// Plan must not open database connections or make external
-			// calls — it is a read-only type-checking pass.
+			// calls — it is a read-only type-checking pass. External
+			// providers DO start subprocesses during Register (the
+			// describe handshake reads the schema), so Close still
+			// matters — defer it immediately.
 			reg, err := registerProviders(ps)
 			if err != nil {
-				return fmt.Errorf("initializing providers: %w", err)
+				return fmt.Errorf("registering providers: %w", err)
 			}
+			defer func() {
+				if closeErr := reg.Close(); closeErr != nil {
+					fmt.Printf("warning: %v\n", closeErr)
+				}
+			}()
 
 			eng, err := engine.New(reg)
 			if err != nil {

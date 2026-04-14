@@ -89,8 +89,13 @@ func Spawn(path string, args ...string) (*Provider, error) {
 	// and exit, and we want that visible rather than swallowed.
 	go p.drainStderr("unknown")
 
+	// Bound the describe handshake: a subprocess that starts but
+	// never writes a response must not wedge Spawn indefinitely.
+	handshakeCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+
 	var result protocol.DescribeResult
-	if err := p.client.Roundtrip(protocol.MethodDescribe, protocol.DescribeParams{}, &result); err != nil {
+	if err := p.client.Roundtrip(handshakeCtx, protocol.MethodDescribe, protocol.DescribeParams{}, &result); err != nil {
 		p.forceClose()
 		return nil, fmt.Errorf("external: describe %s: %w", path, err)
 	}
@@ -130,7 +135,7 @@ func (p *Provider) Configure(ctx context.Context, config map[string]cty.Value) e
 	if err != nil {
 		return fmt.Errorf("external: configure %s: %w", p.schema.Name, err)
 	}
-	if err := p.client.Roundtrip(protocol.MethodConfigure, protocol.ConfigureParams{Config: raw}, nil); err != nil {
+	if err := p.client.Roundtrip(ctx, protocol.MethodConfigure, protocol.ConfigureParams{Config: raw}, nil); err != nil {
 		return fmt.Errorf("external: configure %s: %w", p.schema.Name, err)
 	}
 	return nil
@@ -152,7 +157,7 @@ func (p *Provider) Execute(ctx context.Context, action string, attrs map[string]
 	}
 
 	var result protocol.ExecuteResult
-	err = p.client.Roundtrip(protocol.MethodExecute, protocol.ExecuteParams{
+	err = p.client.Roundtrip(ctx, protocol.MethodExecute, protocol.ExecuteParams{
 		Action: action, Attrs: raw,
 	}, &result)
 	if err != nil {
@@ -166,18 +171,28 @@ func (p *Provider) Execute(ctx context.Context, action string, attrs map[string]
 	return outputs, nil
 }
 
-// Close sends the shutdown RPC and waits for the subprocess to
-// exit. A non-responsive provider is force-killed after the
-// shutdown timeout.
+// Close attempts a graceful shutdown of the subprocess and force-
+// kills it if the total shutdown window elapses without a clean
+// exit. The shutdown RPC and the subsequent process wait share a
+// single deadline — total close time is bounded by shutdownTimeout
+// regardless of whether the provider hangs on the RPC, hangs on
+// exit, or hangs on both.
 func (p *Provider) Close() error {
-	// Best-effort shutdown; the subprocess may already be dead.
-	_ = p.client.Roundtrip(protocol.MethodShutdown, protocol.ShutdownParams{}, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+
+	// Best-effort shutdown. The RPC either returns promptly, fails
+	// fast (poisoned client from a prior ctx cancel), or is abandoned
+	// when ctx deadline hits — in any case we proceed to the wait.
+	_ = p.client.Roundtrip(ctx, protocol.MethodShutdown, protocol.ShutdownParams{}, nil)
 
 	select {
 	case err := <-p.done:
 		return waitErr(err)
-	case <-time.After(shutdownTimeout):
-		// Escalate: force-kill and wait for the reaper goroutine.
+	case <-ctx.Done():
+		// Either the RPC consumed the deadline, or the process
+		// refused to exit after a clean shutdown. Force-kill and
+		// wait for the reaper goroutine.
 		if p.cmd.Process != nil {
 			_ = p.cmd.Process.Kill()
 		}

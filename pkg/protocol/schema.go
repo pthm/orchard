@@ -18,19 +18,42 @@ const ProtocolVersion = "1"
 
 // ProviderSchema is the self-description a provider returns during
 // initialize. It is also the parse target for schema.hcl files.
+//
+// Description is rendered immediately after the page header and
+// carries the provider's intro prose. Notes is rendered at the
+// bottom of the page — the field exists so end-of-page caveats
+// (runtime behaviour, limitations, migration notes) have a natural
+// home without being tucked into the intro.
 type ProviderSchema struct {
-	Name     string                  `json:"name"`
-	Version  string                  `json:"version"`
-	Protocol string                  `json:"protocol"`
-	Config   map[string]AttrSchema   `json:"config,omitempty"`
-	Actions  map[string]ActionSchema `json:"actions"`
+	Name        string                  `json:"name"`
+	Version     string                  `json:"version"`
+	Protocol    string                  `json:"protocol"`
+	Description string                  `json:"description,omitempty"`
+	Notes       string                  `json:"notes,omitempty"`
+	Config      map[string]AttrSchema   `json:"config,omitempty"`
+	Actions     map[string]ActionSchema `json:"actions"`
+	Examples    []Example               `json:"examples,omitempty"`
 }
 
 // ActionSchema describes one action type offered by a provider.
 type ActionSchema struct {
 	Description string                `json:"description,omitempty"`
+	Notes       string                `json:"notes,omitempty"`
 	Attrs       map[string]AttrSchema `json:"attrs"`
 	Outputs     *AttrSchema           `json:"outputs,omitempty"`
+	Examples    []Example             `json:"examples,omitempty"`
+}
+
+// Example is a worked HCL snippet attached to a provider or action. It
+// is carried in the schema so tooling — docs generation in particular —
+// can render authoritative, schema-adjacent examples without a separate
+// templates tree.
+//
+// Code is the raw HCL as it should appear in documentation. Description
+// is an optional one-line caption rendered above the snippet.
+type Example struct {
+	Description string `json:"description,omitempty"`
+	Code        string `json:"code"`
 }
 
 // AttrSchema describes a single attribute or an output shape.

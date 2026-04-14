@@ -64,10 +64,12 @@ var providerBodySchema = &hcl.BodySchema{
 		{Name: "version", Required: true},
 		{Name: "protocol", Required: true},
 		{Name: "description"},
+		{Name: "notes"},
 	},
 	Blocks: []hcl.BlockHeaderSchema{
 		{Type: "config"},
 		{Type: "action", LabelNames: []string{"name"}},
+		{Type: "example"},
 	},
 }
 
@@ -80,10 +82,19 @@ var configBodySchema = &hcl.BodySchema{
 var actionBodySchema = &hcl.BodySchema{
 	Attributes: []hcl.AttributeSchema{
 		{Name: "description"},
+		{Name: "notes"},
 	},
 	Blocks: []hcl.BlockHeaderSchema{
 		{Type: "attribute", LabelNames: []string{"name"}},
 		{Type: "output"},
+		{Type: "example"},
+	},
+}
+
+var exampleBodySchema = &hcl.BodySchema{
+	Attributes: []hcl.AttributeSchema{
+		{Name: "description"},
+		{Name: "code", Required: true},
 	},
 }
 
@@ -117,6 +128,12 @@ func decodeProvider(block *hcl.Block) (ProviderSchema, error) {
 	if err := decodeStringAttr(content.Attributes, "protocol", &out.Protocol, true); err != nil {
 		return ProviderSchema{}, fmt.Errorf("provider %q: %w", out.Name, err)
 	}
+	if err := decodeStringAttr(content.Attributes, "description", &out.Description, false); err != nil {
+		return ProviderSchema{}, fmt.Errorf("provider %q: %w", out.Name, err)
+	}
+	if err := decodeStringAttr(content.Attributes, "notes", &out.Notes, false); err != nil {
+		return ProviderSchema{}, fmt.Errorf("provider %q: %w", out.Name, err)
+	}
 
 	out.Actions = make(map[string]ActionSchema)
 	for _, b := range content.Blocks {
@@ -137,6 +154,12 @@ func decodeProvider(block *hcl.Block) (ProviderSchema, error) {
 				return ProviderSchema{}, fmt.Errorf("provider %q action %q: %w", out.Name, name, err)
 			}
 			out.Actions[name] = action
+		case "example":
+			ex, err := decodeExample(b.Body)
+			if err != nil {
+				return ProviderSchema{}, fmt.Errorf("provider %q example: %w", out.Name, err)
+			}
+			out.Examples = append(out.Examples, ex)
 		}
 	}
 
@@ -154,6 +177,9 @@ func decodeAction(block *hcl.Block) (ActionSchema, error) {
 
 	var action ActionSchema
 	if err := decodeStringAttr(content.Attributes, "description", &action.Description, false); err != nil {
+		return ActionSchema{}, err
+	}
+	if err := decodeStringAttr(content.Attributes, "notes", &action.Notes, false); err != nil {
 		return ActionSchema{}, err
 	}
 
@@ -179,10 +205,31 @@ func decodeAction(block *hcl.Block) (ActionSchema, error) {
 				return ActionSchema{}, fmt.Errorf("output: %w", err)
 			}
 			action.Outputs = &out
+		case "example":
+			ex, err := decodeExample(b.Body)
+			if err != nil {
+				return ActionSchema{}, fmt.Errorf("example: %w", err)
+			}
+			action.Examples = append(action.Examples, ex)
 		}
 	}
 	action.Attrs = attrs
 	return action, nil
+}
+
+func decodeExample(body hcl.Body) (Example, error) {
+	content, diags := body.Content(exampleBodySchema)
+	if diags.HasErrors() {
+		return Example{}, fmt.Errorf("%s", diags.Error())
+	}
+	var ex Example
+	if err := decodeStringAttr(content.Attributes, "description", &ex.Description, false); err != nil {
+		return Example{}, err
+	}
+	if err := decodeStringAttr(content.Attributes, "code", &ex.Code, true); err != nil {
+		return Example{}, err
+	}
+	return ex, nil
 }
 
 func decodeAttributeBlocks(body hcl.Body, schema *hcl.BodySchema) (map[string]AttrSchema, error) {

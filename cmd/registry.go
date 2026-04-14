@@ -38,7 +38,10 @@ func registerProviders(ps *parser.ParsedScenario) (*provider.Registry, error) {
 		if err != nil {
 			return nil, fmt.Errorf("provider %q: %w", name, err)
 		}
-		if err := reg.Register(p); err != nil {
+		// Register under the scenario-local name, not p.Schema().Name —
+		// this is what allows aliases (db = builtin/postgres) to flow
+		// through to Configure and routing.
+		if err := reg.Register(name, p); err != nil {
 			return nil, fmt.Errorf("provider %q: %w", name, err)
 		}
 	}

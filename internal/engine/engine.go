@@ -3,6 +3,8 @@ package engine
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/gohcl"
@@ -19,9 +21,12 @@ import (
 type Engine struct {
 	registry *provider.Registry
 	// routes maps a scenario-level action type (the first label in
-	// `action "TYPE" "name" {}`) to the provider that owns it. Built
-	// once at construction time from registered providers' schemas.
-	routes   map[string]actionRoute
+	// `action "TYPE" "name" {}`) to the set of registered providers
+	// that offer it. More than one entry is allowed — scenarios
+	// disambiguate at the action level with `provider = "<alias>"`.
+	// Built once at construction time from registered providers'
+	// schemas.
+	routes   map[string][]actionRoute
 	reporter Reporter
 }
 
@@ -42,13 +47,14 @@ type NopReporter struct{}
 // NodeCompleted implements Reporter.
 func (NopReporter) NodeCompleted(string) {}
 
-// actionRoute records which registered provider handles a given
-// scenario action type, and which of that provider's action names
-// it maps to.
+// actionRoute records one (provider, action) candidate for a
+// given scenario action type. When multiple candidates exist for
+// an action type, the scenario must pick one explicitly via
+// `provider = "<alias>"` on the action body.
 type actionRoute struct {
-	providerName string
-	actionName   string
-	schema       protocol.ActionSchema
+	providerAlias string                // local name in the registry
+	actionName    string                // schema's action name (usually == action type)
+	schema        protocol.ActionSchema // used by evalAttrs and validate
 }
 
 // Result holds the outputs from executing a scenario.
@@ -81,8 +87,8 @@ func (e *Engine) SetReporter(r Reporter) {
 	e.reporter = r
 }
 
-func buildRoutes(registry *provider.Registry) (map[string]actionRoute, error) {
-	routes := make(map[string]actionRoute)
+func buildRoutes(registry *provider.Registry) (map[string][]actionRoute, error) {
+	routes := make(map[string][]actionRoute)
 	for _, name := range registry.Names() {
 		p, err := registry.Get(name)
 		if err != nil {
@@ -90,20 +96,53 @@ func buildRoutes(registry *provider.Registry) (map[string]actionRoute, error) {
 		}
 		schema := p.Schema()
 		for actionName, actionSchema := range schema.Actions {
-			if existing, dup := routes[actionName]; dup {
-				return nil, fmt.Errorf(
-					"action type %q is exposed by both provider %q and %q; "+
-						"only one provider per action type is supported today",
-					actionName, existing.providerName, name)
-			}
-			routes[actionName] = actionRoute{
-				providerName: name,
-				actionName:   actionName,
-				schema:       actionSchema,
-			}
+			routes[actionName] = append(routes[actionName], actionRoute{
+				providerAlias: name,
+				actionName:    actionName,
+				schema:        actionSchema,
+			})
 		}
 	}
 	return routes, nil
+}
+
+// resolveRoute picks the candidate for the given scenario action
+// type. When the scenario supplied a `provider = "<alias>"`
+// attribute, that alias must match exactly one candidate. When no
+// alias is supplied, there must be exactly one candidate; any
+// other situation is an authoring error surfaced here.
+func (e *Engine) resolveRoute(actionType, providerAlias string) (actionRoute, error) {
+	candidates := e.routes[actionType]
+	if len(candidates) == 0 {
+		return actionRoute{}, fmt.Errorf("no provider registered for action type %q", actionType)
+	}
+	if providerAlias != "" {
+		for _, c := range candidates {
+			if c.providerAlias == providerAlias {
+				return c, nil
+			}
+		}
+		aliases := make([]string, len(candidates))
+		for i, c := range candidates {
+			aliases[i] = c.providerAlias
+		}
+		sort.Strings(aliases)
+		return actionRoute{}, fmt.Errorf(
+			"provider %q does not expose action %q (providers offering it: %s)",
+			providerAlias, actionType, strings.Join(aliases, ", "))
+	}
+	if len(candidates) > 1 {
+		aliases := make([]string, len(candidates))
+		for i, c := range candidates {
+			aliases[i] = c.providerAlias
+		}
+		sort.Strings(aliases)
+		return actionRoute{}, fmt.Errorf(
+			"action type %q is offered by multiple providers (%s); "+
+				"add `provider = \"<alias>\"` to the action body to disambiguate",
+			actionType, strings.Join(aliases, ", "))
+	}
+	return candidates[0], nil
 }
 
 // Execute runs all nodes in topological order and returns scenario outputs.
@@ -169,11 +208,11 @@ func (e *Engine) executeAction(
 	compVars map[string]map[string]cty.Value,
 	resolved map[string]map[string]cty.Value,
 ) (map[string]cty.Value, error) {
-	route, ok := e.routes[node.ActionType]
-	if !ok {
-		return nil, fmt.Errorf("no provider registered for action type %q", node.ActionType)
+	route, err := e.resolveRoute(node.ActionType, node.ProviderAlias)
+	if err != nil {
+		return nil, err
 	}
-	p, err := e.registry.Get(route.providerName)
+	p, err := e.registry.Get(route.providerAlias)
 	if err != nil {
 		return nil, err
 	}

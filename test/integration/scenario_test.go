@@ -69,7 +69,7 @@ func buildRegistry(ps *parser.ParsedScenario) (*provider.Registry, error) {
 		if err != nil {
 			return nil, fmt.Errorf("provider %q: %w", name, err)
 		}
-		if err := reg.Register(p); err != nil {
+		if err := reg.Register(name, p); err != nil {
 			return nil, fmt.Errorf("provider %q: %w", name, err)
 		}
 	}
@@ -222,6 +222,23 @@ func TestScenario_Echo(t *testing.T) {
 	assert.Equal(t,
 		"chained: hello from integration test",
 		ctyString(t, outputs["second"]))
+}
+
+// --- aliased provider ----------------------------------------
+
+// TestScenario_AliasedProvider exercises the review-#1 fix: the
+// scenario registers postgres under the local alias "db". Without
+// the alias-based routing change, Configure would be called with
+// an empty config map and the postgres provider would fail with
+// "dsn is required" even though the scenario supplied it.
+func TestScenario_AliasedProvider(t *testing.T) {
+	resetDB(t)
+	outputs := runScenario(t, "testdata/scenarios/aliased.hcl", map[string]string{
+		"dsn": testDSN,
+	})
+	if got := ctyInt(t, outputs["ok"]); got != 1 {
+		t.Fatalf("ok: got %d want 1", got)
+	}
 }
 
 // --- cross-provider + foreign-key dependency chain -----------

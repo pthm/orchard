@@ -77,10 +77,10 @@ func TestRegistryRegisterAndGet(t *testing.T) {
 	r := NewRegistry()
 	a := &stubProvider{name: "a"}
 	b := &stubProvider{name: "b"}
-	if err := r.Register(a); err != nil {
+	if err := r.Register("a", a); err != nil {
 		t.Fatalf("register a: %v", err)
 	}
-	if err := r.Register(b); err != nil {
+	if err := r.Register("b", b); err != nil {
 		t.Fatalf("register b: %v", err)
 	}
 
@@ -100,20 +100,58 @@ func TestRegistryRegisterAndGet(t *testing.T) {
 
 func TestRegistryDuplicateRegister(t *testing.T) {
 	r := NewRegistry()
-	if err := r.Register(&stubProvider{name: "x"}); err != nil {
+	if err := r.Register("x", &stubProvider{name: "x"}); err != nil {
 		t.Fatal(err)
 	}
-	err := r.Register(&stubProvider{name: "x"})
+	err := r.Register("x", &stubProvider{name: "x"})
 	if err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Fatalf("expected duplicate error, got %v", err)
 	}
 }
 
-func TestRegistryRejectsEmptyName(t *testing.T) {
+func TestRegistryRejectsEmptyLocalName(t *testing.T) {
 	r := NewRegistry()
-	err := r.Register(&stubProvider{name: ""})
-	if err == nil || !strings.Contains(err.Error(), "empty name") {
+	err := r.Register("", &stubProvider{name: "x"})
+	if err == nil || !strings.Contains(err.Error(), "empty") {
 		t.Fatalf("expected empty-name error, got %v", err)
+	}
+}
+
+func TestRegistryRejectsEmptySchemaName(t *testing.T) {
+	r := NewRegistry()
+	err := r.Register("x", &stubProvider{name: ""})
+	if err == nil || !strings.Contains(err.Error(), "empty schema name") {
+		t.Fatalf("expected empty-schema-name error, got %v", err)
+	}
+}
+
+// TestRegistryAliasedProvider verifies that a provider's local
+// name need not match its schema name. This is the key property
+// that lets scenarios declare `required_providers { db = {
+// source = "builtin/postgres" } }` and have Configure reach the
+// postgres instance under the key "db".
+func TestRegistryAliasedProvider(t *testing.T) {
+	r := NewRegistry()
+	p := &stubProvider{name: "a"} // schema name is "a"
+	if err := r.Register("alias_one", p); err != nil {
+		t.Fatal(err)
+	}
+	got, err := r.Get("alias_one")
+	if err != nil || got != p {
+		t.Fatalf("Get(alias_one): got %v err %v", got, err)
+	}
+	// Schema name should not be a valid lookup key.
+	if _, err := r.Get("a"); err == nil {
+		t.Fatal("Get by schema name should fail when registered under alias")
+	}
+	// Configure under the alias.
+	if err := r.Configure(context.Background(), map[string]map[string]cty.Value{
+		"alias_one": {"key": cty.StringVal("hello")},
+	}); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if len(p.sawConfigKeys) != 1 || p.sawConfigKeys[0] != "key" {
+		t.Fatalf("provider did not see its alias-keyed config: %v", p.sawConfigKeys)
 	}
 }
 
@@ -121,8 +159,8 @@ func TestRegistryConfigureDispatches(t *testing.T) {
 	r := NewRegistry()
 	a := &stubProvider{name: "a"}
 	b := &stubProvider{name: "b"}
-	_ = r.Register(a)
-	_ = r.Register(b)
+	_ = r.Register("a", a)
+	_ = r.Register("b", b)
 
 	configs := map[string]map[string]cty.Value{
 		"a": {"key": cty.StringVal("val")},
@@ -144,7 +182,7 @@ func TestRegistryConfigureDispatches(t *testing.T) {
 
 func TestRegistryConfigureOneShot(t *testing.T) {
 	r := NewRegistry()
-	_ = r.Register(&stubProvider{name: "a"})
+	_ = r.Register("a", &stubProvider{name: "a"})
 	if err := r.Configure(context.Background(), nil); err != nil {
 		t.Fatalf("first Configure: %v", err)
 	}
@@ -152,7 +190,7 @@ func TestRegistryConfigureOneShot(t *testing.T) {
 		t.Fatal("expected error on second Configure")
 	}
 	// Register after Configure must also fail.
-	if err := r.Register(&stubProvider{name: "b"}); err == nil {
+	if err := r.Register("b", &stubProvider{name: "b"}); err == nil {
 		t.Fatal("expected register-after-configure error")
 	}
 }
@@ -162,9 +200,9 @@ func TestRegistryConfigureAbortsOnError(t *testing.T) {
 	a := &stubProvider{name: "a"}
 	bad := &stubProvider{name: "bad", configErr: errors.New("nope")}
 	c := &stubProvider{name: "c"}
-	_ = r.Register(a)
-	_ = r.Register(bad)
-	_ = r.Register(c)
+	_ = r.Register("a", a)
+	_ = r.Register("bad", bad)
+	_ = r.Register("c", c)
 
 	err := r.Configure(context.Background(), nil)
 	if err == nil || !strings.Contains(err.Error(), "bad") {
@@ -182,9 +220,9 @@ func TestRegistryConfigureAbortsOnError(t *testing.T) {
 func TestRegistryCloseReverseOrder(t *testing.T) {
 	lifecycle := []string{}
 	r := NewRegistry()
-	_ = r.Register(&stubProvider{name: "a", lifecycle: &lifecycle})
-	_ = r.Register(&stubProvider{name: "b", lifecycle: &lifecycle})
-	_ = r.Register(&stubProvider{name: "c", lifecycle: &lifecycle})
+	_ = r.Register("a", &stubProvider{name: "a", lifecycle: &lifecycle})
+	_ = r.Register("b", &stubProvider{name: "b", lifecycle: &lifecycle})
+	_ = r.Register("c", &stubProvider{name: "c", lifecycle: &lifecycle})
 
 	if err := r.Configure(context.Background(), nil); err != nil {
 		t.Fatal(err)
@@ -209,9 +247,9 @@ func TestRegistryCloseReverseOrder(t *testing.T) {
 
 func TestRegistryCloseCollectsErrors(t *testing.T) {
 	r := NewRegistry()
-	_ = r.Register(&stubProvider{name: "ok"})
-	_ = r.Register(&stubProvider{name: "bad1", closeErr: errors.New("boom1")})
-	_ = r.Register(&stubProvider{name: "bad2", closeErr: errors.New("boom2")})
+	_ = r.Register("ok", &stubProvider{name: "ok"})
+	_ = r.Register("bad1", &stubProvider{name: "bad1", closeErr: errors.New("boom1")})
+	_ = r.Register("bad2", &stubProvider{name: "bad2", closeErr: errors.New("boom2")})
 
 	err := r.Close()
 	if err == nil {

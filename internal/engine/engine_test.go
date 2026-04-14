@@ -69,7 +69,7 @@ func TestBuildEvalContext(t *testing.T) {
 
 func TestEngineExecuteSimple(t *testing.T) {
 	reg := provider.NewRegistry()
-	if err := reg.Register(&fakeProvider{
+	if err := reg.Register("fake", &fakeProvider{
 		outputs: map[string]cty.Value{
 			"id":   cty.StringVal("1"),
 			"name": cty.StringVal("Acme"),
@@ -110,20 +110,23 @@ func TestEngineExecuteSimple(t *testing.T) {
 	}
 }
 
-func TestNewRejectsDuplicateActionNames(t *testing.T) {
+func TestEngineAcceptsOverlappingActionNames(t *testing.T) {
+	// Two providers may expose the same action name — the engine
+	// resolves the ambiguity per-action via the scenario's
+	// `provider = "<alias>"` attribute. Construction itself must
+	// not fail.
 	reg := provider.NewRegistry()
-	_ = reg.Register(&dupProvider{name: "one"})
-	_ = reg.Register(&dupProvider{name: "two"})
+	_ = reg.Register("one", &dupProvider{name: "one"})
+	_ = reg.Register("two", &dupProvider{name: "two"})
 
-	_, err := New(reg)
-	if err == nil {
-		t.Fatal("expected duplicate-action error, got nil")
+	if _, err := New(reg); err != nil {
+		t.Fatalf("overlapping action names should construct cleanly, got %v", err)
 	}
 }
 
 func TestEngineExecuteUnknownActionType(t *testing.T) {
 	reg := provider.NewRegistry()
-	_ = reg.Register(&fakeProvider{outputs: map[string]cty.Value{}})
+	_ = reg.Register("fake", &fakeProvider{outputs: map[string]cty.Value{}})
 
 	eng, err := New(reg)
 	if err != nil {

@@ -40,7 +40,7 @@ func (validatingProvider) Close() error { return nil }
 func newTestEngine(t *testing.T) *Engine {
 	t.Helper()
 	reg := provider.NewRegistry()
-	if err := reg.Register(validatingProvider{}); err != nil {
+	if err := reg.Register("vp", validatingProvider{}); err != nil {
 		t.Fatal(err)
 	}
 	eng, err := New(reg)

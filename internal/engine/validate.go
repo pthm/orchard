@@ -31,9 +31,9 @@ func (e *Engine) ValidateGraph(g *graph.Graph) error {
 		if node.Kind != graph.ActionNode {
 			continue
 		}
-		route, ok := e.routes[node.ActionType]
-		if !ok {
-			return fmt.Errorf("%s: no provider registered for action type %q", nodeID, node.ActionType)
+		route, err := e.resolveRoute(node.ActionType, node.ProviderAlias)
+		if err != nil {
+			return fmt.Errorf("%s: %w", nodeID, err)
 		}
 		if err := validateActionBody(node.Body, route.schema); err != nil {
 			return fmt.Errorf("%s: %w", nodeID, err)

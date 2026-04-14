@@ -56,7 +56,10 @@ type Provider interface {
 	Close() error
 }
 
-// Registry holds the set of providers available to an engine run.
+// Registry holds the set of providers available to an engine run,
+// keyed by their scenario-local name (the alias chosen in
+// `required_providers`). Two provider instances built from the
+// same source can coexist under different names.
 //
 // A Registry goes through three phases: providers are added with
 // Register, then Configure is called to initialize each one with the
@@ -74,18 +77,34 @@ func NewRegistry() *Registry {
 	return &Registry{providers: make(map[string]Provider)}
 }
 
-// Register adds p under the provider name declared in its schema.
-// Returns an error on duplicate names or after Configure has run —
-// late registration would bypass the one-shot Configure contract.
-func (r *Registry) Register(p Provider) error {
+// Register adds p under the given local name. The name is the
+// alias the scenario chose in its `required_providers` block —
+// not the provider's schema name. A scenario that declares
+//
+//	required_providers {
+//	  db = { source = "builtin/postgres" }
+//	}
+//
+// registers the postgres provider under the name "db". This is
+// what lets two instances of the same provider coexist, and what
+// makes the `provider "db" {}` config block, the routing
+// disambiguator (`provider = "db"` on an action), and the
+// Configure lookup all agree.
+//
+// Returns an error on duplicate local names or after Configure
+// has run — late registration would bypass the one-shot Configure
+// contract.
+func (r *Registry) Register(name string, p Provider) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.configured {
 		return fmt.Errorf("provider registry: Register called after Configure")
 	}
-	name := p.Schema().Name
 	if name == "" {
-		return fmt.Errorf("provider registry: provider schema has empty name")
+		return fmt.Errorf("provider registry: provider name is empty")
+	}
+	if p.Schema().Name == "" {
+		return fmt.Errorf("provider registry: provider %q has empty schema name", name)
 	}
 	if _, dup := r.providers[name]; dup {
 		return fmt.Errorf("provider registry: duplicate provider %q", name)

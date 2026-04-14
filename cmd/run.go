@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -10,7 +9,6 @@ import (
 	"github.com/pthm/orchard/internal/engine"
 	"github.com/pthm/orchard/internal/graph"
 	"github.com/pthm/orchard/internal/parser"
-	"github.com/pthm/orchard/pkg/provider"
 
 	// Side-effect imports register builtin provider sources. Adding
 	// a new builtin provider is a one-line change here.
@@ -69,27 +67,6 @@ func newRunCmd() *cobra.Command {
 			return nil
 		},
 	}
-}
-
-// buildRegistry instantiates and configures every provider declared
-// in the scenario's required_providers block. Each provider is
-// resolved through the builtin factory table; unknown sources fail
-// early with a clear error.
-func buildRegistry(ctx context.Context, ps *parser.ParsedScenario) (*provider.Registry, error) {
-	reg := provider.NewRegistry()
-	for name, spec := range ps.RequiredProviders {
-		p, err := provider.NewBuiltin(spec.Source)
-		if err != nil {
-			return nil, fmt.Errorf("provider %q: %w", name, err)
-		}
-		if err := reg.Register(p); err != nil {
-			return nil, fmt.Errorf("provider %q: %w", name, err)
-		}
-	}
-	if err := reg.Configure(ctx, ps.ProviderConfigs); err != nil {
-		return nil, err
-	}
-	return reg, nil
 }
 
 func formatCtyValue(v cty.Value) string {

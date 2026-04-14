@@ -1,9 +1,18 @@
 package graph
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
 
 // topoSort performs a topological sort using Kahn's algorithm.
 // Returns an error if the graph contains a cycle.
+//
+// When multiple nodes are ready at the same time (their in-degree
+// drops to zero), they are emitted in lexicographic order of their
+// node IDs. This keeps scenario execution order reproducible run
+// to run — the data dependencies alone do not fully determine
+// sibling order, and map iteration in Go is deliberately randomised.
 func topoSort(nodes map[NodeID]*Node) ([]NodeID, error) {
 	// Compute in-degree for each node.
 	inDegree := make(map[NodeID]int)
@@ -15,10 +24,6 @@ func topoSort(nodes map[NodeID]*Node) ([]NodeID, error) {
 			if _, exists := nodes[dep]; !exists {
 				return nil, fmt.Errorf("unknown dependency %q referenced by %q", dep, node.ID)
 			}
-			// dep → node (dep must come before node).
-			// node depends on dep, so node's in-degree is incremented
-			// when we count edges. But in Kahn's we track incoming edges.
-			// The edge is dep → node, so node has an incoming edge from dep.
 		}
 	}
 
@@ -31,25 +36,37 @@ func topoSort(nodes map[NodeID]*Node) ([]NodeID, error) {
 		}
 	}
 
-	// Seed queue with zero in-degree nodes.
-	var queue []NodeID
+	// Seed the ready set with every zero-in-degree node, sorted.
+	// The sort is what gives us deterministic sibling ordering.
+	ready := make([]NodeID, 0)
 	for id, deg := range inDegree {
 		if deg == 0 {
-			queue = append(queue, id)
+			ready = append(ready, id)
 		}
 	}
+	sortNodeIDs(ready)
 
 	var order []NodeID
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
+	for len(ready) > 0 {
+		current := ready[0]
+		ready = ready[1:]
 		order = append(order, current)
 
+		// Collect newly-ready dependents, sort them, then prepend so
+		// all siblings discovered this tick come out before the next
+		// layer's siblings. Appending + resorting the whole slice
+		// would also work; this form keeps the established order of
+		// already-queued nodes stable.
+		var newly []NodeID
 		for _, dependent := range dependents[current] {
 			inDegree[dependent]--
 			if inDegree[dependent] == 0 {
-				queue = append(queue, dependent)
+				newly = append(newly, dependent)
 			}
+		}
+		if len(newly) > 0 {
+			sortNodeIDs(newly)
+			ready = append(ready, newly...)
 		}
 	}
 
@@ -58,4 +75,8 @@ func topoSort(nodes map[NodeID]*Node) ([]NodeID, error) {
 	}
 
 	return order, nil
+}
+
+func sortNodeIDs(ids []NodeID) {
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 }

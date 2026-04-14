@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/spf13/cobra"
 	"github.com/zclconf/go-cty/cty"
@@ -68,9 +69,14 @@ func newRunCmd() *cobra.Command {
 			}
 
 			if len(result.Outputs) > 0 {
+				names := make([]string, 0, len(result.Outputs))
+				for name := range result.Outputs {
+					names = append(names, name)
+				}
+				sort.Strings(names)
 				fmt.Println("\nOutputs:")
-				for name, val := range result.Outputs {
-					fmt.Printf("  %s = %s\n", name, formatCtyValue(val))
+				for _, name := range names {
+					fmt.Printf("  %s = %s\n", name, formatCtyValue(result.Outputs[name]))
 				}
 			}
 

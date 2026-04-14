@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/pthm/orchard/internal/parser"
@@ -19,8 +20,20 @@ import (
 // open database connections or other side-effectful Configure work
 // just to type-check action bodies.
 func registerProviders(ps *parser.ParsedScenario) (*provider.Registry, error) {
+	// Iterate in sorted order so registration (and therefore Close
+	// reverse-order and plan output) is deterministic across runs.
+	// Go map iteration is deliberately randomised; the scenarios'
+	// intent is declarative so alphabetical is the least surprising
+	// default.
+	names := make([]string, 0, len(ps.RequiredProviders))
+	for name := range ps.RequiredProviders {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
 	reg := provider.NewRegistry()
-	for name, spec := range ps.RequiredProviders {
+	for _, name := range names {
+		spec := ps.RequiredProviders[name]
 		p, err := instantiateProvider(spec.Source)
 		if err != nil {
 			return nil, fmt.Errorf("provider %q: %w", name, err)

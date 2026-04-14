@@ -15,6 +15,26 @@ type ParsedScenario struct {
 	Scenario   *ScenarioBlock
 	Components map[string]*ParsedComponent // keyed by "type.name"
 	Variables  map[string]cty.Value
+
+	// RequiredProviders maps a provider name to its declared source,
+	// e.g. "postgres" → {Source: "builtin/postgres"}. Populated from
+	// the scenario's required_providers block. Empty when absent.
+	RequiredProviders map[string]RequiredProviderSpec
+
+	// ProviderConfigs maps a provider name to the evaluated attribute
+	// values from its `provider "<name>" {}` block. These are passed
+	// to provider.Registry.Configure. Providers without a config
+	// block receive an empty map rather than being absent, matching
+	// the Configure contract that lets providers start up with
+	// default or zero configuration.
+	ProviderConfigs map[string]map[string]cty.Value
+}
+
+// RequiredProviderSpec captures the declared source of a provider.
+// Version and explicit configuration-alias fields land here when we
+// add them; the struct form lets us evolve without breaking callers.
+type RequiredProviderSpec struct {
+	Source string
 }
 
 // ParsedComponent holds a resolved component definition alongside its instance ref.
@@ -49,6 +69,19 @@ func LoadScenario(path string, vars map[string]string) (*ParsedScenario, error) 
 		return nil, fmt.Errorf("resolving variables: %w", err)
 	}
 
+	// Extract required_providers before provider config blocks so we
+	// can validate that every provider block names a declared
+	// provider.
+	required, err := extractRequiredProviders(sf.Scenario.RequiredProviders)
+	if err != nil {
+		return nil, fmt.Errorf("required_providers: %w", err)
+	}
+
+	providerConfigs, err := evaluateProviderConfigs(sf.Scenario.Providers, required, resolved)
+	if err != nil {
+		return nil, fmt.Errorf("provider config: %w", err)
+	}
+
 	// Load component definitions from their source paths.
 	scenarioDir := filepath.Dir(path)
 	components := make(map[string]*ParsedComponent)
@@ -64,10 +97,94 @@ func LoadScenario(path string, vars map[string]string) (*ParsedScenario, error) 
 	}
 
 	return &ParsedScenario{
-		Scenario:   sf.Scenario,
-		Components: components,
-		Variables:  resolved,
+		Scenario:          sf.Scenario,
+		Components:        components,
+		Variables:         resolved,
+		RequiredProviders: required,
+		ProviderConfigs:   providerConfigs,
 	}, nil
+}
+
+// extractRequiredProviders decodes the required_providers block into
+// a map keyed by provider name. Each declaration must supply at
+// minimum a `source` string; other keys are accepted but ignored
+// today so that adding fields (version, alias) later is additive.
+func extractRequiredProviders(block *RequiredProvidersBlock) (map[string]RequiredProviderSpec, error) {
+	out := make(map[string]RequiredProviderSpec)
+	if block == nil {
+		return out, nil
+	}
+	attrs, diags := block.Body.JustAttributes()
+	if diags.HasErrors() {
+		return nil, fmt.Errorf("%s", diags.Error())
+	}
+	for name, attr := range attrs {
+		val, diags := attr.Expr.Value(nil)
+		if diags.HasErrors() {
+			return nil, fmt.Errorf("%s: %s", name, diags.Error())
+		}
+		if !val.Type().IsObjectType() {
+			return nil, fmt.Errorf("%s: expected object with source, got %s", name, val.Type().FriendlyName())
+		}
+		if !val.Type().HasAttribute("source") {
+			return nil, fmt.Errorf("%s: missing required attribute \"source\"", name)
+		}
+		src := val.GetAttr("source")
+		if src.Type() != cty.String {
+			return nil, fmt.Errorf("%s: source must be a string", name)
+		}
+		out[name] = RequiredProviderSpec{Source: src.AsString()}
+	}
+	return out, nil
+}
+
+// evaluateProviderConfigs evaluates each provider block's body
+// against the scenario's resolved variables, producing a per-provider
+// attribute map. Every declared required provider is represented in
+// the result, even if it has no config block — providers may use
+// schema defaults alone.
+func evaluateProviderConfigs(
+	blocks []*ProviderConfigBlock,
+	required map[string]RequiredProviderSpec,
+	vars map[string]cty.Value,
+) (map[string]map[string]cty.Value, error) {
+	result := make(map[string]map[string]cty.Value)
+	for name := range required {
+		result[name] = map[string]cty.Value{}
+	}
+
+	evalCtx := &hcl.EvalContext{Variables: map[string]cty.Value{}}
+	if len(vars) > 0 {
+		evalCtx.Variables["var"] = cty.ObjectVal(vars)
+	}
+
+	seen := make(map[string]bool)
+	for _, block := range blocks {
+		if _, ok := required[block.Name]; !ok {
+			return nil, fmt.Errorf(
+				"provider %q is configured but not declared in required_providers",
+				block.Name)
+		}
+		if seen[block.Name] {
+			return nil, fmt.Errorf("duplicate provider config for %q", block.Name)
+		}
+		seen[block.Name] = true
+
+		attrs, diags := block.Remain.JustAttributes()
+		if diags.HasErrors() {
+			return nil, fmt.Errorf("%s: %s", block.Name, diags.Error())
+		}
+		config := make(map[string]cty.Value, len(attrs))
+		for attrName, attr := range attrs {
+			val, diags := attr.Expr.Value(evalCtx)
+			if diags.HasErrors() {
+				return nil, fmt.Errorf("%s.%s: %s", block.Name, attrName, diags.Error())
+			}
+			config[attrName] = val
+		}
+		result[block.Name] = config
+	}
+	return result, nil
 }
 
 func loadComponent(p *hclparse.Parser, path string) (*ComponentDefBlock, error) {

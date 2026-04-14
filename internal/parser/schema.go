@@ -11,11 +11,37 @@ type ScenarioFile struct {
 
 // ScenarioBlock represents: scenario "name" { ... }
 type ScenarioBlock struct {
-	Name       string           `hcl:"name,label"`
-	Variables  []*VariableBlock `hcl:"variable,block"`
-	Components []*ComponentRef  `hcl:"component,block"`
-	Actions    []*ActionBlock   `hcl:"action,block"`
-	Outputs    []*OutputBlock   `hcl:"output,block"`
+	Name              string                  `hcl:"name,label"`
+	RequiredProviders *RequiredProvidersBlock `hcl:"required_providers,block"`
+	Providers         []*ProviderConfigBlock  `hcl:"provider,block"`
+	Variables         []*VariableBlock        `hcl:"variable,block"`
+	Components        []*ComponentRef         `hcl:"component,block"`
+	Actions           []*ActionBlock          `hcl:"action,block"`
+	Outputs           []*OutputBlock          `hcl:"output,block"`
+}
+
+// RequiredProvidersBlock declares the providers a scenario needs.
+// The body is a flat attribute set where each attribute is a
+// provider name assigned to an object describing the source:
+//
+//	required_providers {
+//	  postgres = { source = "builtin/postgres" }
+//	  http     = { source = "builtin/http" }
+//	}
+//
+// The body is captured as hcl.Body so each entry's object can be
+// decoded dynamically — gohcl cannot flatten a "remaining-attribute-
+// set-of-objects" shape into a typed struct.
+type RequiredProvidersBlock struct {
+	Body hcl.Body `hcl:",remain"`
+}
+
+// ProviderConfigBlock represents: provider "<name>" { <config attributes> }.
+// The body is captured for deferred evaluation against the scenario's
+// variable context.
+type ProviderConfigBlock struct {
+	Name   string   `hcl:"name,label"`
+	Remain hcl.Body `hcl:",remain"`
 }
 
 // ComponentFile is the top-level HCL structure for a component definition file.

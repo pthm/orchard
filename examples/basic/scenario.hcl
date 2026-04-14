@@ -1,10 +1,24 @@
 scenario "seed_dev" {
+  required_providers {
+    postgres = {
+      source = "builtin/postgres"
+    }
+  }
+
+  variable "database_url" {
+    default = "postgres://localhost:5432/orchard?sslmode=disable"
+  }
+
   variable "merchant_name" {
     default = "Acme Corp"
   }
 
   variable "region" {
     default = "us"
+  }
+
+  provider "postgres" {
+    dsn = var.database_url
   }
 
   action "sql" "create_merchant" {

@@ -409,7 +409,75 @@ func (e *Engine) executeActionOnce(
 		}
 		return nil, err
 	}
-	return outputs, nil
+	validated, err := validateOutputs(route.schema, outputs)
+	if err != nil {
+		return nil, fmt.Errorf("action %s: %w", node.ID, err)
+	}
+	return validated, nil
+}
+
+// validateOutputs enforces an action's declared output contract.
+// Scenarios type-check references against the schema at plan time;
+// without a runtime check a misbehaving provider could hand back
+// values of the wrong shape and the mismatch would only surface in
+// whatever downstream expression tried to use them — far from the
+// real source. Instead, coerce here: reject unknown attributes and
+// convert known ones to their declared types, so the error names
+// the offending provider+action the moment the contract is broken.
+//
+// Actions whose schema declares `outputs { type = any }` or has no
+// output block are opaque: plan-time type-checking already can't
+// narrow them, so there's nothing to coerce — accept the map as-is.
+func validateOutputs(schema protocol.ActionSchema, outputs map[string]cty.Value) (map[string]cty.Value, error) {
+	if schema.Outputs == nil {
+		return outputs, nil
+	}
+	declared, err := schema.Outputs.CtyType()
+	if err != nil {
+		// Schema itself is malformed; plan-time validation already
+		// surfaced it. Don't double-report at execute time.
+		return outputs, nil
+	}
+	if declared == cty.DynamicPseudoType {
+		return outputs, nil
+	}
+	if !declared.IsObjectType() {
+		return nil, fmt.Errorf("output schema must be an object type, got %s", declared.FriendlyName())
+	}
+	declaredAttrs := declared.AttributeTypes()
+	for name := range outputs {
+		if _, ok := declaredAttrs[name]; !ok {
+			return nil, fmt.Errorf("unknown output attribute %q (declared: %s)",
+				name, sortedAttrNames(declaredAttrs))
+		}
+	}
+	result := make(map[string]cty.Value, len(declaredAttrs))
+	for name, t := range declaredAttrs {
+		val, present := outputs[name]
+		if !present {
+			// Plan-time typing assumes every declared attribute is
+			// reachable; materialise a typed null so downstream
+			// expressions see a consistently-shaped value rather
+			// than a missing-key runtime surprise.
+			result[name] = cty.NullVal(t)
+			continue
+		}
+		coerced, err := convert.Convert(val, t)
+		if err != nil {
+			return nil, fmt.Errorf("output %q: %w", name, err)
+		}
+		result[name] = coerced
+	}
+	return result, nil
+}
+
+func sortedAttrNames(attrs map[string]cty.Type) string {
+	names := make([]string, 0, len(attrs))
+	for name := range attrs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }
 
 // computeRetryDelay returns the wait between attempt N and

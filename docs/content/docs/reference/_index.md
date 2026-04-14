@@ -1,13 +1,17 @@
 ---
 title: Reference
-weight: 30
+weight: 50
 bookCollapseSection: true
 ---
 
 # Reference
 
-Exhaustive reference for Orchard's HCL schema, built-in providers, and CLI.
+Exhaustive reference for Orchard's CLI, HCL schema, and expression language.
 
-- HCL schema — `scenario`, `component`, `provider`, `variable`, `output`
-- Built-in providers — `postgres`, `http`, `exec`
-- CLI — `apply`, `destroy`, `plan`, `validate`
+- [CLI](cli/) — `run`, `plan`, `list`; flags and environment variables.
+- [HCL schema](hcl-schema/) — every top-level block, attribute, and nested block.
+- [Expressions](expressions/) — reference namespaces, type expressions, built-in
+  functions.
+
+For per-provider reference (config attributes, action types, outputs), see the
+[providers section](../providers/).

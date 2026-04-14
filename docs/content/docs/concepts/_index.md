@@ -6,13 +6,14 @@ bookCollapseSection: true
 
 # Concepts
 
-Orchard has a small vocabulary. Learn these four terms and the rest of the system
+Orchard has a small vocabulary. Learn these terms and the rest of the system
 follows naturally.
 
-- **Scenario** — a top-level, runnable description of a desired state
-- **Component** — a reusable unit of state; scenarios compose components
-- **Provider** — the runtime that turns a component's declaration into side effects
-  (Postgres rows, HTTP calls, shell commands)
-- **Wiring** — how outputs from one component flow into the inputs of the next
-
-Each gets its own page under this section.
+- **[Scenario](scenarios/)** — a top-level, runnable description of a desired state.
+- **[Component](components/)** — a reusable unit of state that scenarios compose.
+- **[Provider](providers/)** — the runtime that turns a declaration into side effects
+  (Postgres rows, HTTP calls, shell commands).
+- **[Wiring](wiring/)** — how outputs from one action flow into the inputs of the next,
+  and how Orchard derives the execution order.
+- **[Plan vs run](plan-vs-run/)** — the two execution modes, why they exist, and what
+  they guarantee.

@@ -74,7 +74,71 @@ func (e *Engine) ValidateReferences(ps *parser.ParsedScenario, g *graph.Graph) e
 		}
 	}
 
+	// Component output expressions. Each component's outputs see
+	// their own var namespace (the component's declared variables)
+	// and only their own internal actions — the same scoping the
+	// engine applies when evaluating these expressions at runtime.
+	for key, comp := range ps.Components {
+		compCtx := e.buildComponentTypedEvalContext(key, comp, g)
+		for _, out := range comp.Def.Outputs {
+			loc := fmt.Sprintf("component %q output %q", key, out.Name)
+			if err := checkExpr(compCtx, out.Value, loc); err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
+}
+
+// buildComponentTypedEvalContext builds the typed eval context used
+// to check a single component's output expressions at plan time.
+// It mirrors the engine's runtime scoping: `var.*` carries the
+// component's declared variables (typed by their type constraint,
+// DynamicPseudoType when none), and `action.<type>.<name>` exposes
+// only the component's own internal actions — the bare namespace,
+// matching scopedComponentResolved.
+func (e *Engine) buildComponentTypedEvalContext(
+	key string, comp *parser.ParsedComponent, g *graph.Graph,
+) *hcl.EvalContext {
+	variables := map[string]cty.Value{}
+
+	if len(comp.Def.Variables) > 0 {
+		varAttrs := make(map[string]cty.Value, len(comp.Def.Variables))
+		for _, v := range comp.Def.Variables {
+			t, err := parser.ResolveVariableType(v)
+			if err != nil {
+				t = cty.DynamicPseudoType
+			}
+			varAttrs[v.Name] = cty.UnknownVal(t)
+		}
+		variables["var"] = cty.ObjectVal(varAttrs)
+	}
+
+	actionsByType := make(map[string]map[string]cty.Value)
+	for id, node := range g.Nodes {
+		if node.Kind != graph.ActionNode || node.ComponentKey != key {
+			continue
+		}
+		typ, name := parseActionID(string(id))
+		if typ == "" {
+			continue
+		}
+		outputType := e.actionOutputType(node)
+		if actionsByType[typ] == nil {
+			actionsByType[typ] = make(map[string]cty.Value)
+		}
+		actionsByType[typ][name] = cty.UnknownVal(outputType)
+	}
+	if len(actionsByType) > 0 {
+		objs := make(map[string]cty.Value, len(actionsByType))
+		for typ, byName := range actionsByType {
+			objs[typ] = cty.ObjectVal(byName)
+		}
+		variables["action"] = cty.ObjectVal(objs)
+	}
+
+	return &hcl.EvalContext{Variables: variables}
 }
 
 // buildTypedEvalContext constructs an eval context where node

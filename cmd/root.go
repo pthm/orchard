@@ -5,7 +5,8 @@ import (
 )
 
 var (
-	varFlags map[string]string
+	varFlags    map[string]string
+	noColorFlag bool
 )
 
 func NewRootCmd() *cobra.Command {
@@ -16,6 +17,7 @@ func NewRootCmd() *cobra.Command {
 	}
 
 	root.PersistentFlags().StringToStringVar(&varFlags, "var", nil, "Variable overrides (key=value)")
+	root.PersistentFlags().BoolVar(&noColorFlag, "no-color", false, "Disable colored output (also honors NO_COLOR env)")
 
 	root.AddCommand(newRunCmd())
 	root.AddCommand(newPlanCmd())

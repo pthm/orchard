@@ -2,11 +2,10 @@ package cmd
 
 import (
 	"fmt"
-	"sort"
 
 	"github.com/spf13/cobra"
-	"github.com/zclconf/go-cty/cty"
 
+	"github.com/pthm/orchard/internal/cli/reporter"
 	"github.com/pthm/orchard/internal/engine"
 	"github.com/pthm/orchard/internal/graph"
 	"github.com/pthm/orchard/internal/parser"
@@ -30,8 +29,6 @@ func newRunCmd() *cobra.Command {
 				return fmt.Errorf("loading scenario: %w", err)
 			}
 
-			fmt.Printf("Scenario: %s\n", ps.Scenario.Name)
-
 			g, err := graph.Build(ps)
 			if err != nil {
 				return fmt.Errorf("building graph: %w", err)
@@ -49,7 +46,7 @@ func newRunCmd() *cobra.Command {
 			}
 			defer func() {
 				if closeErr := reg.Close(); closeErr != nil {
-					fmt.Printf("warning: %v\n", closeErr)
+					fmt.Fprintf(cmd.ErrOrStderr(), "warning: %v\n", closeErr)
 				}
 			}()
 
@@ -61,59 +58,15 @@ func newRunCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("building engine: %w", err)
 			}
-			eng.SetReporter(stdoutReporter{})
+			eng.SetReporter(reporter.Select(reporter.Options{
+				Out:        cmd.OutOrStdout(),
+				ForcePlain: noColorFlag,
+			}))
 
-			fmt.Println("Executing...")
-			result, err := eng.Execute(ctx, ps, g)
-			if err != nil {
-				return fmt.Errorf("execution failed: %w", err)
+			if _, err := eng.Execute(ctx, ps, g); err != nil {
+				return err
 			}
-
-			if len(result.Outputs) > 0 {
-				names := make([]string, 0, len(result.Outputs))
-				for name := range result.Outputs {
-					names = append(names, name)
-				}
-				sort.Strings(names)
-				fmt.Println("\nOutputs:")
-				for _, name := range names {
-					fmt.Printf("  %s = %s\n", name, formatCtyValue(result.Outputs[name]))
-				}
-			}
-
-			fmt.Println("\nDone.")
 			return nil
 		},
-	}
-}
-
-// stdoutReporter prints a "✓ nodeID" line per completed node. The
-// engine itself is mute by default; presentation lives in cmd/.
-type stdoutReporter struct{}
-
-// NodeCompleted implements engine.Reporter.
-func (stdoutReporter) NodeCompleted(nodeID string) {
-	fmt.Printf("  ✓ %s\n", nodeID)
-}
-
-func formatCtyValue(v cty.Value) string {
-	if v.IsNull() {
-		return "null"
-	}
-	switch v.Type() {
-	case cty.String:
-		return v.AsString()
-	case cty.Number:
-		bf := v.AsBigFloat()
-		if bf.IsInt() {
-			i, _ := bf.Int64()
-			return fmt.Sprintf("%d", i)
-		}
-		f, _ := bf.Float64()
-		return fmt.Sprintf("%g", f)
-	case cty.Bool:
-		return fmt.Sprintf("%t", v.True())
-	default:
-		return v.GoString()
 	}
 }

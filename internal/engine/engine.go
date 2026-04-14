@@ -78,13 +78,29 @@ func buildRoutes(registry *provider.Registry) (map[string]actionRoute, error) {
 // Execute runs all nodes in topological order and returns scenario outputs.
 func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *graph.Graph) (*Result, error) {
 	resolved := make(map[string]map[string]cty.Value)
+	// compVars holds each component's resolved inputs, indexed by
+	// component key. Populated lazily on first access so components
+	// with input expressions that reference upstream action outputs
+	// still resolve against the latest `resolved` map — the graph
+	// already ensures those upstreams have run by the time we need
+	// the inputs.
+	compVars := make(map[string]map[string]cty.Value)
 
 	for _, nodeID := range g.Order {
 		node := g.Nodes[nodeID]
 
 		switch node.Kind {
 		case graph.ActionNode:
-			outputs, err := e.executeAction(ctx, node, ps.Variables, resolved)
+			if node.ComponentKey != "" {
+				if _, ok := compVars[node.ComponentKey]; !ok {
+					vars, err := e.resolveComponentInputs(ps.Components[node.ComponentKey], ps.Variables, resolved)
+					if err != nil {
+						return nil, fmt.Errorf("resolving inputs for component %q: %w", node.ComponentKey, err)
+					}
+					compVars[node.ComponentKey] = vars
+				}
+			}
+			outputs, err := e.executeAction(ctx, node, ps.Variables, compVars, resolved)
 			if err != nil {
 				return nil, fmt.Errorf("executing %s: %w", nodeID, err)
 			}
@@ -92,7 +108,7 @@ func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *grap
 			fmt.Printf("  ✓ %s\n", nodeID)
 
 		case graph.ComponentNode:
-			outputs, err := e.resolveComponentOutputs(node, ps, resolved)
+			outputs, err := e.resolveComponentOutputs(node, ps, compVars, resolved)
 			if err != nil {
 				return nil, fmt.Errorf("resolving outputs for %s: %w", nodeID, err)
 			}
@@ -119,6 +135,7 @@ func (e *Engine) executeAction(
 	ctx context.Context,
 	node *graph.Node,
 	vars map[string]cty.Value,
+	compVars map[string]map[string]cty.Value,
 	resolved map[string]map[string]cty.Value,
 ) (map[string]cty.Value, error) {
 	route, ok := e.routes[node.ActionType]
@@ -130,7 +147,7 @@ func (e *Engine) executeAction(
 		return nil, err
 	}
 
-	evalCtx := e.buildNodeEvalContext(node, vars, resolved)
+	evalCtx := e.buildNodeEvalContext(node, vars, compVars, resolved)
 
 	attrs, err := evalAttrs(node.Body, route.schema, evalCtx)
 	if err != nil {
@@ -141,11 +158,14 @@ func (e *Engine) executeAction(
 }
 
 // buildNodeEvalContext creates an EvalContext appropriate for the node.
-// Component-scoped actions see `var.*` as the component's input values,
-// and `action.*` references are resolved within the component's scope.
+// Component-scoped actions see `var.*` as the component's resolved
+// inputs (with defaults applied from the component's own variable
+// declarations), and `action.*` references are rewritten to expose
+// only the internal actions belonging to the same component.
 func (e *Engine) buildNodeEvalContext(
 	node *graph.Node,
 	vars map[string]cty.Value,
+	compVars map[string]map[string]cty.Value,
 	resolved map[string]map[string]cty.Value,
 ) *hcl.EvalContext {
 	if node.ComponentKey == "" {
@@ -161,15 +181,24 @@ func (e *Engine) buildNodeEvalContext(
 		}
 	}
 
-	// TODO: resolve component inputs from the parent eval context.
-	return buildEvalContext(vars, scopedResolved)
+	scopedVars := compVars[node.ComponentKey]
+	if scopedVars == nil {
+		// Component with no inputs block and no declared variables.
+		scopedVars = map[string]cty.Value{}
+	}
+	return buildEvalContext(scopedVars, scopedResolved)
 }
 
 // resolveComponentOutputs evaluates a component's output blocks using
-// its internal action results.
+// its internal action results and the component-scoped var namespace.
+//
+// compVars is expected to already contain the component's resolved
+// inputs — populated by Execute before this node runs, so that both
+// internal actions and output blocks see the same var context.
 func (e *Engine) resolveComponentOutputs(
 	node *graph.Node,
 	ps *parser.ParsedScenario,
+	compVars map[string]map[string]cty.Value,
 	resolved map[string]map[string]cty.Value,
 ) (map[string]cty.Value, error) {
 	comp, ok := ps.Components[node.ComponentKey]
@@ -186,12 +215,20 @@ func (e *Engine) resolveComponentOutputs(
 		}
 	}
 
-	compVars, err := e.resolveComponentInputs(comp, ps.Variables, resolved)
-	if err != nil {
-		return nil, err
+	vars, ok := compVars[node.ComponentKey]
+	if !ok {
+		// Component with neither inputs nor internal actions: nothing
+		// to resolve, but we still need an empty var namespace so
+		// output expressions referencing declared component defaults
+		// evaluate cleanly.
+		v, err := e.resolveComponentInputs(comp, ps.Variables, resolved)
+		if err != nil {
+			return nil, err
+		}
+		vars = v
 	}
 
-	evalCtx := buildEvalContext(compVars, scopedResolved)
+	evalCtx := buildEvalContext(vars, scopedResolved)
 
 	outputs := make(map[string]cty.Value)
 	for _, output := range comp.Def.Outputs {

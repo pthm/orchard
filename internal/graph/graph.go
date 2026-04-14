@@ -91,16 +91,27 @@ func Build(ps *parser.ParsedScenario) (*Graph, error) {
 		node.Dependencies = append(node.Dependencies, deps...)
 	}
 
-	// Also extract dependencies from component input expressions.
+	// Extract dependencies from component input expressions and
+	// attach them both to the component node (so outputs wait on
+	// their inputs) and to every internal action (so the component's
+	// inputs are resolvable before any internal action runs — the
+	// engine uses input values as the component-scoped var namespace).
 	for key, comp := range ps.Components {
+		if comp.Ref.Inputs == nil {
+			continue
+		}
+		deps, err := extractDependencies(comp.Ref.Inputs, "")
+		if err != nil {
+			return nil, fmt.Errorf("extracting input dependencies for component %s: %w", key, err)
+		}
 		compID := NodeID("component." + key)
-		compNode := nodes[compID]
-		if comp.Ref.Inputs != nil {
-			deps, err := extractDependencies(comp.Ref.Inputs, "")
-			if err != nil {
-				return nil, fmt.Errorf("extracting input dependencies for component %s: %w", key, err)
+		nodes[compID].Dependencies = append(nodes[compID].Dependencies, deps...)
+
+		for _, action := range comp.Def.Actions {
+			actionID := NodeID(fmt.Sprintf("component.%s.action.%s.%s", key, action.Type, action.Name))
+			if n, ok := nodes[actionID]; ok {
+				n.Dependencies = append(n.Dependencies, deps...)
 			}
-			compNode.Dependencies = append(compNode.Dependencies, deps...)
 		}
 	}
 

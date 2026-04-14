@@ -1,0 +1,45 @@
+baseURL: https://orchard.sh/
+title: Orchard
+languageCode: en-us
+defaultContentLanguage: en
+
+enableGitInfo: true
+enableRobotsTXT: true
+disablePathToLower: true
+
+module:
+  imports:
+    - path: github.com/alex-shpak/hugo-book
+  hugoVersion:
+    extended: true
+    min: "0.158.0"
+
+markup:
+  goldmark:
+    renderer:
+      unsafe: true
+  tableOfContents:
+    startLevel: 2
+    endLevel: 3
+  highlight:
+    style: github
+    noClasses: false
+    lineNos: false
+    tabWidth: 2
+
+params:
+  BookTheme: light
+  BookToC: true
+  BookSection: docs
+  BookRepo: https://github.com/pthm/orchard
+  BookEditLink: "{{ .Site.Params.BookRepo }}/edit/main/docs/content/{{ .Path }}"
+  BookEditLinkText: Edit this page
+  BookSearch: true
+  BookComments: false
+  BookDateFormat: "January 2, 2006"
+
+menu:
+  after:
+    - name: GitHub
+      url: https://github.com/pthm/orchard
+      weight: 10

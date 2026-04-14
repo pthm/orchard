@@ -50,8 +50,22 @@ A **Scenario** defines a complete, reproducible system state. It is the thing a 
 
 ```hcl
 scenario "merchant_with_chargeback" {
+  required_providers {
+    postgres = {
+      source = "builtin/postgres"
+    }
+  }
+
+  variable "dsn" {
+    default = "postgres://localhost:5432/orchard?sslmode=disable"
+  }
+
   variable "merchant_name" {
     default = "Acme Corp"
+  }
+
+  provider "postgres" {
+    dsn = var.dsn
   }
 
   component "merchant" "base" {
@@ -74,6 +88,8 @@ scenario "merchant_with_chargeback" {
   }
 }
 ```
+
+Scenarios declare which providers they need via `required_providers` and configure each one with a `provider "<name>" {}` block. The `source` string resolves through the provider registry: `builtin/<name>` picks a compiled-in provider, `exec:<path>` spawns an external subprocess (see [Provider Plugin System](#provider-plugin-system)).
 
 ### Component (Reusable module)
 
@@ -175,13 +191,108 @@ This is the core architectural decision. HCL expressions cannot be fully evaluat
 
 ---
 
+## Provider Plugin System
+
+Providers extend Orchard's action vocabulary. A provider declares a schema of the actions it offers, configures itself from the scenario, and executes actions against its target system (a database, an HTTP API, a command shell, a custom service). Orchard's core stays focused on the orchestration problem — parsing, dependency resolution, expression evaluation — and providers handle the "do the thing" side.
+
+Two kinds of providers share one interface:
+
+- **Builtin providers** are compiled into the `orchard` binary and registered at startup. Today's builtins are `postgres` (raw SQL) and `http` (HTTP requests).
+- **External providers** are separate subprocesses that Orchard spawns and talks to over JSON Lines on stdio. Any language that can read and write JSON is a valid host — a Python, Rust, or Node provider is roughly the same shape as the example Go one.
+
+Both kinds implement the same Go interface:
+
+```go
+type Provider interface {
+    Schema() ProviderSchema
+    Configure(ctx, config) error
+    Execute(ctx, action, attrs) (outputs, error)
+    Close() error
+}
+```
+
+### Wire Protocol
+
+External providers speak JSON Lines — one JSON object per line, request/response matched by `id`. Four methods:
+
+- `describe` → `{schema}` — returns the provider's self-description. Called during spawn, before `configure`, so tools like `orchard plan` can validate scenarios without opening connections.
+- `configure` → `{}` — sets up connections, credentials, caches. Called once per scenario run.
+- `execute` → `{outputs}` — performs one action with fully-resolved attribute values.
+- `shutdown` → `{}` — graceful close; Orchard waits for the subprocess to exit (force-killed after a timeout).
+
+The engine always evaluates HCL on the Orchard side. Providers see a flat map of `cty.Value`s for attributes and return a flat map of outputs — they never touch HCL themselves. This is what makes the multi-language story viable: no language needs its own HCL parser or evaluator.
+
+### Schema Authoring
+
+Provider schemas are written in HCL and shipped alongside the provider binary. The authoring form uses HCL's native type expressions (`string`, `list(number)`, `object({id=number})`) rather than a separate type DSL — so types round-trip 1:1 with the engine's own `cty` type system:
+
+```hcl
+provider "postgres" {
+  version  = "1"
+  protocol = "1"
+
+  config {
+    attribute "dsn" {
+      type     = string
+      required = true
+    }
+  }
+
+  action "sql" {
+    attribute "query" {
+      type     = string
+      required = true
+    }
+    output { type = any }
+  }
+}
+```
+
+On the wire the schema travels as JSON (parsed by any language). On disk it's HCL (parsed by Orchard only). The Go SDK can also synthesize the schema from struct tags instead of a `schema.hcl` file — builtins get this for free.
+
+### Source Schemes
+
+Scenarios declare their providers by source string:
+
+| Scheme | Example | Resolution |
+|--------|---------|------------|
+| `builtin/<name>` | `builtin/postgres` | Factory registered at binary startup. |
+| `exec:<path>` | `exec:./providers/stripe` | Path to a subprocess binary, cwd-relative or absolute. |
+
+Additional schemes (remote registries, OCI-distributed binaries) are possible future extensions; the source string is parsed through a scheme switch that stays open for them.
+
+### Plan-time Validation
+
+`orchard plan` instantiates every declared provider for schemas only — no `Configure`, no connections — and validates every action body in the graph against its provider's declared schema. Unknown attributes, missing required fields, and action types without a matching provider are caught here with HCL source coordinates, long before the first INSERT runs.
+
+### Writing a Provider
+
+**Builtin (Go, in-process):**
+
+1. Create `pkg/provider/<name>/` with an embedded `schema.hcl` and a `Provider` struct implementing `Schema()`, `Configure()`, `Execute()`, `Close()`.
+2. Add a `register.go` with `provider.RegisterBuiltin("builtin/<name>", New)` in `init()`.
+3. Blank-import the package from `cmd/run.go` so the `init` fires at startup.
+
+See `pkg/provider/postgres/` and `pkg/provider/http/` as references.
+
+**External (any language, subprocess):**
+
+1. Write a program that reads JSON Lines from stdin and writes JSON Lines to stdout. Handle four methods: `describe`, `configure`, `execute`, `shutdown`.
+2. Return your schema from `describe` as a JSON object matching `pkg/protocol/schema.go`'s `ProviderSchema` shape.
+3. Reserve stdout for protocol traffic; use stderr for diagnostics (Orchard streams it to the log).
+4. Exit cleanly after responding to `shutdown`.
+
+See `test/integration/testdata/echo/main.go` for a minimal reference (~100 lines of standard-library Go, zero Orchard imports).
+
+---
+
 ## Action Types
 
-The system supports multiple action types, each implemented as a **provider**. Providers are registered by name and receive the action's HCL body plus an evaluation context at execution time.
+The system supports multiple action types, each implemented by a provider. A scenario's `required_providers` block decides which ones are available for that run.
 
-### SQL
+### SQL (builtin/postgres)
 
-Execute arbitrary SQL against the connected database. Results from `RETURNING` clauses are captured as outputs.
+Execute arbitrary SQL against the configured PostgreSQL connection. Results from `RETURNING` clauses are captured as outputs.
 
 ```hcl
 action "sql" "create_merchant" {
@@ -193,37 +304,59 @@ action "sql" "create_merchant" {
 }
 ```
 
-### Command Execution
+### HTTP Request (builtin/http)
 
-Run external commands or scripts. Parameters are passed to the command.
+Make HTTP requests to APIs or services. The provider supports a `base_url` config for relative paths, `default_headers` merged across every request, and a request-level timeout. Responses expose `status`, `body`, and `headers` (first value per key) as outputs.
 
 ```hcl
-action "cmd" "generate_data" {
-  command = "./scripts/generate_transactions"
-
-  params = {
-    merchant_id = component.merchant.base.id
-    count       = var.transaction_count
+provider "http" {
+  base_url = var.api_base
+  default_headers = {
+    User-Agent = "orchard/1"
   }
 }
-```
 
-### HTTP
-
-Make HTTP requests to APIs or services.
-
-```hcl
-action "http" "trigger_sync" {
+action "request" "trigger_sync" {
   method = "POST"
-  url    = "${var.api_base}/sync"
-
-  body = {
-    merchant_id = component.merchant.base.id
+  url    = "/sync"
+  headers = {
+    Content-Type = "application/json"
   }
+  body = jsonencode({
+    merchant_id = component.merchant.base.id
+  })
 }
 ```
 
-### Schema-Aware Database Operations
+### External Providers
+
+Any action implemented by a subprocess provider. An external provider ships a binary plus (optionally) a `schema.hcl` and is referenced by its path:
+
+```hcl
+required_providers {
+  stripe = {
+    source = "exec:./providers/orchard-stripe"
+  }
+}
+
+provider "stripe" {
+  api_key = var.stripe_key
+}
+
+action "charge" "test_payment" {
+  customer_id = component.customer.base.id
+  amount      = 500
+  currency    = "usd"
+}
+```
+
+The action-type label (`"charge"`) matches an entry in the provider's schema. The full set of actions a scenario can use is the union of all declared providers' action names.
+
+### Planned: Command Execution
+
+Run external commands or scripts. Parameters are passed through the environment or argv. Not yet shipped; tracked in the roadmap below.
+
+### Planned: Schema-Aware Database Operations
 
 A typed database provider that validates operations against the actual database schema — checking that tables exist, columns exist, types match, and required fields are present.
 
@@ -259,10 +392,11 @@ action "http" "reindex" {
 
 ### Execution Phases
 
-1. **Parse** — Load HCL files, structurally decode scenarios and components, resolve component source paths, merge variable defaults with CLI overrides.
-2. **Plan** — Build the dependency graph from expression references. Topologically sort nodes. Detect cycles. Validate that all referenced nodes exist.
-3. **Execute** — Walk the topological order. For each node: build an EvalContext from resolved upstream outputs, evaluate the node's deferred expressions, dispatch to the appropriate provider, capture outputs.
+1. **Parse** — Load HCL files, structurally decode scenarios and components, resolve component source paths, merge variable defaults with CLI overrides, extract `required_providers` and evaluate each `provider` block against the variable context.
+2. **Plan** — Build the dependency graph from expression references. Topologically sort nodes. Detect cycles. Register providers for schemas only (no `Configure`) and validate every action body against its provider's declared schema — unknown attributes, missing required fields, and unrouted action types are rejected here with HCL source coordinates.
+3. **Execute** — Configure every provider with its resolved config. Walk the topological order. For each node: build an `EvalContext` from resolved upstream outputs, evaluate the node's deferred expressions, coerce attrs to their declared types, dispatch to the appropriate provider, capture outputs.
 4. **Output** — Evaluate and display scenario-level outputs.
+5. **Close** — Close providers in reverse registration order. External subprocesses receive `shutdown` and are waited on (force-killed after a timeout if unresponsive).
 
 ### Determinism
 
@@ -447,12 +581,25 @@ orchard list runs
 
 ### Configuration
 
-Database connection is resolved in priority order:
+Provider configuration lives in the scenario itself, evaluated against the variable context:
 
-1. `--dsn` CLI flag
-2. `ORCHARD_DATABASE_URL` environment variable
-3. `ORCHARD_DSN` environment variable
-4. Default: `postgres://localhost:5432/orchard?sslmode=disable`
+```hcl
+variable "dsn" {
+  default = "postgres://localhost:5432/orchard?sslmode=disable"
+}
+
+provider "postgres" {
+  dsn = var.dsn
+}
+```
+
+Runtime overrides use `--var`:
+
+```bash
+orchard run scenarios/demo.hcl --var dsn=postgres://prod-host/db
+```
+
+This replaces earlier flag/env-var precedence with a single mechanism — any provider attribute flows through `variable` blocks — so new providers don't need CLI-level configuration plumbing.
 
 ---
 
@@ -468,8 +615,11 @@ project/
     merchant_with_chargeback.hcl
     demo_env.hcl
     support_debug.hcl
+  providers/                # External provider binaries (exec: sources)
+    orchard-stripe
+    orchard-intercom
   .orchard/
-    schema.json
+    schema.json             # Pulled database schema (future milestone)
 ```
 
 ---
@@ -492,9 +642,13 @@ Runs should be reproducible given the same inputs and database state. Randomness
 
 Clear execution logs showing what ran, what was created, what outputs were produced, and what failed. The `plan` command shows the execution graph without running anything.
 
-### Extensible
+### Extensible — in any language
 
-New action types (providers) can be added without changing the core engine. The provider interface is simple: receive an HCL body and eval context, return outputs.
+New action types live behind a single `Provider` interface. Builtins are Go packages compiled into the binary; external providers are subprocesses speaking JSON Lines on stdio and can be written in any language with JSON support. The engine evaluates HCL on its own side and hands providers a flat attribute map, so external authors never need an HCL parser or evaluator.
+
+### Schema-driven, validated early
+
+Providers advertise their schemas; the engine validates scenario action bodies against those schemas at plan time. Typos and missing required attributes surface with source coordinates before any side effects run.
 
 ### Escape hatches always available
 
@@ -550,21 +704,37 @@ orchard list examples/                                 # finds scenarios
 orchard run examples/basic/scenario.hcl --dsn postgres://...  # executes against Postgres
 ```
 
-### Milestone 2: Action Providers
+### Milestone 2: Provider Plugin System — COMPLETE
 
-Expand the action type system beyond raw SQL to support the full range of side effects needed for realistic environment setup.
+Rebuild the action layer around a language-agnostic plugin model so third parties can extend Orchard without forking the binary. Borrowed from Terraform's provider model, trimmed to fit Orchard's synchronous workload: JSON Lines over stdio instead of gRPC, HCL for schema authoring, `cty` types as the universal type DSL.
+
+| Feature | Status |
+|---------|--------|
+| `pkg/protocol` — envelope, schema types, HCL parser, cty↔JSON codec | Done |
+| `pkg/provider.Provider` unified interface | Done |
+| Builtin factory registry (`builtin/<name>` sources) | Done |
+| External subprocess adapter (`exec:<path>` sources) | Done |
+| `describe` / `configure` / `execute` / `shutdown` wire protocol | Done |
+| `required_providers` + `provider "<name>" {}` HCL blocks | Done |
+| Plan-time schema validation (`orchard plan` type-checks action bodies) | Done |
+| Schema-driven HCL evaluation (engine evaluates, providers receive flat attrs) | Done |
+| Postgres builtin ported onto the new interface | Done |
+| HTTP builtin (status/body/headers outputs) | Done |
+| Cross-provider integration coverage (FK chain + external echo) | Done |
+
+### Milestone 3: Action Ergonomics
+
+Fill in the remaining action-layer features that were in the original Milestone 2 before the plugin refactor.
 
 | Feature | Status |
 |---------|--------|
 | Command execution provider (`action "cmd"`) | Not started |
-| HTTP request provider (`action "http"`) | Not started |
-| Provider-specific HCL schema validation | Not started |
-| Action output type coercion and validation | Not started |
 | `depends_on` explicit dependency support | Not started |
-| Action timeout support | Not started |
+| Action-level timeout support | Not started |
 | Action retry support | Not started |
+| Plan-time reference type-checking (output types → eval context) | Not started |
 
-### Milestone 3: Schema-Aware Database Provider
+### Milestone 4: Schema-Aware Database Provider
 
 Introspect PostgreSQL schemas and provide a typed database layer that validates operations before execution.
 
@@ -581,7 +751,7 @@ Introspect PostgreSQL schemas and provide a typed database layer that validates 
 | `RETURNING` field validation | Not started |
 | Foreign key reference hints | Not started |
 
-### Milestone 4: Lifecycle and Teardown
+### Milestone 5: Lifecycle and Teardown
 
 Make cleanup a first-class operation so that scenarios can be torn down cleanly, whether immediately after a test or hours later in a dev environment.
 
@@ -600,7 +770,7 @@ Make cleanup a first-class operation so that scenarios can be torn down cleanly,
 | `orchard teardown <scenario> --latest` convenience | Not started |
 | Run metadata tagging on created resources | Not started |
 
-### Milestone 5: Robustness and Ergonomics
+### Milestone 6: Robustness and Ergonomics
 
 Harden the tool for real-world use and improve the authoring experience.
 
@@ -617,7 +787,7 @@ Harden the tool for real-world use and improve the authoring experience.
 | Transaction wrapping for atomic scenario execution | Not started |
 | Configuration file (`.orchard/config.hcl` or similar) | Not started |
 
-### Milestone 6: Advanced Features (Future)
+### Milestone 7: Advanced Features (Future)
 
 | Feature | Status |
 |---------|--------|
@@ -643,52 +813,98 @@ Harden the tool for real-world use and improve the authoring experience.
 ```
 main.go                         Entry point
 cmd/
-  root.go                       Cobra root command, global flags
-  run.go                        orchard run — parse → graph → engine → output
-  plan.go                       orchard plan — parse → graph → print
+  root.go                       Cobra root, global --var flag
+  run.go                        orchard run — parse → graph → validate → configure → execute
+  plan.go                       orchard plan — parse → graph → schema-validate, print DAG
   list.go                       orchard list — scan for scenario files
+  registry.go                   registerProviders + buildRegistry helpers (shared by run/plan)
 
 internal/
-  config/config.go              DSN resolution (flag → env → default)
-
   parser/
-    schema.go                   HCL schema structs (gohcl-tagged)
-    parser.go                   LoadScenario: parse, decode, resolve components, merge vars
+    schema.go                   HCL schema structs: Scenario, Component, RequiredProviders,
+                                ProviderConfig, Variable, Action, Output
+    parser.go                   LoadScenario: parse, decode, extract required_providers,
+                                evaluate provider configs, resolve components, merge vars
 
   graph/
-    graph.go                    Build DAG from Expression.Variables() traversals
+    graph.go                    Build DAG from Expression.Variables() traversals;
+                                component-input expression deps propagate to internal actions
     topo.go                     Kahn's algorithm topological sort
 
   engine/
-    engine.go                   Execute nodes in topo order, dispatch to providers
+    engine.go                   Walk topo order, resolve compVars per component,
+                                dispatch via pkg/provider.Provider
+    evalattrs.go                Schema-driven HCL body → map[string]cty.Value with
+                                coercion to declared types and defaults from schema
+    validate.go                 Engine.ValidateGraph — structural schema check, no eval
     context.go                  Build nested cty.ObjectVal EvalContext from resolved outputs
 
+pkg/ (public SDK surface)
+  protocol/
+    envelope.go                 Request/Response/Error + JSON Lines framing helpers
+    methods.go                  describe / configure / execute / shutdown param/result types
+    schema.go                   ProviderSchema, ActionSchema, AttrSchema + Validate,
+                                CtyType (textual type → cty.Type via hcl/ext/typeexpr)
+    schema_hcl.go               Authoring-form parser: provider/config/action/attribute/output blocks
+    ctyjson.go                  cty.Value ↔ json.RawMessage helpers using go-cty/cty/json
+
   provider/
-    provider.go                 Provider interface
-    registry.go                 Provider registry by action type name
-    sql/sql.go                  PostgreSQL provider via pgx (query + RETURNING capture)
+    provider.go                 Provider interface (Schema/Configure/Execute/Close) + Registry
+    builtins.go                 Source-string → factory-function registry for "builtin/*"
+    postgres/                   builtin/postgres — raw SQL against pgx pool
+      schema.hcl                Embedded via //go:embed
+      provider.go, sql.go, cty.go, register.go
+    http/                       builtin/http — net/http-backed request action
+      schema.hcl                Embedded via //go:embed
+      provider.go, register.go
+    external/                   exec:<path> subprocess adapter
+      client.go                 JSON Lines transport with atomic id counter + roundtrip mutex
+      external.go               Spawn + lifecycle (describe handshake, stderr drain, shutdown)
+
+test/
+  integration/                  Separate go module with testcontainers-go Postgres
+    harness_test.go             Container bootstrap, goose migrations, echo-fixture build
+    scenario_test.go            Full-pipeline tests: basic, with-component, echo, http,
+                                combined (cross-provider + FK diamond)
+    http_fixture_test.go        Tiny ServeHTTP stub with per-path callbacks
+    testdata/
+      scenarios/                basic, with_component, echo, http, combined
+      components/merchant.hcl   Shared component used by with_component
+      echo/main.go              External echo provider (re-built by TestMain)
+    migrations/
+      00001_domain.sql          merchants, products
+      00002_reviews.sql         product_reviews (FK both parents — enables diamond test)
 ```
 
 ### Key Design Decisions
 
 **Two-pass HCL decode** — Structural decode at parse time with `hcl.Expression` for deferred fields. Expression evaluation at execution time with a populated `EvalContext`. This is the foundation that makes dependency graph construction and lazy evaluation work together.
 
-**Component-scoped namespacing** — A component's internal actions get node IDs like `component.merchant.base.action.sql.create`. At execution time, the engine remaps these to bare `action.sql.create` references within the component's scope, so component authors write `action.sql.create.id` without knowing their component's instance name.
+**Component-scoped namespacing** — A component's internal actions get node IDs like `component.merchant.base.action.sql.create`. At execution time, the engine remaps these to bare `action.sql.create` references within the component's scope, so component authors write `action.sql.create.id` without knowing their component's instance name. The `var.*` namespace visible inside a component is the component's resolved inputs (merged with its declared variable defaults), not the scenario's — scoping is enforced in both directions.
 
-**cty type system** — All values flowing through the system use the `cty` type system (from HCL). This provides type safety, null handling, and seamless integration with HCL expression evaluation. Provider outputs are converted from Go/database types to `cty.Value`.
+**cty type system as the universal type DSL** — All values flowing through the system use `cty` (from HCL). Provider schemas declare types in HCL's own type-expression syntax (`string`, `map(number)`, `object({id=number})`); on the wire these travel as compact strings (`"object({id=number})"`), parseable by any JSON-capable language without an HCL library. This is what makes the multi-language provider story work without forcing external authors to ship an HCL parser.
 
-**Provider interface** — Providers receive the raw `hcl.Body` and an `EvalContext`, giving them full control over how to decode their action-specific attributes. This means adding a new action type is a matter of implementing one interface method.
+**Schema-driven evaluation at the boundary** — The engine evaluates action bodies against each provider's declared schema, coerces values to their declared types, applies schema defaults, and passes providers a flat `map[string]cty.Value`. Providers never see `hcl.Body` or `hcl.EvalContext`. This localises all HCL-specific concerns to the engine, which is exactly what the JSON-over-stdio adapter needs to stay a pure byte-mover.
+
+**JSON Lines over stdio for external providers** — Not gRPC. Not custom binary. The smallest transport that supports multi-language providers, matching what LSP, DAP, and MCP all converged on. Borrowed from Terraform's plugin model (two-phase describe/configure handshake, per-provider schema advertisement) without the protobuf toolchain cost.
+
+**Plan-time schema validation** — `orchard plan` instantiates providers for schemas only and runs structural validation (unknown attrs, missing required fields, unrouted action types) against every action body before any `Configure` runs. Catches typos without opening database connections or making network calls.
+
+**Provider sources are scheme-prefixed strings** — `builtin/<name>` for compiled-in, `exec:<path>` for subprocess. The scheme switch lives in `cmd/registry.go` and stays open for future schemes (remote registries, OCI-distributed binaries) without touching the engine or protocol.
 
 ### Dependencies
 
 | Dependency | Purpose |
 |------------|---------|
-| `github.com/hashicorp/hcl/v2` | HCL parsing, expression evaluation, gohcl structural decode |
-| `github.com/zclconf/go-cty` | Type system for values flowing through the engine |
-| `github.com/jackc/pgx/v5` | PostgreSQL driver and connection pooling |
+| `github.com/hashicorp/hcl/v2` | HCL parsing, expression evaluation, `ext/typeexpr` for type-expression ↔ `cty.Type` |
+| `github.com/zclconf/go-cty` | Type system for values flowing through the engine; `cty/json` for wire encoding |
+| `github.com/jackc/pgx/v5` | PostgreSQL driver and connection pooling (used by `builtin/postgres`) |
 | `github.com/spf13/cobra` | CLI framework |
+| Go standard library (`net/http`, `os/exec`, `encoding/json`) | `builtin/http` and the external-provider subprocess adapter |
 
-No other runtime dependencies. The tool is a single static binary.
+No other runtime dependencies. The tool is a single static binary; external providers are separate binaries the user builds and ships alongside their scenarios.
+
+The integration test suite (`test/integration/`) is a separate Go module and pulls in additional dependencies (`testcontainers-go`, `pressly/goose`, `stretchr/testify`) so the production binary stays lean.
 
 ---
 

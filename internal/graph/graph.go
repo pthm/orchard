@@ -40,14 +40,28 @@ type Graph struct {
 func Build(ps *parser.ParsedScenario) (*Graph, error) {
 	nodes := make(map[NodeID]*Node)
 
+	addNode := func(n *Node) error {
+		if existing, dup := nodes[n.ID]; dup {
+			// Parser-level duplicate detection should catch this before
+			// we get here. Retained as a defence-in-depth guard so a
+			// future refactor cannot silently overwrite nodes.
+			return fmt.Errorf("graph: duplicate node ID %q (kind %v vs %v)",
+				n.ID, existing.Kind, n.Kind)
+		}
+		nodes[n.ID] = n
+		return nil
+	}
+
 	// Register scenario-level actions.
 	for _, action := range ps.Scenario.Actions {
 		id := NodeID(fmt.Sprintf("action.%s.%s", action.Type, action.Name))
-		nodes[id] = &Node{
+		if err := addNode(&Node{
 			ID:         id,
 			Kind:       ActionNode,
 			ActionType: action.Type,
 			Body:       action.Remain,
+		}); err != nil {
+			return nil, err
 		}
 	}
 
@@ -59,23 +73,27 @@ func Build(ps *parser.ParsedScenario) (*Graph, error) {
 		internalActionIDs := make([]NodeID, 0, len(comp.Def.Actions))
 		for _, action := range comp.Def.Actions {
 			actionID := NodeID(fmt.Sprintf("component.%s.action.%s.%s", key, action.Type, action.Name))
-			nodes[actionID] = &Node{
+			if err := addNode(&Node{
 				ID:           actionID,
 				Kind:         ActionNode,
 				ActionType:   action.Type,
 				Body:         action.Remain,
 				ComponentKey: key,
+			}); err != nil {
+				return nil, err
 			}
 			internalActionIDs = append(internalActionIDs, actionID)
 		}
 
 		// The component node itself depends on all its internal actions.
 		// It acts as a "join" node that exposes outputs.
-		nodes[compID] = &Node{
+		if err := addNode(&Node{
 			ID:           compID,
 			Kind:         ComponentNode,
 			Dependencies: internalActionIDs,
 			ComponentKey: key,
+		}); err != nil {
+			return nil, err
 		}
 	}
 

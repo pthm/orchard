@@ -118,7 +118,7 @@ func buildEchoProvider() error {
 func resetDB(t *testing.T) {
 	t.Helper()
 	_, err := testPool.Exec(context.Background(),
-		"TRUNCATE TABLE products, merchants RESTART IDENTITY CASCADE")
+		"TRUNCATE TABLE product_reviews, products, merchants RESTART IDENTITY CASCADE")
 	if err != nil {
 		t.Fatalf("truncating tables: %v", err)
 	}

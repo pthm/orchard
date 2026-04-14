@@ -11,8 +11,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"os"
+	"time"
 )
+
+var rng = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 type request struct {
 	ID     int64           `json:"id"`
@@ -79,6 +83,12 @@ func schema() map[string]any {
 				},
 				"outputs": map[string]any{"type": "any"},
 			},
+			"randomize": map[string]any{
+				"attrs": map[string]any{
+					"prefix": map[string]any{"type": "string", "required": true},
+				},
+				"outputs": map[string]any{"type": "any"},
+			},
 		},
 	}
 }
@@ -92,11 +102,22 @@ func handleExecute(w *os.File, req request) {
 		writeError(w, req.ID, "invalid_request", err.Error())
 		return
 	}
-	if params.Action != "echo" {
+	switch params.Action {
+	case "echo":
+		writeResult(w, req.ID, map[string]any{"outputs": params.Attrs})
+	case "randomize":
+		var prefix string
+		if err := json.Unmarshal(params.Attrs["prefix"], &prefix); err != nil {
+			writeError(w, req.ID, "invalid_request", "prefix: "+err.Error())
+			return
+		}
+		value := fmt.Sprintf("%s-%08x", prefix, rng.Uint32())
+		writeResult(w, req.ID, map[string]any{
+			"outputs": map[string]any{"value": value},
+		})
+	default:
 		writeError(w, req.ID, "unknown_action", "unknown action: "+params.Action)
-		return
 	}
-	writeResult(w, req.ID, map[string]any{"outputs": params.Attrs})
 }
 
 func writeResult(w *os.File, id int64, result any) {

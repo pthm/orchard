@@ -1,0 +1,112 @@
+// echo is a minimal Orchard external provider used in tests.
+// It implements one action, "echo", which returns its input
+// attrs as outputs. Speaks the protocol directly with the
+// standard library — no orchard imports — so it serves as a
+// live proof that the wire contract is language-independent.
+package main
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
+type request struct {
+	ID     int64           `json:"id"`
+	Method string          `json:"method"`
+	Params json.RawMessage `json:"params,omitempty"`
+}
+
+type response struct {
+	ID     int64           `json:"id"`
+	Result json.RawMessage `json:"result,omitempty"`
+	Error  *errorMessage   `json:"error,omitempty"`
+}
+
+type errorMessage struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+func main() {
+	r := bufio.NewReader(os.Stdin)
+	w := os.Stdout
+
+	for {
+		line, err := r.ReadBytes('\n')
+		if err != nil {
+			return
+		}
+		line = bytes.TrimRight(line, "\r\n")
+		if len(line) == 0 {
+			continue
+		}
+
+		var req request
+		if err := json.Unmarshal(line, &req); err != nil {
+			fmt.Fprintf(os.Stderr, "echo: bad request: %v\n", err)
+			return
+		}
+
+		switch req.Method {
+		case "describe":
+			writeResult(w, req.ID, map[string]any{"schema": schema()})
+		case "configure":
+			writeResult(w, req.ID, map[string]any{})
+		case "execute":
+			handleExecute(w, req)
+		case "shutdown":
+			writeResult(w, req.ID, map[string]any{})
+			return
+		default:
+			writeError(w, req.ID, "unknown_method", "unknown method: "+req.Method)
+		}
+	}
+}
+
+func schema() map[string]any {
+	return map[string]any{
+		"name":     "echo",
+		"version":  "1",
+		"protocol": "1",
+		"actions": map[string]any{
+			"echo": map[string]any{
+				"attrs": map[string]any{
+					"message": map[string]any{"type": "string", "required": true},
+				},
+				"outputs": map[string]any{"type": "any"},
+			},
+		},
+	}
+}
+
+func handleExecute(w *os.File, req request) {
+	var params struct {
+		Action string                     `json:"action"`
+		Attrs  map[string]json.RawMessage `json:"attrs"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		writeError(w, req.ID, "invalid_request", err.Error())
+		return
+	}
+	if params.Action != "echo" {
+		writeError(w, req.ID, "unknown_action", "unknown action: "+params.Action)
+		return
+	}
+	writeResult(w, req.ID, map[string]any{"outputs": params.Attrs})
+}
+
+func writeResult(w *os.File, id int64, result any) {
+	raw, _ := json.Marshal(result)
+	resp := response{ID: id, Result: raw}
+	b, _ := json.Marshal(resp)
+	fmt.Fprintf(w, "%s\n", b)
+}
+
+func writeError(w *os.File, id int64, code, message string) {
+	resp := response{ID: id, Error: &errorMessage{Code: code, Message: message}}
+	b, _ := json.Marshal(resp)
+	fmt.Fprintf(w, "%s\n", b)
+}

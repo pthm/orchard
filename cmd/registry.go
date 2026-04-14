@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -58,16 +57,14 @@ func instantiateProvider(source string) (provider.Provider, error) {
 	}
 }
 
-// buildRegistry registers every declared provider and runs Configure
-// with the scenario's evaluated provider configs. Used by orchard
-// run, which needs providers fully ready before executing actions.
-func buildRegistry(ctx context.Context, ps *parser.ParsedScenario) (*provider.Registry, error) {
-	reg, err := registerProviders(ps)
-	if err != nil {
-		return nil, err
-	}
-	if err := reg.Configure(ctx, ps.ProviderConfigs); err != nil {
-		return nil, err
-	}
-	return reg, nil
-}
+// buildRegistry is intentionally not provided as a single-call
+// helper anymore. Callers must register providers first (which for
+// exec: sources spawns subprocesses that need cleanup even on
+// failure), defer Close, and only then call Configure — otherwise
+// a failed Configure leaves running subprocesses or open pools
+// that nothing will clean up. See cmd/run.go and cmd/plan.go for
+// the correct order.
+//
+// The split is deliberate despite the small amount of caller
+// boilerplate — bundling register+configure+defer into one helper
+// encouraged the leak pattern in the first place.

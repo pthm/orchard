@@ -124,6 +124,7 @@ reserves a few attributes for engine-level behavior:
 | `depends_on` | `list(reference)` | Explicit dependency edges. Each entry is a reference to another action or component node. |
 | `timeout` | `string` | Go-style duration (e.g. `"30s"`, `"5m"`). Wraps the provider's `Execute` call. |
 | `retry` | block | Retry policy. See below. |
+| `lifecycle` | block | Teardown configuration. See below. |
 
 #### `retry` block
 
@@ -145,6 +146,38 @@ action "request" "flaky" {
 | `delay` | `string` | Initial delay between attempts, as a Go duration. |
 | `backoff` | `string` | `"constant"` or `"exponential"`. |
 | `max_delay` | `string` | Cap for exponential backoff. |
+
+#### `lifecycle` block
+
+Declares a teardown operation for the action. Read by `orchard teardown <record>`
+when walking the graph in reverse.
+
+```hcl
+action "sql" "create_merchant" {
+  query = "INSERT INTO merchants (name) VALUES ('${var.name}') RETURNING id, name"
+
+  lifecycle {
+    teardown {
+      query = "DELETE FROM merchants WHERE id = ${self.id}"
+    }
+  }
+}
+```
+
+The `teardown` block's body uses the **same schema as the outer action's
+provider**. A sql action's teardown declares `query`; an http action's declares
+`method` + `url`; an exec action's declares `command` + `args`.
+
+Inside the `teardown` body, three reference namespaces are in scope:
+
+- `var.<name>` — scenario variables (from the record).
+- `self.<field>` — this action's own recorded outputs. Use it to target the
+  resources this action created, without restating the node name.
+- `action.<type>.<name>.<field>` — any other action's recorded outputs, for
+  teardowns that reference upstream state.
+
+See [lifecycle](../../concepts/lifecycle/) for authoring guidance and the
+[`self` namespace](../expressions/#self-teardown-only) under expressions.
 
 ### `output`
 

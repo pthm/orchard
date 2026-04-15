@@ -539,96 +539,72 @@ Lifecycle is a first-class concern, not an afterthought. Once Orchard can create
 
 ### Run Records
 
-Every scenario execution produces a **run record** containing:
+Every `orchard run` writes a JSON record to the working directory (override with `--record-dir`, skip with `--no-record`). Filename: `orchard_<scenario>_run_<id>.json`, where the id is a sortable `YYYYMMDDTHHMMSSZ_<8hex>` string. The record captures:
 
-- Run ID (unique identifier)
-- Scenario name and version
-- Input variables
-- Timestamps (start, end)
-- Status (success, failure, partial)
-- Actions executed and their outputs
-- Resource registry (what was created)
-- Registered cleanup operations
+- A format version so readers can reject records they don't understand.
+- Run id, scenario name and absolute path, start/finish timestamps.
+- Overall status (`succeeded` / `failed`) and top-level error, if any.
+- The scenario's resolved variables (cty-encoded via `pkg/protocol/ctyjson`).
+- Per-node entries: id, kind (`action` / `component`), status (`succeeded` / `failed`), start/finish timestamps, outputs or error.
+- Scenario-level outputs.
 
-This makes teardown concrete and inspectable: instead of "undo the scenario type," you teardown a specific run instance.
+Writes are atomic (temp + rename). Records are produced on both success and failure so partial runs stay inspectable.
 
-### Teardown Modes
+The file-on-disk shape is deliberately simpler than Terraform's state: no remote backends, no locking, no multi-version migration. One file per run, produced where the user ran the command. A records-based teardown can grow sophistication later when real use demands it.
 
-**Immediate teardown** — for tests and ephemeral setups:
+### Teardown
 
-```bash
-orchard run fraud_case --teardown
-```
+`orchard teardown <record-file>` reloads the scenario at the record's absolute path, re-configures providers from the current scenario file, and walks the dependency graph in **reverse** topological order. For each action whose original run succeeded AND that declares a `lifecycle { teardown { } }` block, the engine evaluates the teardown body against an eval context composed of:
 
-Execute the scenario, then automatically clean up everything it created.
+- `var.<name>` — the scenario variables from the record.
+- `self.<field>` — the teardown-only namespace pointing at this action's own recorded outputs. Authors write `DELETE FROM t WHERE id = ${self.id}` without restating the node name.
+- `action.<type>.<name>.<field>` — any other action's recorded outputs, so a downstream teardown can reference an upstream's natural keys if needed.
 
-**Deferred teardown** — for dev, QA, and demos:
+The teardown body uses the **same schema as the outer action's provider**. A sql action's teardown declares `query`; an http action's declares `method` + `url`; an exec action's declares `command` + `args`. No teardown-specific provider surface — the provider's existing `Execute` is what runs.
 
-```bash
-orchard run support_case        # returns run_id: run_01H...
-# ... use the environment ...
-orchard teardown run_01H...     # clean up when done
-```
-
-**Convenience shortcuts:**
-
-```bash
-orchard teardown merchant_with_chargeback --latest
-orchard teardown merchant_with_chargeback --all
-```
-
-### Resource Ownership
-
-Actions register the resources they create into the run record. For example, a `db.insert` action registers the table and primary key of the inserted row. An `http` action that creates an API resource registers its URL and deletion endpoint.
-
-Resources are classified by cleanup capability:
-
-- **Managed** — Orchard knows exactly how to clean up (e.g., `db.insert` → `DELETE FROM table WHERE id = ?`)
-- **Explicit cleanup** — user provides teardown logic via a `lifecycle` block
-- **Unmanaged** — no automatic cleanup (e.g., sending an email, enqueuing a message)
-
-### Lifecycle Blocks
-
-Actions can declare explicit teardown logic:
+Example:
 
 ```hcl
 action "sql" "create_merchant" {
-  query = <<-SQL
-    INSERT INTO merchants (name) VALUES ('${var.name}') RETURNING id
-  SQL
+  query = "INSERT INTO merchants (name) VALUES ('${var.name}') RETURNING id"
 
   lifecycle {
-    teardown_query = <<-SQL
-      DELETE FROM merchants WHERE id = ${action.sql.create_merchant.id}
-    SQL
-  }
-}
-```
-
-### Failure Behavior
-
-Scenarios can declare lifecycle policies:
-
-```hcl
-scenario "fraud_case" {
-  lifecycle {
-    on_failure = "rollback"    # undo partial state on failure
-    on_success = "retain"      # keep state until explicit teardown
+    teardown {
+      query = "DELETE FROM merchants WHERE id = ${self.id}"
+    }
   }
 }
 ```
 
 ### Reverse-Order Cleanup
 
-Teardown executes in reverse dependency order. If a run created org → user → transaction → alert, teardown removes alert → transaction → user → org. The dependency graph that drives execution also drives cleanup.
+Teardown walks the graph in reverse of the execute order. For `merchant → product` (FK in products.merchant_id), that means the product delete runs first and the merchant delete second — otherwise the FK constraint fires on the merchant delete. The dependency graph that drives execution also drives cleanup.
+
+### Best-Effort Semantics
+
+Teardown is best-effort: a per-action failure is surfaced through the reporter but doesn't abort the walk, and the joined set of errors is returned at the end. Rationale: manual cleanup typically wants "get as far as you can, tell me what's still there" rather than "stop at the first unexpected row". A fail-fast flag can grow later if automation demands it.
+
+### Resource Ownership (future)
+
+Today teardown depends on the scenario author writing a `lifecycle { teardown { } }` for every action they want cleaned up. A future pass will let providers advertise a **managed** teardown strategy — e.g. `db.insert` auto-generates the matching `DELETE`, closing the loop so plain CRUD actions don't need authored teardowns. That belongs with Milestone 4 (Schema-Aware Database Provider), where the typed DB layer already carries the primary-key metadata needed to generate the inverse.
+
+Until then, resources are one of:
+- **Explicit** — cleanup declared via `lifecycle { teardown { } }`.
+- **Unmanaged** — no automatic cleanup (sending an email, enqueuing a message, HTTP calls without an idempotent delete endpoint).
+
+### Failure Behavior (future)
+
+Scenario-level lifecycle policies (`on_failure = "rollback"`, `on_success = "retain"`) are a planned addition. Today, a failed run still writes a record describing what succeeded; a user can teardown that partial record to unwind.
 
 ### Isolation Strategies
 
 The cleanest teardown is often destroying an isolation boundary rather than deleting individual resources:
 
-- **Dedicated schema per run** — create `orchard_run_123` schema, teardown drops it
-- **Tenant/namespace per run** — tag everything with a run ID, teardown removes the namespace
-- **Individual resource cleanup** — delete rows/files/resources one by one (the fallback)
+- **Dedicated schema per run** — create `orchard_run_123` schema, teardown drops it.
+- **Tenant/namespace per run** — tag everything with a run ID, teardown removes the namespace.
+- **Individual resource cleanup** — delete rows/files/resources one by one (the current fallback; appropriate when lifecycle blocks give you precise control).
+
+These are scenario-author patterns, not engine features — pass a run id through `var.run_id` and let `lifecycle { teardown { } }` blocks drop the schema / delete by tag.
 
 ---
 
@@ -694,8 +670,8 @@ orchard list
 orchard docs builtin/postgres
 orchard docs exec:./providers/stripe
 
-# Teardown a specific run
-orchard teardown <run-id>
+# Teardown a specific run by pointing at its record file
+orchard teardown orchard_scenario_run_20260415T000000Z_abc.json
 
 # Pull database schema for validation
 orchard schema pull
@@ -803,6 +779,9 @@ These are intentional tradeoffs or deferred items that surfaced during code revi
 - **Builtin providers register globally at `init()`.** Blank-importing `pkg/provider/postgres` et al from `cmd/run.go` triggers a package-level `init()` that writes to the global builtin factory table. Two consequences: tests can't swap builtins easily, and it's not possible today to run two orchard processes in the same binary with different builtin sets. The plan is to shift to per-registry registration when the plugin system matures; everything keeps working in the meantime because the binary only has one registry per process.
 - **Dynamic-output actions (`outputs { type = any }`) skip runtime output validation.** There's nothing to coerce against, by design. `postgres.sql` is the main example today because `RETURNING` shapes are open-ended. Providers should declare concrete output types where they can — the runtime check gets stricter for free when they do.
 - **HCL heredocs interpolate `${...}` by default.** Schema authors embedding literal `${...}` in `description`, `notes`, or example `code` fields must escape them as `$${...}`. A future iteration may teach the decoder to read raw heredoc source bytes so authors can write `${...}` literally.
+- **Teardown re-evaluates provider configs from the current scenario, not the record.** `orchard teardown` reloads the scenario file and runs `Configure` against whatever's there today. If the DSN / API key / base URL changed between run and teardown, the teardown could hit a different environment than the one the record describes. Mitigation: record provider configs in a future format bump, or require an explicit `--var` pass-through when configs have drifted.
+- **Partial-run teardown is best-effort, not transactional.** A teardown that fails mid-walk leaves earlier teardowns committed. The engine reports the joined error; there's no automatic rollback of already-run teardowns. For scenarios where partial teardown is unacceptable, author teardowns that are idempotent or use an isolation-boundary pattern (schema-per-run, tag-based deletes).
+- **Records don't capture provider configs or action attribute values.** Per-node outputs are recorded; the action's input attrs and the provider's Configure block aren't. Teardown uses `self.<output>` / `var.*`, so this is usually fine — but a teardown expression that needs the original action's input can't read it from the record.
 
 ---
 
@@ -924,18 +903,29 @@ Make cleanup a first-class operation so that scenarios can be torn down cleanly,
 
 | Feature | Status |
 |---------|--------|
-| Run ID generation and run record persistence | Not started |
-| Resource registry (track what each action creates) | Not started |
-| `orchard teardown <run-id>` — destroy a specific run's resources | Not started |
-| Reverse-order cleanup based on dependency graph | Not started |
-| Managed cleanup for `db.insert` / `db.update` actions | Not started |
-| `lifecycle` blocks on actions for explicit teardown logic | Not started |
+| Run ID generation (`YYYYMMDDTHHMMSSZ_<8hex>`, sortable) | Done |
+| JSON run record written to cwd by default (`--record-dir`, `--no-record`) | Done |
+| Atomic on-disk write (temp + rename) | Done |
+| Per-node output capture via extended Reporter hook | Done |
+| `lifecycle { teardown { } }` blocks on actions (same schema as the outer action's provider) | Done |
+| `self.*` reference namespace inside teardown bodies | Done |
+| `orchard teardown <record-file>` command | Done |
+| Reverse-order cleanup driven by the dependency graph | Done |
+| Best-effort teardown with joined error reporting | Done |
+| End-to-end integration test over Postgres (FK-bound merchant+product) | Done |
+| Managed cleanup for `db.insert` / `db.update` actions (depends on M4) | Not started |
 | `lifecycle` blocks on scenarios (`on_failure`, `on_success` policies) | Not started |
 | Rollback on partial failure | Not started |
 | `orchard list runs` — list past runs | Not started |
 | `orchard inspect <run-id>` — show run details | Not started |
 | `orchard teardown <scenario> --latest` convenience | Not started |
 | Run metadata tagging on created resources | Not started |
+| `orchard run --teardown` one-shot create-then-teardown | Not started |
+| Record format migrations / version negotiation | Not started |
+
+**Done summary.** The core records + teardown loop is functional: every `orchard run` writes a JSON record with per-node outputs and resolved variables; `orchard teardown <record-file>` replays the scenario in reverse topological order and evaluates each action's `lifecycle { teardown { } }` body against a `var.* / self.* / action.*` eval context. Teardown uses the provider's existing `Execute` — no new provider surface — so any action type automatically supports teardown once its author writes a lifecycle block.
+
+**Next up.** The obvious gap is "the scenario author has to write every teardown expression by hand". Milestone 4's schema-aware DB provider closes that for vanilla CRUD: `db.insert` knows its table + primary key, so its teardown is auto-generable (`DELETE FROM t WHERE pk = ${self.pk}`). After that, scenario-level `lifecycle { on_failure / on_success }` policies and `orchard list runs` / `orchard inspect` get the record file format far enough for workflows beyond a single invocation.
 
 ### Milestone 6: Robustness and Ergonomics
 
@@ -996,7 +986,8 @@ cmd/
   plan.go                       orchard plan — parse → graph → schema-validate, print DAG
   list.go                       orchard list — scan for scenario files
   docs.go                       orchard docs — resolve provider source, render schema to markdown
-  registry.go                   registerProviders + buildRegistry helpers (shared by run/plan/docs)
+  teardown.go                   orchard teardown — load record, reload scenario, invoke engine.Teardown
+  registry.go                   registerProviders + buildRegistry helpers (shared by run/plan/docs/teardown)
 
 internal/
   parser/
@@ -1030,12 +1021,28 @@ internal/
                                 fields come from its declared output expressions.
     context.go                  Build nested cty.ObjectVal EvalContext from resolved
                                 outputs; populates Functions from parser.StdFunctions
+    teardown.go                 Engine.Teardown — walk graph in reverse, evaluate
+                                each action's lifecycle.teardown body against a
+                                record-sourced eval context (var/self/action),
+                                dispatch through the provider's Execute.
+                                Best-effort: per-action failures are joined, not
+                                fatal.
 
   docs/
     docs.go                     Renders a protocol.ProviderSchema to Markdown using a
                                 fixed layout (no templates). Drives `orchard docs`.
     testdata/                   Golden fixture + expected Markdown; regenerate with
                                 `go test ./internal/docs -update`.
+
+  record/
+    record.go                   Record / Node / Scenario schemas, EncodeCty /
+                                DecodeCty / IndexOutputs / Load. The record
+                                format's single source of truth.
+    id.go                       NewID (sortable YYYYMMDDTHHMMSSZ_<8hex>),
+                                Filename (scenario-name sanitisation).
+    reporter.go                 Reporter wraps an engine.Reporter and assembles
+                                a Record from engine events; writes via Writer
+                                on RunCompleted.
 
   cli/                          CLI-only helpers, kept out of engine/
     render/                     Lipgloss semantic styles (Success/Error/Muted/Label/
@@ -1091,9 +1098,14 @@ test/
     scenario_test.go            Full-pipeline tests: basic, with-component, echo, http,
                                 combined (cross-provider + FK diamond)
     http_fixture_test.go        Tiny ServeHTTP stub with per-path callbacks
+    teardown_test.go            End-to-end records + teardown round-trip:
+                                seed merchant+product with FK, write record,
+                                load record, run engine.Teardown, assert rows
+                                are gone (reverse order honours the FK).
     testdata/
-      scenarios/                basic, with_component, echo, http, combined. External
-                                provider references use scenario-relative paths
+      scenarios/                basic, with_component, echo, http, combined,
+                                teardown. External provider references use
+                                scenario-relative paths
                                 (`exec:../echo/echo-provider`).
       components/merchant.hcl   Shared component used by with_component
       echo/main.go              External echo provider (re-built by TestMain)
@@ -1127,6 +1139,10 @@ test/
 **Schema-driven provider documentation** — `orchard docs <source>` renders a provider's reference page from its `ProviderSchema` alone. Narrative content (provider intro, notes, worked examples) lives inside the schema — `description`, `notes`, and `example { }` carry markdown/HCL — so the same generator works for any provider, builtin or external, without a per-provider template. The docs site mounts the generated output over its tracked content tree via Hugo module mounts; schemas are the single source of truth, and schema edits regenerate the reference page automatically.
 
 **One shared HCL function surface** — `parser.StdFunctions` is the single source of truth for the cty stdlib subset Orchard exposes (strings, collections, encoding, math, regex, time, sets). Every EvalContext — parser-side (variable defaults, provider configs), engine runtime, and plan-time typed contexts — pulls from the same function map, so `jsonencode`, `format`, `upper` etc. behave identically regardless of where the expression sits. Adding a function is additive; existing scenarios stay valid.
+
+**Records + teardown are stateless at the engine boundary** — `engine.Teardown` takes a scenario, a graph, and pre-decoded `vars map[string]cty.Value` + `outputs map[string]map[string]cty.Value`. The record file format lives in `internal/record`; the engine doesn't import it. That avoids a cycle (record already imports engine for its Reporter), and — more usefully — keeps the teardown pass testable without producing a file on disk. Higher-level callers (the CLI subcommand, the integration test) compose the pieces.
+
+**Teardown reuses the provider's Execute** — a `lifecycle { teardown { } }` body is evaluated against the outer action's provider schema and dispatched through the same `Provider.Execute`. No teardown-specific surface: a sql action's teardown is "another sql action"; an http action's is "another http request". This makes teardown feasible for any existing provider (builtin or external) without an interface change, and it keeps the mental model simple — teardown is just "execute these actions in reverse".
 
 ### Dependencies
 

@@ -17,3 +17,5 @@ follows naturally.
   and how Orchard derives the execution order.
 - **[Plan vs run](plan-vs-run/)** — the two execution modes, why they exist, and what
   they guarantee.
+- **[Lifecycle and teardown](lifecycle/)** — run records, `lifecycle { teardown { } }`
+  blocks, and `orchard teardown`.

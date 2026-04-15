@@ -10,8 +10,14 @@ type ScenarioFile struct {
 }
 
 // ScenarioBlock represents: scenario "name" { ... }
+//
+// Description and Tags are optional metadata surfaced by `orchard
+// list` and reserved for future search / categorisation tooling. They
+// have no effect on execution and are ignored by the engine.
 type ScenarioBlock struct {
 	Name              string                  `hcl:"name,label"`
+	Description       string                  `hcl:"description,optional"`
+	Tags              []string                `hcl:"tags,optional"`
 	RequiredProviders *RequiredProvidersBlock `hcl:"required_providers,block"`
 	Providers         []*ProviderConfigBlock  `hcl:"provider,block"`
 	Variables         []*VariableBlock        `hcl:"variable,block"`
@@ -50,11 +56,16 @@ type ComponentFile struct {
 }
 
 // ComponentDefBlock defines a reusable component: component "name" { ... }
+//
+// Description and Tags mirror the scenario-level fields: free-form
+// metadata surfaced by tooling, ignored by the engine.
 type ComponentDefBlock struct {
-	Name      string           `hcl:"name,label"`
-	Variables []*VariableBlock `hcl:"variable,block"`
-	Actions   []*ActionBlock   `hcl:"action,block"`
-	Outputs   []*OutputBlock   `hcl:"output,block"`
+	Name        string           `hcl:"name,label"`
+	Description string           `hcl:"description,optional"`
+	Tags        []string         `hcl:"tags,optional"`
+	Variables   []*VariableBlock `hcl:"variable,block"`
+	Actions     []*ActionBlock   `hcl:"action,block"`
+	Outputs     []*OutputBlock   `hcl:"output,block"`
 }
 
 // ComponentRef is a component instance within a scenario.

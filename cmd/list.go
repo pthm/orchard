@@ -36,6 +36,12 @@ func newListCmd() *cobra.Command {
 			fmt.Println("Available scenarios:")
 			for _, s := range scenarios {
 				fmt.Printf("  %s  (%s)\n", s.name, s.path)
+				if s.description != "" {
+					fmt.Printf("      %s\n", s.description)
+				}
+				if len(s.tags) > 0 {
+					fmt.Printf("      tags: %s\n", strings.Join(s.tags, ", "))
+				}
 			}
 			return nil
 		},
@@ -43,8 +49,10 @@ func newListCmd() *cobra.Command {
 }
 
 type scenarioInfo struct {
-	name string
-	path string
+	name        string
+	path        string
+	description string
+	tags        []string
 }
 
 func findScenarios(dir string, warn io.Writer) ([]scenarioInfo, error) {
@@ -78,10 +86,38 @@ func findScenarios(dir string, warn io.Writer) ([]scenarioInfo, error) {
 		}
 
 		for _, block := range content.Blocks {
-			scenarios = append(scenarios, scenarioInfo{
+			info := scenarioInfo{
 				name: block.Labels[0],
 				path: path,
+			}
+			// Pull description/tags out of the scenario body without
+			// decoding anything heavier. Failures here are non-fatal
+			// — metadata is best-effort in a listing context.
+			attrs, _, ad := block.Body.PartialContent(&hcl.BodySchema{
+				Attributes: []hcl.AttributeSchema{
+					{Name: "description"},
+					{Name: "tags"},
+				},
 			})
+			if !ad.HasErrors() {
+				if a, ok := attrs.Attributes["description"]; ok {
+					if v, vd := a.Expr.Value(nil); !vd.HasErrors() && v.Type().FriendlyName() == "string" {
+						info.description = v.AsString()
+					}
+				}
+				if a, ok := attrs.Attributes["tags"]; ok {
+					if v, vd := a.Expr.Value(nil); !vd.HasErrors() {
+						it := v.ElementIterator()
+						for it.Next() {
+							_, el := it.Element()
+							if el.Type().FriendlyName() == "string" {
+								info.tags = append(info.tags, el.AsString())
+							}
+						}
+					}
+				}
+			}
+			scenarios = append(scenarios, info)
 		}
 		return nil
 	})

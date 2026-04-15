@@ -17,6 +17,7 @@ package record
 
 import (
 	"encoding/json"
+	"os"
 	"time"
 
 	"github.com/zclconf/go-cty/cty"
@@ -94,4 +95,58 @@ func EncodeCty(values map[string]cty.Value) (map[string]json.RawMessage, error) 
 		out[k] = raw
 	}
 	return out, nil
+}
+
+// DecodeCty is the inverse of EncodeCty: turn a map of JSON-encoded
+// cty values back into cty values. Types are inferred from the JSON
+// structure (DynamicPseudoType) since the record doesn't carry a
+// type hint per field — numbers become numbers, lists become tuples,
+// objects become objects. Close enough for teardown expressions that
+// typically read scalars and occasionally traverse an object.
+func DecodeCty(raw map[string]json.RawMessage) (map[string]cty.Value, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]cty.Value, len(raw))
+	for k, v := range raw {
+		val, err := protocol.UnmarshalValue(v, cty.DynamicPseudoType)
+		if err != nil {
+			return nil, err
+		}
+		out[k] = val
+	}
+	return out, nil
+}
+
+// IndexOutputs decodes each succeeded node's outputs into a map
+// keyed by full node ID ("action.sql.create_merchant" etc.). Failed
+// or output-less nodes are omitted — callers treat their absence as
+// "nothing to tear down". Designed as the canonical way to hand a
+// record off to engine.Teardown.
+func IndexOutputs(r *Record) (map[string]map[string]cty.Value, error) {
+	out := make(map[string]map[string]cty.Value, len(r.Nodes))
+	for _, n := range r.Nodes {
+		if n.Status != StatusSucceeded || len(n.Outputs) == 0 {
+			continue
+		}
+		m, err := DecodeCty(n.Outputs)
+		if err != nil {
+			return nil, err
+		}
+		out[n.ID] = m
+	}
+	return out, nil
+}
+
+// Load reads and parses a record file from disk.
+func Load(path string) (*Record, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var rec Record
+	if err := json.Unmarshal(raw, &rec); err != nil {
+		return nil, err
+	}
+	return &rec, nil
 }

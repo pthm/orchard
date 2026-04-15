@@ -147,6 +147,42 @@ scenario "s" {
 	}
 }
 
+// TestValidateRefsScenarioTypoOnComponentOutput: a scenario that
+// references a component output name that doesn't exist must fail
+// at plan time. Prior to typed component output resolution the
+// scenario-level context modelled component instances as
+// DynamicPseudoType, so any attribute access (including typos) was
+// permitted and the error only surfaced at execute time.
+func TestValidateRefsScenarioTypoOnComponentOutput(t *testing.T) {
+	comp := `
+component "c" {
+  action "fetch" "inner" {
+    url = "/x"
+  }
+  output "id" { value = action.fetch.inner.status }
+}`
+	scenario := `
+scenario "s" {
+  required_providers {
+    tp = { source = "builtin/tp" }
+  }
+  component "c" "one" {
+    source = "./comp.hcl"
+  }
+  output "wrong" { value = component.c.one.idd }
+}`
+	err := validateComponentRefs(t, comp, scenario, map[string]provider.Provider{"tp": typedOutputProvider{}})
+	if err == nil {
+		t.Fatal("expected typo on component output to fail plan")
+	}
+	if !strings.Contains(err.Error(), "idd") {
+		t.Errorf("error should name the typo: %v", err)
+	}
+	if !strings.Contains(err.Error(), `output "wrong"`) {
+		t.Errorf("error should locate the scenario output: %v", err)
+	}
+}
+
 // TestValidateRefsComponentUndeclaredVar: referencing var.<unknown>
 // from inside a component output surfaces as an unknown-variable
 // error. The var namespace is scoped to the component's own

@@ -2,6 +2,11 @@
 
 **Define reproducible application state as code.**
 
+> This document is the project's long-form design brief and living roadmap. For
+> a quick intro, a working scenario, and install instructions, see
+> [`README.md`](README.md). For end-user documentation, see
+> [orchard.pthm.dev](https://orchard.pthm.dev/).
+
 Orchard is a CLI tool that lets teams define, compose, and execute *scenarios* — declarative descriptions of complex application state — using HCL. Instead of writing ad-hoc seeding scripts, teams describe what state they want and Orchard builds it: inserting database rows, calling APIs, running scripts, and wiring outputs between steps automatically.
 
 The tool sits at the intersection of fixture libraries, test scenario runners, lightweight workflow engines, and environment bootstrap tools. It is not just a CSV importer or a SQL loader. It is a **state orchestration tool** that models the reality that meaningful application state is not just rows in tables — it is workflows, side effects, histories, and relationships across services.
@@ -226,7 +231,7 @@ Providers extend Orchard's action vocabulary. A provider declares a schema of th
 
 Two kinds of providers share one interface:
 
-- **Builtin providers** are compiled into the `orchard` binary and registered at startup. Today's builtins are `postgres` (raw SQL) and `http` (HTTP requests).
+- **Builtin providers** are compiled into the `orchard` binary and registered at startup. Today's builtins are `postgres` (raw SQL), `http` (HTTP requests), and `exec` (shell commands).
 - **External providers** are separate subprocesses that Orchard spawns and talks to over JSON Lines on stdio. Any language that can read and write JSON is a valid host — a Python, Rust, or Node provider is roughly the same shape as the example Go one.
 
 Both kinds implement the same Go interface:
@@ -286,7 +291,7 @@ Scenarios declare their providers by source string:
 | Scheme | Example | Resolution |
 |--------|---------|------------|
 | `builtin/<name>` | `builtin/postgres` | Factory registered at binary startup. |
-| `exec:<path>` | `exec:./providers/stripe` | Path to a subprocess binary, cwd-relative or absolute. |
+| `exec:<path>` | `exec:./providers/stripe` | Path to a subprocess binary. Relative paths are resolved against the scenario file's directory (absolutized at parse time); absolute paths pass through unchanged. |
 
 Additional schemes (remote registries, OCI-distributed binaries) are possible future extensions; the source string is parsed through a scheme switch that stays open for them.
 
@@ -336,7 +341,11 @@ External providers stay plan-safe via a `<binary> schema` subcommand: plan invok
 
 Runtime complements this with **output contract enforcement**: after `Provider.Execute` returns, the engine coerces the output map against the action's declared output type. Unknown attributes are rejected, declared attributes are converted to their declared cty type, and missing declared attributes materialise as typed nulls so downstream expressions see the shape plan-time typing promised. Actions declared with `outputs { type = any }` remain opaque, as they have been.
 
-Coverage caveats: actions with `output { type = any }` (today: `postgres.sql`) are typed as `cty.DynamicPseudoType`, which HCL allows any attribute access against — typos there remain runtime errors. Component outputs are type-propagated from the component's internal action schemas, but component output *types* still surface at scenario level as `cty.DynamicPseudoType`; sharpening that is future work.
+**Output type model**: `ActionSchema.Outputs` is constrained at schema load to an object type or `any`. Runtime always produces an object (fields keyed by attribute name), so a schema that declared `type = list(string)` or `type = number` used to typecheck at plan time and fail at execute. `ProviderSchema.Validate` rejects these declarations where authors can act on them.
+
+**Component output typing**: scenario-level `component.<type>.<name>` references are now type-checked at plan time. The engine evaluates each declared component output expression against the component's own typed scope to derive a concrete `cty.Object`; `component.c.one.idd` fails validation against that object instead of silently passing as `cty.DynamicPseudoType`.
+
+Coverage caveats: actions with `output { type = any }` (today: `postgres.sql`) are typed as `cty.DynamicPseudoType`, which HCL allows any attribute access against — typos there remain runtime errors.
 
 ### Writing a Provider
 
@@ -681,6 +690,10 @@ orchard plan merchant_with_chargeback
 # List available scenarios
 orchard list
 
+# Render provider reference docs from a provider's schema
+orchard docs builtin/postgres
+orchard docs exec:./providers/stripe
+
 # Teardown a specific run
 orchard teardown <run-id>
 
@@ -788,8 +801,8 @@ These are intentional tradeoffs or deferred items that surfaced during code revi
 
 - **`exec` provider inherits host env and cwd.** Commands run by `builtin/exec` inherit the full environment and working directory of the `orchard` process. This is great for ergonomics (users don't have to re-plumb `PATH` into every scenario) but makes runs host-sensitive: a scenario that relies on `$PGHOST` or the current shell's `GOPATH` behaves differently on CI than on a laptop. A future `inherit_env = false` config attribute (with an optional explicit `env = {...}` and `cwd = "..."`) is the planned fix; for now, scenario authors should prefer passing inputs explicitly through action attributes.
 - **Builtin providers register globally at `init()`.** Blank-importing `pkg/provider/postgres` et al from `cmd/run.go` triggers a package-level `init()` that writes to the global builtin factory table. Two consequences: tests can't swap builtins easily, and it's not possible today to run two orchard processes in the same binary with different builtin sets. The plan is to shift to per-registry registration when the plugin system matures; everything keeps working in the meantime because the binary only has one registry per process.
-- **Component output types are still dynamic at scenario scope.** Plan-time type checking threads types through a component's *internal* action outputs for its own output expressions, but at the scenario scope (`component.foo.bar.x`) the type remains `cty.DynamicPseudoType`. Tightening this requires recursively typing each component's output expressions; out of scope for the current milestone.
 - **Dynamic-output actions (`outputs { type = any }`) skip runtime output validation.** There's nothing to coerce against, by design. `postgres.sql` is the main example today because `RETURNING` shapes are open-ended. Providers should declare concrete output types where they can — the runtime check gets stricter for free when they do.
+- **HCL heredocs interpolate `${...}` by default.** Schema authors embedding literal `${...}` in `description`, `notes`, or example `code` fields must escape them as `$${...}`. A future iteration may teach the decoder to read raw heredoc source bytes so authors can write `${...}` literally.
 
 ---
 
@@ -934,12 +947,17 @@ Harden the tool for real-world use and improve the authoring experience.
 | `orchard plan` as a DAG-shaped dependency tree | Done |
 | Engine-Reporter split so CLI presentation lives outside the engine | Done |
 | `--no-color` / `NO_COLOR` respect | Done |
+| HCL stdlib function library (`upper`, `jsonencode`, `format`, `concat`, `regex`, ...) | Done |
+| Scenario-portable provider paths (`exec:` resolved against scenario file) | Done |
+| Documentation site (Hugo + hugo-book) with concepts/providers/guides/extending/reference | Done |
+| `orchard docs <source>` — schema-driven provider reference generator | Done |
+| Schema authoring extensions (`description`, `notes`, `example { }` on provider and action) | Done |
+| `justfile` task runner (test, docs, docs-watch, docs-provider) | Done |
 | Scenario and component `description` and `tags` metadata | Not started |
 | Improved error messages with HCL source locations | Partial — parser/plan errors carry HCL coordinates; runtime errors don't yet |
 | Dry-run mode (plan with expression evaluation but no execution) | Not started |
 | Execution logging with structured output | Not started |
 | Multiple scenarios per file support | Not started |
-| HCL function library (`sqlstring`, `uuid`, `timestamp`, etc.) | Not started |
 | Parallel execution of independent nodes | Not started |
 | Transaction wrapping for atomic scenario execution | Not started |
 | Configuration file (`.orchard/config.hcl` or similar) | Not started |
@@ -969,19 +987,27 @@ Harden the tool for real-world use and improve the authoring experience.
 
 ```
 main.go                         Entry point
+README.md                       Repo intro, quick example, install, dev setup
+justfile                        Task runner (test, docs, docs-generate, docs-watch, docs-provider)
+PROJECT.md                      This document
 cmd/
   root.go                       Cobra root, global --var flag
   run.go                        orchard run — parse → graph → validate → configure → execute
   plan.go                       orchard plan — parse → graph → schema-validate, print DAG
   list.go                       orchard list — scan for scenario files
-  registry.go                   registerProviders + buildRegistry helpers (shared by run/plan)
+  docs.go                       orchard docs — resolve provider source, render schema to markdown
+  registry.go                   registerProviders + buildRegistry helpers (shared by run/plan/docs)
 
 internal/
   parser/
     schema.go                   HCL schema structs: Scenario, Component, RequiredProviders,
                                 ProviderConfig, Variable, Action, Output
     parser.go                   LoadScenario: parse, decode, extract required_providers,
-                                evaluate provider configs, resolve components, merge vars
+                                evaluate provider configs, resolve components, merge vars,
+                                absolutize exec: provider paths against scenario dir
+    functions.go                StdFunctions — the HCL stdlib subset Orchard exposes in
+                                every eval context (strings, collections, encoding, math,
+                                regex, time, sets)
 
   graph/
     graph.go                    Build DAG from Expression.Variables() traversals;
@@ -999,8 +1025,17 @@ internal/
     validate.go                 Engine.ValidateGraph — structural schema check, no eval
     validate_refs.go            Engine.ValidateReferences — typed eval context,
                                 walks scenario expressions and catches reference typos
-                                + type mismatches against provider output schemas
-    context.go                  Build nested cty.ObjectVal EvalContext from resolved outputs
+                                + type mismatches. Components are type-propagated:
+                                each instance exposes a concrete cty.Object whose
+                                fields come from its declared output expressions.
+    context.go                  Build nested cty.ObjectVal EvalContext from resolved
+                                outputs; populates Functions from parser.StdFunctions
+
+  docs/
+    docs.go                     Renders a protocol.ProviderSchema to Markdown using a
+                                fixed layout (no templates). Drives `orchard docs`.
+    testdata/                   Golden fixture + expected Markdown; regenerate with
+                                `go test ./internal/docs -update`.
 
   cli/                          CLI-only helpers, kept out of engine/
     render/                     Lipgloss semantic styles (Success/Error/Muted/Label/
@@ -1014,26 +1049,41 @@ pkg/ (public SDK surface)
   protocol/
     envelope.go                 Request/Response/Error + JSON Lines framing helpers
     methods.go                  describe / configure / execute / shutdown param/result types
-    schema.go                   ProviderSchema, ActionSchema, AttrSchema + Validate,
-                                CtyType (textual type → cty.Type via hcl/ext/typeexpr)
-    schema_hcl.go               Authoring-form parser: provider/config/action/attribute/output blocks
+    schema.go                   ProviderSchema, ActionSchema, AttrSchema, Example + Validate,
+                                CtyType (textual type → cty.Type via hcl/ext/typeexpr).
+                                Outputs narrowed to object-or-any at schema load.
+    schema_hcl.go               Authoring-form parser: provider/config/action/attribute/output
+                                blocks plus description/notes strings and `example { }` blocks
     ctyjson.go                  cty.Value ↔ json.RawMessage helpers using go-cty/cty/json
 
   provider/
     provider.go                 Provider interface (Schema/Configure/Execute/Close) + Registry
     builtins.go                 Source-string → factory-function registry for "builtin/*"
     postgres/                   builtin/postgres — raw SQL against pgx pool
-      schema.hcl                Embedded via //go:embed
+      schema.hcl                Embedded via //go:embed; carries description, notes,
+                                examples consumed by the docs renderer
       provider.go, sql.go, cty.go, register.go
     http/                       builtin/http — net/http-backed request action
-      schema.hcl                Embedded via //go:embed
+      schema.hcl                Embedded via //go:embed (with description/notes/examples)
       provider.go, register.go
     exec/                       builtin/exec — os/exec-backed run action
-      schema.hcl                Embedded via //go:embed
+      schema.hcl                Embedded via //go:embed (with description/notes/examples)
       provider.go, register.go
     external/                   exec:<path> subprocess adapter
       client.go                 JSON Lines transport with atomic id counter + roundtrip mutex
       external.go               Spawn + lifecycle (describe handshake, stderr drain, shutdown)
+      schema_probe.go           LoadSchema — short-lived `<binary> schema` probe for plan
+
+docs/                           Hugo site sources (https://orchard.pthm.dev)
+  hugo.yaml                     hugo-book theme; module mount layers content-generated/
+                                over content/ so generated provider pages live at the
+                                same URLs as hand-written sections
+  content/                      Tracked sections: getting-started, concepts, providers/_index,
+                                providers/external, guides, extending, reference
+  content-generated/            (gitignored) Output of `just docs-generate` — one file
+                                per builtin provider rendered from its schema.hcl
+  static/                       Brand assets (orchard_logo.png, favicon)
+  assets/                       SCSS overrides (container width, etc.)
 
 test/
   integration/                  Separate go module with testcontainers-go Postgres
@@ -1042,7 +1092,9 @@ test/
                                 combined (cross-provider + FK diamond)
     http_fixture_test.go        Tiny ServeHTTP stub with per-path callbacks
     testdata/
-      scenarios/                basic, with_component, echo, http, combined
+      scenarios/                basic, with_component, echo, http, combined. External
+                                provider references use scenario-relative paths
+                                (`exec:../echo/echo-provider`).
       components/merchant.hcl   Shared component used by with_component
       echo/main.go              External echo provider (re-built by TestMain)
     migrations/
@@ -1071,6 +1123,10 @@ test/
 **Context-bounded subprocess lifecycle** — `external.Client.Roundtrip` takes a `context.Context`; both the write and read run in one goroutine selected against `ctx.Done`. On cancellation the client poisons itself — subsequent calls fail fast — so there's never more than one goroutine reading the pipe. `Provider.Close` wraps the shutdown RPC and the process wait in a single `context.WithTimeout(shutdownTimeout)`, capping total teardown time regardless of which half hangs.
 
 **Presentation outside the engine** — `engine.Execute` emits progress through a tiny `Reporter` interface with a `NopReporter` default. `cmd/` installs a stdout reporter; integration tests get silence for free. The engine has no direct opinion on stdout, logging, or formatting.
+
+**Schema-driven provider documentation** — `orchard docs <source>` renders a provider's reference page from its `ProviderSchema` alone. Narrative content (provider intro, notes, worked examples) lives inside the schema — `description`, `notes`, and `example { }` carry markdown/HCL — so the same generator works for any provider, builtin or external, without a per-provider template. The docs site mounts the generated output over its tracked content tree via Hugo module mounts; schemas are the single source of truth, and schema edits regenerate the reference page automatically.
+
+**One shared HCL function surface** — `parser.StdFunctions` is the single source of truth for the cty stdlib subset Orchard exposes (strings, collections, encoding, math, regex, time, sets). Every EvalContext — parser-side (variable defaults, provider configs), engine runtime, and plan-time typed contexts — pulls from the same function map, so `jsonencode`, `format`, `upper` etc. behave identically regardless of where the expression sits. Adding a function is additive; existing scenarios stay valid.
 
 ### Dependencies
 

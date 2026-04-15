@@ -157,9 +157,7 @@ func buildForest(g *graph.Graph) []*displayNode {
 		primary := topParents[0]
 		nodesByID[primary].children = append(nodesByID[primary].children, nodesByID[id])
 		// Rest are secondaries — shown as "also after" on the child.
-		for _, sp := range topParents[1:] {
-			nodesByID[id].secondaryParents = append(nodesByID[id].secondaryParents, sp)
-		}
+		nodesByID[id].secondaryParents = append(nodesByID[id].secondaryParents, topParents[1:]...)
 	}
 
 	// Roots: nodes with no top-level parent.

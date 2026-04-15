@@ -14,7 +14,7 @@ func testdataPath(name string) string {
 }
 
 func TestBuild_SimpleScenario(t *testing.T) {
-	ps, err := parser.LoadScenario(testdataPath("simple_scenario.hcl"), nil)
+	ps, err := parser.LoadScenario(testdataPath("simple_scenario.hcl"), "", nil)
 	if err != nil {
 		t.Fatalf("LoadScenario: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestBuild_SimpleScenario(t *testing.T) {
 }
 
 func TestBuild_WithComponent(t *testing.T) {
-	ps, err := parser.LoadScenario(testdataPath("scenario_with_component.hcl"), nil)
+	ps, err := parser.LoadScenario(testdataPath("scenario_with_component.hcl"), "", nil)
 	if err != nil {
 		t.Fatalf("LoadScenario: %v", err)
 	}

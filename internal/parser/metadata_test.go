@@ -21,7 +21,7 @@ scenario "annotated" {
 		t.Fatal(err)
 	}
 
-	ps, err := LoadScenario(path, nil)
+	ps, err := LoadScenario(path, "", nil)
 	if err != nil {
 		t.Fatalf("LoadScenario: %v", err)
 	}
@@ -44,7 +44,7 @@ scenario "bare" {
 		t.Fatal(err)
 	}
 
-	ps, err := LoadScenario(path, nil)
+	ps, err := LoadScenario(path, "", nil)
 	if err != nil {
 		t.Fatalf("LoadScenario: %v", err)
 	}

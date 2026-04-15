@@ -13,7 +13,7 @@ func testdataPath(name string) string {
 }
 
 func TestLoadScenario_Simple(t *testing.T) {
-	ps, err := LoadScenario(testdataPath("simple_scenario.hcl"), nil)
+	ps, err := LoadScenario(testdataPath("simple_scenario.hcl"), "", nil)
 	if err != nil {
 		t.Fatalf("LoadScenario failed: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestLoadScenario_Simple(t *testing.T) {
 }
 
 func TestLoadScenario_VarOverride(t *testing.T) {
-	ps, err := LoadScenario(testdataPath("simple_scenario.hcl"), map[string]string{
+	ps, err := LoadScenario(testdataPath("simple_scenario.hcl"), "", map[string]string{
 		"merchant_name": "Override Inc",
 	})
 	if err != nil {
@@ -67,7 +67,7 @@ func TestLoadScenario_VarOverride(t *testing.T) {
 }
 
 func TestLoadScenario_WithComponent(t *testing.T) {
-	ps, err := LoadScenario(testdataPath("scenario_with_component.hcl"), nil)
+	ps, err := LoadScenario(testdataPath("scenario_with_component.hcl"), "", nil)
 	if err != nil {
 		t.Fatalf("LoadScenario failed: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestLoadScenario_WithComponent(t *testing.T) {
 }
 
 func TestLoadScenario_RequiredProvidersAndConfig(t *testing.T) {
-	ps, err := LoadScenario(testdataPath("simple_scenario.hcl"), nil)
+	ps, err := LoadScenario(testdataPath("simple_scenario.hcl"), "", nil)
 	if err != nil {
 		t.Fatalf("LoadScenario: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestLoadScenario_RequiredProvidersAndConfig(t *testing.T) {
 }
 
 func TestLoadScenario_ProviderConfigEvaluatesVars(t *testing.T) {
-	ps, err := LoadScenario(testdataPath("provider_with_var.hcl"), map[string]string{
+	ps, err := LoadScenario(testdataPath("provider_with_var.hcl"), "", map[string]string{
 		"dsn": "postgres://override:5432/db",
 	})
 	if err != nil {
@@ -132,7 +132,7 @@ func TestLoadScenario_ProviderConfigEvaluatesVars(t *testing.T) {
 }
 
 func TestLoadScenario_ProviderWithoutRequired(t *testing.T) {
-	_, err := LoadScenario(testdataPath("provider_undeclared.hcl"), nil)
+	_, err := LoadScenario(testdataPath("provider_undeclared.hcl"), "", nil)
 	if err == nil {
 		t.Fatal("expected error for undeclared provider")
 	}
@@ -142,7 +142,7 @@ func TestLoadScenario_ProviderWithoutRequired(t *testing.T) {
 }
 
 func TestLoadScenario_RequiredMissingSource(t *testing.T) {
-	_, err := LoadScenario(testdataPath("required_missing_source.hcl"), nil)
+	_, err := LoadScenario(testdataPath("required_missing_source.hcl"), "", nil)
 	if err == nil {
 		t.Fatal("expected error for missing source")
 	}
@@ -155,7 +155,7 @@ func TestLoadScenario_NoRequiredProviders(t *testing.T) {
 	// The with-component testdata has no required_providers block;
 	// that must be legal (component-only scenarios exist) and leave
 	// RequiredProviders / ProviderConfigs as non-nil empty maps.
-	ps, err := LoadScenario(testdataPath("scenario_with_component.hcl"), nil)
+	ps, err := LoadScenario(testdataPath("scenario_with_component.hcl"), "", nil)
 	if err != nil {
 		t.Fatalf("LoadScenario: %v", err)
 	}

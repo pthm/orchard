@@ -22,8 +22,9 @@ import (
 // argument parser writes into them, matching the pattern the
 // existing global flags use.
 var (
-	recordDirFlag string
-	noRecordFlag  bool
+	recordDirFlag    string
+	noRecordFlag     bool
+	runScenarioFlag  string
 )
 
 func newRunCmd() *cobra.Command {
@@ -34,7 +35,7 @@ func newRunCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 
-			ps, err := parser.LoadScenario(args[0], varFlags)
+			ps, err := parser.LoadScenario(args[0], runScenarioFlag, varFlags)
 			if err != nil {
 				return fmt.Errorf("loading scenario: %w", err)
 			}
@@ -118,6 +119,8 @@ func newRunCmd() *cobra.Command {
 		"Directory to write the run record to (default cwd)")
 	cmd.Flags().BoolVar(&noRecordFlag, "no-record", false,
 		"Skip writing a run record")
+	cmd.Flags().StringVar(&runScenarioFlag, "scenario", "",
+		"Pick a scenario by name when the file defines multiple")
 
 	return cmd
 }

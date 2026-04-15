@@ -20,7 +20,7 @@ func loadWithComponent(t *testing.T, compSrc, scenarioSrc string) error {
 	if err := os.WriteFile(path, []byte(scenarioSrc), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := LoadScenario(path, nil)
+	_, err := LoadScenario(path, "", nil)
 	return err
 }
 

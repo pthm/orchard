@@ -24,7 +24,7 @@ scenario "s" {
 		t.Fatal(err)
 	}
 
-	ps, err := LoadScenario(scenarioPath, nil)
+	ps, err := LoadScenario(scenarioPath, "", nil)
 	if err != nil {
 		t.Fatalf("LoadScenario: %v", err)
 	}
@@ -57,7 +57,7 @@ scenario "s" {
 		t.Fatal(err)
 	}
 
-	ps, err := LoadScenario(scenarioPath, nil)
+	ps, err := LoadScenario(scenarioPath, "", nil)
 	if err != nil {
 		t.Fatalf("LoadScenario: %v", err)
 	}
@@ -82,7 +82,7 @@ scenario "s" {
 		t.Fatal(err)
 	}
 
-	_, err := LoadScenario(scenarioPath, nil)
+	_, err := LoadScenario(scenarioPath, "", nil)
 	if err == nil {
 		t.Fatal("expected error for empty exec path")
 	}

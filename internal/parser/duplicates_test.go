@@ -25,7 +25,7 @@ scenario "dup_var" {
   variable "name" { default = "a" }
   variable "name" { default = "b" }
 }`)
-	_, err := LoadScenario(path, nil)
+	_, err := LoadScenario(path, "", nil)
 	if err == nil || !strings.Contains(err.Error(), "duplicate variable") {
 		t.Fatalf("expected duplicate-variable error, got %v", err)
 	}
@@ -37,7 +37,7 @@ scenario "dup_action" {
   action "sql" "create" { query = "SELECT 1" }
   action "sql" "create" { query = "SELECT 2" }
 }`)
-	_, err := LoadScenario(path, nil)
+	_, err := LoadScenario(path, "", nil)
 	if err == nil || !strings.Contains(err.Error(), "duplicate action") {
 		t.Fatalf("expected duplicate-action error, got %v", err)
 	}
@@ -47,7 +47,7 @@ scenario "ok" {
   action "sql" "a" { query = "SELECT 1" }
   action "sql" "b" { query = "SELECT 2" }
 }`)
-	if _, err := LoadScenario(pathOK, nil); err != nil {
+	if _, err := LoadScenario(pathOK, "", nil); err != nil {
 		t.Fatalf("distinct-name actions should parse: %v", err)
 	}
 }
@@ -58,7 +58,7 @@ scenario "dup_output" {
   output "x" { value = 1 }
   output "x" { value = 2 }
 }`)
-	_, err := LoadScenario(path, nil)
+	_, err := LoadScenario(path, "", nil)
 	if err == nil || !strings.Contains(err.Error(), "duplicate output") {
 		t.Fatalf("expected duplicate-output error, got %v", err)
 	}
@@ -82,7 +82,7 @@ scenario "dup_component" {
 }`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := LoadScenario(path, nil)
+	_, err := LoadScenario(path, "", nil)
 	if err == nil || !strings.Contains(err.Error(), "duplicate component") {
 		t.Fatalf("expected duplicate-component error, got %v", err)
 	}
@@ -109,7 +109,7 @@ scenario "s" {
 }`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := LoadScenario(path, nil)
+	_, err := LoadScenario(path, "", nil)
 	if err == nil || !strings.Contains(err.Error(), "duplicate variable") {
 		t.Fatalf("expected duplicate-variable-in-component error, got %v", err)
 	}
@@ -124,7 +124,7 @@ scenario "dup_provider" {
   provider "postgres" { dsn = "one" }
   provider "postgres" { dsn = "two" }
 }`)
-	_, err := LoadScenario(path, nil)
+	_, err := LoadScenario(path, "", nil)
 	if err == nil || !strings.Contains(err.Error(), "duplicate provider config") {
 		t.Fatalf("expected duplicate-provider-config error, got %v", err)
 	}

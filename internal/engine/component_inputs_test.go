@@ -48,7 +48,7 @@ func writeScenario(t *testing.T, dir, name, body string) string {
 
 func runWithSink(t *testing.T, scenarioPath string, vars map[string]string) (map[string]cty.Value, error) {
 	t.Helper()
-	ps, err := parser.LoadScenario(scenarioPath, vars)
+	ps, err := parser.LoadScenario(scenarioPath, "", vars)
 	if err != nil {
 		return nil, err
 	}

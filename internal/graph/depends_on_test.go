@@ -16,7 +16,7 @@ func loadScenario(t *testing.T, src string) (*parser.ParsedScenario, error) {
 	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	return parser.LoadScenario(path, nil)
+	return parser.LoadScenario(path, "", nil)
 }
 
 func buildOrError(t *testing.T, src string) (*Graph, error) {
@@ -185,7 +185,7 @@ scenario "s" {
 		t.Fatal(err)
 	}
 
-	ps, err := parser.LoadScenario(path, nil)
+	ps, err := parser.LoadScenario(path, "", nil)
 	if err != nil {
 		t.Fatalf("LoadScenario: %v", err)
 	}

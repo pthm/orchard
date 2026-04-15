@@ -55,6 +55,25 @@ func TestProviderSchemaValidate(t *testing.T) {
 		t.Fatalf("valid schema rejected: %v", err)
 	}
 
+	// Both forms of valid outputs must pass: `any` (open-ended) and
+	// a concrete object type. Non-object shapes are rejected in the
+	// cases table below.
+	for name, outputs := range map[string]AttrSchema{
+		"dynamic any":     {Type: "any"},
+		"concrete object": {Type: "object({id=number})"},
+	} {
+		s := valid
+		s.Actions = map[string]ActionSchema{
+			"sql": {
+				Attrs:   map[string]AttrSchema{"query": {Type: "string", Required: true}},
+				Outputs: &outputs,
+			},
+		}
+		if err := s.Validate(); err != nil {
+			t.Errorf("valid outputs %q rejected: %v", name, err)
+		}
+	}
+
 	cases := []struct {
 		name   string
 		mutate func(*ProviderSchema)
@@ -68,6 +87,18 @@ func TestProviderSchemaValidate(t *testing.T) {
 		{"bad attr type", func(s *ProviderSchema) {
 			s.Actions["sql"] = ActionSchema{Attrs: map[string]AttrSchema{"query": {Type: "not_a_type"}}}
 		}, "action.sql.query"},
+		{"non-object output type", func(s *ProviderSchema) {
+			s.Actions["sql"] = ActionSchema{
+				Attrs:   map[string]AttrSchema{"query": {Type: "string", Required: true}},
+				Outputs: &AttrSchema{Type: "list(string)"},
+			}
+		}, "outputs: type must be an object or `any`"},
+		{"scalar output type", func(s *ProviderSchema) {
+			s.Actions["sql"] = ActionSchema{
+				Attrs:   map[string]AttrSchema{"query": {Type: "string", Required: true}},
+				Outputs: &AttrSchema{Type: "string"},
+			}
+		}, "outputs: type must be an object or `any`"},
 	}
 	for _, c := range cases {
 		s := valid

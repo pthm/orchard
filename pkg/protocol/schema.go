@@ -124,9 +124,21 @@ func (s ProviderSchema) Validate() error {
 			}
 		}
 		if action.Outputs != nil {
-			if _, err := action.Outputs.CtyType(); err != nil {
+			t, err := action.Outputs.CtyType()
+			if err != nil {
 				return fmt.Errorf("provider %q action.%s.outputs: %w",
 					s.Name, actionName, err)
+			}
+			// Runtime always returns an object (fields keyed by
+			// attribute name), so the schema must declare either a
+			// concrete object type or `any` for open-ended shapes.
+			// List/scalar declarations would typecheck at plan time
+			// but fail at execute — rejecting at schema load surfaces
+			// the mismatch where authors can act on it.
+			if t != cty.DynamicPseudoType && !t.IsObjectType() {
+				return fmt.Errorf(
+					"provider %q action.%s outputs: type must be an object or `any`, got %s",
+					s.Name, actionName, t.FriendlyName())
 			}
 		}
 	}

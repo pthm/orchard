@@ -215,13 +215,18 @@ well-typed values.
 ## Outputs
 
 The `outputs` field of an action schema declares the shape of the object the
-action returns. If present, Orchard uses it to type-check downstream references
-like `action.charge.test_charge.id`.
+action returns. Actions always produce objects at runtime (keyed by attribute
+name), so the declared output type **must be either `any` or a concrete
+`object({...})`**. List, scalar, and map declarations are rejected at schema
+load.
 
-Use `any` for outputs whose shape depends on runtime (for example,
-`builtin/postgres`'s `sql` action — its outputs depend on the columns returned
-by each specific query). Use a concrete `object({ ... })` when the shape is
-fixed; it makes scenario authors' lives easier.
+| Form | Meaning |
+|------|---------|
+| `type = any` | Open-ended object. Useful when field names depend on runtime — e.g. `builtin/postgres`'s `sql` action, whose columns vary per query. Orchard can't type-check downstream references against the action's output. |
+| `type = object({...})` | Concrete object shape. Orchard type-checks every downstream reference (`action.x.y.field`) at plan time. |
+
+Prefer a concrete `object({...})` whenever the shape is fixed — scenario
+authors get plan-time errors on typos instead of runtime failures.
 
 ## Validation
 

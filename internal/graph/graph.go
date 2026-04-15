@@ -58,6 +58,13 @@ type Node struct {
 	// non-nil Teardown in reverse topological order; actions with
 	// no Teardown are skipped.
 	Teardown hcl.Body
+
+	// SourceRange locates the action's definition in its source
+	// file. Non-zero when the body was parsed from HCL text (the
+	// common case) and used by the engine to decorate runtime
+	// errors with `filename:line` so failures point at a specific
+	// scenario line rather than a bare node ID.
+	SourceRange hcl.Range
 }
 
 // Graph holds the dependency graph built from a parsed scenario.
@@ -99,6 +106,7 @@ func Build(ps *parser.ParsedScenario) (*Graph, error) {
 			Timeout:       reserved.Timeout,
 			Retry:         reserved.Retry,
 			Teardown:      reserved.Teardown,
+			SourceRange:   actionSourceRange(action.Remain),
 		}); err != nil {
 			return nil, err
 		}
@@ -127,6 +135,7 @@ func Build(ps *parser.ParsedScenario) (*Graph, error) {
 				Timeout:       reserved.Timeout,
 				Retry:         reserved.Retry,
 				Teardown:      reserved.Teardown,
+				SourceRange:   actionSourceRange(action.Remain),
 			}); err != nil {
 				return nil, err
 			}
@@ -516,6 +525,23 @@ func extractReservedActionAttrs(body hcl.Body, componentKey string) (reservedAct
 	}
 
 	return out, remain, nil
+}
+
+// actionSourceRange extracts a source range from an action body for
+// runtime error decoration. Prefers the hclsyntax body's SrcRange
+// when available (covers the whole action block contents and is
+// tighter than MissingItemRange), falls back to MissingItemRange
+// for merged bodies where SrcRange isn't exposed. Returns a zero
+// range when the body was synthesised in-memory (e.g. test mocks)
+// so error formatting can opt out of the "(filename:line)" suffix.
+func actionSourceRange(body hcl.Body) hcl.Range {
+	if hb, ok := body.(*hclsyntax.Body); ok {
+		return hb.SrcRange
+	}
+	if body != nil {
+		return body.MissingItemRange()
+	}
+	return hcl.Range{}
 }
 
 // parseLifecycleBlock extracts the teardown block's body from a

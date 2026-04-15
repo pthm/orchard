@@ -88,7 +88,7 @@ func (e *Engine) Teardown(
 		err := e.teardownAction(ctx, node, vars, selfOutputs, recordedOutputs)
 		if err != nil {
 			e.reporter.NodeFailed(string(nodeID), err)
-			errs = append(errs, fmt.Errorf("%s: %w", nodeID, err))
+			errs = append(errs, fmt.Errorf("%s%s: %w", nodeID, formatSourceLoc(node.SourceRange), err))
 			failed++
 			continue
 		}

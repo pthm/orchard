@@ -116,6 +116,12 @@ scenario with `--var merchant_id=...`.
 - **Tear down eagerly.** Integration DBs are shared — leaks across test runs
   make failures hard to diagnose. Prefer transactional rollback, truncation, or
   per-test databases.
+- **Wire `lifecycle { teardown { } }` into fixture scenarios for per-test
+  reversibility.** Run the fixture via a `RecordingReporter` in your test
+  harness (the same reporter `orchard run` uses), then call `engine.Teardown`
+  between tests to unwind state without re-creating the database. The
+  integration test at `test/integration/teardown_test.go` is the canonical
+  example. See [lifecycle](../../concepts/lifecycle/).
 - **Don't reimplement components in Go.** If your tests call
   `createMerchant(t, ...)` for the tenth time, that's a component crying to be
   shared with the `dev.hcl` and `demo_*.hcl` scenarios.

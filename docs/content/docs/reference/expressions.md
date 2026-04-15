@@ -10,7 +10,7 @@ reference namespaces, type expressions, and available functions.
 
 ## Reference namespaces
 
-Four reference namespaces are available inside expressions:
+Five reference namespaces are available inside expressions:
 
 | Form | Scope | Available when |
 |------|-------|----------------|
@@ -18,6 +18,7 @@ Four reference namespaces are available inside expressions:
 | `action.<type>.<name>.<output>` | Action outputs. | After the referenced action completes. |
 | `component.<type>.<name>.<output>` | Component instance outputs. | After the component resolves. |
 | `var.<name>` (inside a component) | The component's own variables. | Immediately, scoped to the component. |
+| `self.<output>` | The current action's own outputs. | Inside `lifecycle { teardown { } }` blocks only. |
 
 ### Variable references
 
@@ -61,6 +62,28 @@ action "sql" "attach" {
 `component.<type>.<name>.<output>` — where `<type>` matches the component's
 declared name in its source file and `<name>` matches the instance label in
 the scenario.
+
+### `self` (teardown only) {#self-teardown-only}
+
+Inside a `lifecycle { teardown { } }` block, `self.<field>` refers to the
+action's own recorded outputs. This lets authors write teardowns without
+repeating the node name:
+
+```hcl
+action "sql" "create_merchant" {
+  query = "INSERT INTO merchants (name) VALUES ('${var.name}') RETURNING id"
+
+  lifecycle {
+    teardown {
+      query = "DELETE FROM merchants WHERE id = ${self.id}"
+    }
+  }
+}
+```
+
+`self` is only populated when `orchard teardown <record>` evaluates the body;
+the values come from the record's per-node outputs captured at run time. Inside
+the action's main body (during `orchard run`), `self` is not in scope.
 
 ## Type expressions
 

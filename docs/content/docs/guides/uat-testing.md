@@ -92,8 +92,23 @@ the test plan.
 
 - **Surface what QA needs** in outputs: customer ID, login URL, API token. Don't
   make testers run a second SQL query to find the row they just created.
-- **Tear-down scripts are cheap.** A `scenarios/uat/_cleanup.hcl` that takes a
-  customer ID and deletes everything related is much nicer than "drop and
-  recreate the database."
+- **Use `lifecycle { teardown { } }` instead of cleanup scripts.** Attach a
+  teardown block to each `action` and let `orchard teardown <record>` undo the
+  run:
+
+  ```hcl
+  action "sql" "create_subscription" {
+    query = "INSERT INTO subscriptions (...) RETURNING id"
+    lifecycle {
+      teardown {
+        query = "DELETE FROM subscriptions WHERE id = ${self.id}"
+      }
+    }
+  }
+  ```
+
+  The record file `orchard run` writes is all `orchard teardown` needs — no
+  bespoke cleanup scenario, no hand-rolled shell script. See
+  [lifecycle](../../concepts/lifecycle/).
 - **Run UAT scenarios in CI.** Even if the real tests are manual, having CI
   verify that each scenario still applies cleanly catches schema drift early.

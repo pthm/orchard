@@ -132,7 +132,7 @@ func (r *PlainReporter) RunStarted(scenario string) {
 func (r *PlainReporter) NodeStarted(string) {}
 
 // NodeCompleted implements engine.Reporter.
-func (r *PlainReporter) NodeCompleted(nodeID string, d time.Duration) {
+func (r *PlainReporter) NodeCompleted(nodeID string, _ map[string]cty.Value, d time.Duration) {
 	fmt.Fprintf(r.Out, "  ok %s (%s)\n", nodeID, formatDuration(d))
 }
 
@@ -178,7 +178,7 @@ func (r *TTYReporter) RunStarted(scenario string) {
 func (r *TTYReporter) NodeStarted(string) {}
 
 // NodeCompleted implements engine.Reporter.
-func (r *TTYReporter) NodeCompleted(nodeID string, d time.Duration) {
+func (r *TTYReporter) NodeCompleted(nodeID string, _ map[string]cty.Value, d time.Duration) {
 	fmt.Fprintf(r.Out, "  %s %s  %s\n",
 		render.SuccessMark.Render("✓"),
 		nodeID,

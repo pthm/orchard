@@ -17,8 +17,8 @@ func TestPlainReporterLifecycle(t *testing.T) {
 	r := &PlainReporter{Out: &buf}
 	r.RunStarted("seed_dev")
 	r.NodeStarted("action.sql.x") // silent
-	r.NodeCompleted("action.sql.x", 12*time.Millisecond)
-	r.NodeCompleted("action.sql.y", 3*time.Second)
+	r.NodeCompleted("action.sql.x", nil, 12*time.Millisecond)
+	r.NodeCompleted("action.sql.y", nil, 3*time.Second)
 	r.RunCompleted(engine.RunSummary{
 		Scenario:  "seed_dev",
 		Outputs:   map[string]cty.Value{"id": cty.NumberIntVal(42)},
@@ -70,7 +70,7 @@ func TestTTYReporterEmitsKeyContent(t *testing.T) {
 	var buf bytes.Buffer
 	r := &TTYReporter{Out: &buf}
 	r.RunStarted("seed_dev")
-	r.NodeCompleted("action.sql.x", 12*time.Millisecond)
+	r.NodeCompleted("action.sql.x", nil, 12*time.Millisecond)
 	r.RunCompleted(engine.RunSummary{
 		Scenario:  "seed_dev",
 		Outputs:   map[string]cty.Value{"id": cty.NumberIntVal(42)},

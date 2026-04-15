@@ -9,6 +9,7 @@ import (
 	"github.com/pthm/orchard/internal/engine"
 	"github.com/pthm/orchard/internal/graph"
 	"github.com/pthm/orchard/internal/parser"
+	"github.com/pthm/orchard/internal/record"
 
 	// Side-effect imports register builtin provider sources. Adding
 	// a new builtin provider is a one-line change here.
@@ -17,8 +18,16 @@ import (
 	_ "github.com/pthm/orchard/pkg/provider/postgres"
 )
 
+// Flags scoped to `orchard run`. Kept package-level so cobra's
+// argument parser writes into them, matching the pattern the
+// existing global flags use.
+var (
+	recordDirFlag string
+	noRecordFlag  bool
+)
+
 func newRunCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "run <scenario>",
 		Short: "Execute a scenario",
 		Args:  cobra.ExactArgs(1),
@@ -72,15 +81,43 @@ func newRunCmd() *cobra.Command {
 				return fmt.Errorf("validation failed: %w", err)
 			}
 
-			eng.SetReporter(reporter.Select(reporter.Options{
+			cliRep := reporter.Select(reporter.Options{
 				Out:        cmd.OutOrStdout(),
 				ForcePlain: noColorFlag,
-			}))
+			})
 
-			if _, err := eng.Execute(ctx, ps, g); err != nil {
-				return err
+			// Wrap the presentation reporter in a recording reporter
+			// unless the user opted out. Records persist to the
+			// --record-dir (default cwd) after the run finishes,
+			// including on failure so partial runs stay inspectable.
+			finalReporter := engine.Reporter(cliRep)
+			var recRep *record.Reporter
+			if !noRecordFlag {
+				recRep, err = record.NewReporter(record.Options{
+					Inner:     cliRep,
+					Writer:    record.FileWriter{Dir: recordDirFlag},
+					Scenario:  record.ScenarioFromParser(ps, args[0]),
+					Variables: ps.Variables,
+					LogOutput: cmd.ErrOrStderr(),
+				})
+				if err != nil {
+					return fmt.Errorf("preparing record: %w", err)
+				}
+				finalReporter = recRep
 			}
-			return nil
+			eng.SetReporter(finalReporter)
+
+			_, execErr := eng.Execute(ctx, ps, g)
+			// Propagate Execute's error after letting the record land —
+			// the record reporter has already fired from inside Execute.
+			return execErr
 		},
 	}
+
+	cmd.Flags().StringVar(&recordDirFlag, "record-dir", ".",
+		"Directory to write the run record to (default cwd)")
+	cmd.Flags().BoolVar(&noRecordFlag, "no-record", false,
+		"Skip writing a run record")
+
+	return cmd
 }

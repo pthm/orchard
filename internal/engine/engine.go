@@ -76,7 +76,13 @@ type Reporter interface {
 	// duration measures wall-clock time spent in the node's own
 	// work (action execute, or component output resolution) —
 	// upstream wait time is excluded.
-	NodeCompleted(nodeID string, duration time.Duration)
+	//
+	// outputs carries the node's resolved outputs: an action's
+	// Execute return map for action nodes, the resolved component
+	// outputs for component nodes. Presentation reporters typically
+	// ignore it; the recording reporter uses it to persist each
+	// node's contribution to a run record.
+	NodeCompleted(nodeID string, outputs map[string]cty.Value, duration time.Duration)
 
 	// NodeFailed fires when a node returns an error. The engine
 	// returns that error to the caller too; this gives the
@@ -112,7 +118,7 @@ func (NopReporter) RunStarted(string) {}
 func (NopReporter) NodeStarted(string) {}
 
 // NodeCompleted implements Reporter.
-func (NopReporter) NodeCompleted(string, time.Duration) {}
+func (NopReporter) NodeCompleted(string, map[string]cty.Value, time.Duration) {}
 
 // NodeFailed implements Reporter.
 func (NopReporter) NodeFailed(string, error) {}
@@ -282,7 +288,7 @@ func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *grap
 					fmt.Errorf("executing %s: %w", nodeID, err))
 			}
 			resolved[string(nodeID)] = outputs
-			e.reporter.NodeCompleted(string(nodeID), time.Since(start))
+			e.reporter.NodeCompleted(string(nodeID), outputs, time.Since(start))
 			succeeded++
 
 		case graph.ComponentNode:
@@ -294,7 +300,7 @@ func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *grap
 					fmt.Errorf("resolving outputs for %s: %w", nodeID, err))
 			}
 			resolved[string(nodeID)] = outputs
-			e.reporter.NodeCompleted(string(nodeID), time.Since(start))
+			e.reporter.NodeCompleted(string(nodeID), outputs, time.Since(start))
 			succeeded++
 		}
 	}

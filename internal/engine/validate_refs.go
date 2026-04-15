@@ -182,11 +182,19 @@ func (e *Engine) buildTypedEvalContext(ps *parser.ParsedScenario, g *graph.Graph
 		variables["action"] = cty.ObjectVal(objs)
 	}
 
-	// component.<type>.<name> → DynamicPseudoType unknown for v1.
-	// Deriving concrete component output types requires recursively
-	// typing the component's own output expressions — deferred.
+	// component.<type>.<name> → typed object whose attributes come
+	// from evaluating each declared output expression against the
+	// component's own typed scope. This is what makes typos like
+	// `component.c.one.idd` fail at plan time: HCL's type checker
+	// rejects attribute access on an object that doesn't declare
+	// that field.
+	//
+	// Individual outputs whose expressions don't type-check (a typo
+	// inside the component itself) fall back to DynamicPseudoType
+	// for that one field; the dedicated component-output pass below
+	// still reports the underlying error with full location info.
 	componentsByType := make(map[string]map[string]cty.Value)
-	for key := range ps.Components {
+	for key, comp := range ps.Components {
 		typ, name := splitComponentKey(key)
 		if typ == "" {
 			continue
@@ -194,7 +202,7 @@ func (e *Engine) buildTypedEvalContext(ps *parser.ParsedScenario, g *graph.Graph
 		if componentsByType[typ] == nil {
 			componentsByType[typ] = make(map[string]cty.Value)
 		}
-		componentsByType[typ][name] = cty.UnknownVal(cty.DynamicPseudoType)
+		componentsByType[typ][name] = e.componentOutputsObject(key, comp, g)
 	}
 	if len(componentsByType) > 0 {
 		objs := make(map[string]cty.Value, len(componentsByType))
@@ -205,6 +213,33 @@ func (e *Engine) buildTypedEvalContext(ps *parser.ParsedScenario, g *graph.Graph
 	}
 
 	return &hcl.EvalContext{Variables: variables}
+}
+
+// componentOutputsObject returns a typed cty object value
+// representing the outputs of one component instance. Each declared
+// output's expression is evaluated against the component's own
+// typed eval context; the resulting value (an unknown with concrete
+// type) becomes one attribute of the returned object.
+//
+// When an expression fails to type-check — typically a typo inside
+// the component body — the attribute falls back to
+// DynamicPseudoType so the scenario-level pass can still complete.
+// The component-output pass in ValidateReferences re-evaluates the
+// same expression and reports the original diagnostic with location.
+func (e *Engine) componentOutputsObject(
+	key string, comp *parser.ParsedComponent, g *graph.Graph,
+) cty.Value {
+	compCtx := e.buildComponentTypedEvalContext(key, comp, g)
+	fields := make(map[string]cty.Value, len(comp.Def.Outputs))
+	for _, out := range comp.Def.Outputs {
+		val, diags := out.Value.Value(compCtx)
+		if diags.HasErrors() {
+			fields[out.Name] = cty.UnknownVal(cty.DynamicPseudoType)
+			continue
+		}
+		fields[out.Name] = val
+	}
+	return cty.ObjectVal(fields)
 }
 
 // actionOutputType resolves a node's route and returns the cty

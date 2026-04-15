@@ -32,7 +32,7 @@ import (
 func runScenario(t *testing.T, path string, vars map[string]string) map[string]cty.Value {
 	t.Helper()
 
-	ps, err := parser.LoadScenario(path, vars)
+	ps, err := parser.LoadScenario(path, "", vars)
 	require.NoError(t, err, "loading scenario")
 
 	g, err := graph.Build(ps)

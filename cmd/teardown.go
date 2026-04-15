@@ -54,8 +54,10 @@ func newTeardownCmd() *cobra.Command {
 			}
 
 			// Reload the scenario. The record's scenario.path is
-			// absolute, so it resolves regardless of cwd.
-			ps, err := parser.LoadScenario(rec.Scenario.Path, nil)
+			// absolute, so it resolves regardless of cwd. Use the
+			// recorded scenario name so files with multiple
+			// scenarios still pick the right one.
+			ps, err := parser.LoadScenario(rec.Scenario.Path, rec.Scenario.Name, nil)
 			if err != nil {
 				return fmt.Errorf("loading scenario %s: %w", rec.Scenario.Path, err)
 			}

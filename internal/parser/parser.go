@@ -47,9 +47,16 @@ type ParsedComponent struct {
 	Def *ComponentDefBlock
 }
 
-// LoadScenario parses a scenario HCL file, resolves component sources,
-// and merges CLI variable overrides with defaults.
-func LoadScenario(path string, vars map[string]string) (*ParsedScenario, error) {
+// LoadScenario parses a scenario HCL file, picks the scenario block
+// matching name, resolves component sources, and merges CLI variable
+// overrides with defaults.
+//
+// An empty name selects the sole scenario when the file contains
+// exactly one — a convenience that keeps `orchard run foo.hcl`
+// ergonomic for the single-scenario case. When a file has multiple
+// scenarios and name is empty, the error lists the available names so
+// the caller can retry with --scenario.
+func LoadScenario(path, name string, vars map[string]string) (*ParsedScenario, error) {
 	parser := hclparse.NewParser()
 
 	file, diags := parser.ParseHCLFile(path)
@@ -63,16 +70,31 @@ func LoadScenario(path string, vars map[string]string) (*ParsedScenario, error) 
 		return nil, fmt.Errorf("decoding scenario: %s", diags.Error())
 	}
 
-	if sf.Scenario == nil {
+	if len(sf.Scenarios) == 0 {
 		return nil, fmt.Errorf("no scenario block found in %s", path)
 	}
 
-	if err := validateScenarioUniqueness(sf.Scenario); err != nil {
+	// Guard against multiple scenarios sharing the same name — that
+	// makes --scenario ambiguous and is surely a mistake.
+	seen := make(map[string]bool, len(sf.Scenarios))
+	for _, s := range sf.Scenarios {
+		if seen[s.Name] {
+			return nil, fmt.Errorf("%s: duplicate scenario name %q", path, s.Name)
+		}
+		seen[s.Name] = true
+	}
+
+	scenario, err := pickScenario(sf.Scenarios, name, path)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := validateScenarioUniqueness(scenario); err != nil {
 		return nil, err
 	}
 
 	// Resolve variables: defaults + CLI overrides.
-	resolved, err := resolveVariables(sf.Scenario.Variables, vars)
+	resolved, err := resolveVariables(scenario.Variables, vars)
 	if err != nil {
 		return nil, fmt.Errorf("resolving variables: %w", err)
 	}
@@ -80,7 +102,7 @@ func LoadScenario(path string, vars map[string]string) (*ParsedScenario, error) 
 	// Extract required_providers before provider config blocks so we
 	// can validate that every provider block names a declared
 	// provider.
-	required, err := extractRequiredProviders(sf.Scenario.RequiredProviders)
+	required, err := extractRequiredProviders(scenario.RequiredProviders)
 	if err != nil {
 		return nil, fmt.Errorf("required_providers: %w", err)
 	}
@@ -96,7 +118,7 @@ func LoadScenario(path string, vars map[string]string) (*ParsedScenario, error) 
 		return nil, err
 	}
 
-	providerConfigs, err := evaluateProviderConfigs(sf.Scenario.Providers, required, resolved)
+	providerConfigs, err := evaluateProviderConfigs(scenario.Providers, required, resolved)
 	if err != nil {
 		return nil, fmt.Errorf("provider config: %w", err)
 	}
@@ -104,7 +126,7 @@ func LoadScenario(path string, vars map[string]string) (*ParsedScenario, error) 
 	// Load component definitions from their source paths.
 	components := make(map[string]*ParsedComponent)
 
-	for _, ref := range sf.Scenario.Components {
+	for _, ref := range scenario.Components {
 		compPath := filepath.Join(scenarioDir, ref.Source)
 		def, err := loadComponent(parser, compPath)
 		if err != nil {
@@ -124,7 +146,7 @@ func LoadScenario(path string, vars map[string]string) (*ParsedScenario, error) 
 	}
 
 	return &ParsedScenario{
-		Scenario:          sf.Scenario,
+		Scenario:          scenario,
 		Components:        components,
 		Variables:         resolved,
 		RequiredProviders: required,
@@ -281,6 +303,37 @@ func loadComponent(p *hclparse.Parser, path string) (*ComponentDefBlock, error) 
 // Duplicate provider blocks and duplicate required_providers entries
 // are caught inside evaluateProviderConfigs and extractRequiredProviders
 // respectively, so not repeated here.
+// pickScenario returns the scenario matching name. An empty name
+// succeeds when there is exactly one scenario in the file. An empty
+// name against multiple scenarios produces an error listing the
+// available names so the caller can retry with --scenario.
+func pickScenario(scenarios []*ScenarioBlock, name, path string) (*ScenarioBlock, error) {
+	if name == "" {
+		if len(scenarios) == 1 {
+			return scenarios[0], nil
+		}
+		names := make([]string, len(scenarios))
+		for i, s := range scenarios {
+			names[i] = s.Name
+		}
+		return nil, fmt.Errorf(
+			"%s contains multiple scenarios; pass --scenario to pick one of: %s",
+			path, strings.Join(names, ", "))
+	}
+	for _, s := range scenarios {
+		if s.Name == name {
+			return s, nil
+		}
+	}
+	names := make([]string, len(scenarios))
+	for i, s := range scenarios {
+		names[i] = s.Name
+	}
+	return nil, fmt.Errorf(
+		"%s: no scenario %q found (have: %s)",
+		path, name, strings.Join(names, ", "))
+}
+
 func validateScenarioUniqueness(s *ScenarioBlock) error {
 	seenVars := make(map[string]bool)
 	for _, v := range s.Variables {

@@ -57,7 +57,7 @@ scenario "s" {
 		t.Fatal(err)
 	}
 
-	ps, err := parser.LoadScenario(scenarioPath, nil)
+	ps, err := parser.LoadScenario(scenarioPath, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

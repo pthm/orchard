@@ -25,7 +25,7 @@ func validateComponentRefs(t *testing.T, compSrc, scenarioSrc string, providers 
 	if err := os.WriteFile(path, []byte(scenarioSrc), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ps, err := parser.LoadScenario(path, nil)
+	ps, err := parser.LoadScenario(path, "", nil)
 	if err != nil {
 		return err
 	}

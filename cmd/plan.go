@@ -11,13 +11,15 @@ import (
 	"github.com/pthm/orchard/internal/parser"
 )
 
+var planScenarioFlag string
+
 func newPlanCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "plan <scenario>",
 		Short: "Validate a scenario and show its execution plan",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ps, err := parser.LoadScenario(args[0], varFlags)
+			ps, err := parser.LoadScenario(args[0], planScenarioFlag, varFlags)
 			if err != nil {
 				return fmt.Errorf("loading scenario: %w", err)
 			}
@@ -80,4 +82,7 @@ func newPlanCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&planScenarioFlag, "scenario", "",
+		"Pick a scenario by name when the file defines multiple")
+	return cmd
 }

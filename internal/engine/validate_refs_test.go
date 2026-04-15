@@ -76,7 +76,7 @@ func validateReferencesFromHCL(t *testing.T, src string, providers map[string]pr
 	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ps, err := parser.LoadScenario(path, nil)
+	ps, err := parser.LoadScenario(path, "", nil)
 	if err != nil {
 		return err
 	}

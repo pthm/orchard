@@ -23,7 +23,7 @@ scenario "typed" {
     default = ["a", "b"]
   }
 }`)
-	ps, err := LoadScenario(path, nil)
+	ps, err := LoadScenario(path, "", nil)
 	if err != nil {
 		t.Fatalf("LoadScenario: %v", err)
 	}
@@ -50,7 +50,7 @@ scenario "typed_override" {
     default = false
   }
 }`)
-	ps, err := LoadScenario(path, map[string]string{
+	ps, err := LoadScenario(path, "", map[string]string{
 		"count": "42",
 		"flag":  "true",
 	})
@@ -73,7 +73,7 @@ scenario "mismatch" {
     type = number
   }
 }`)
-	_, err := LoadScenario(path, map[string]string{"count": "not_a_number"})
+	_, err := LoadScenario(path, "", map[string]string{"count": "not_a_number"})
 	if err == nil {
 		t.Fatal("expected coercion error")
 	}
@@ -90,7 +90,7 @@ scenario "bad_default" {
     default = "not a number"
   }
 }`)
-	_, err := LoadScenario(path, nil)
+	_, err := LoadScenario(path, "", nil)
 	if err == nil || !strings.Contains(err.Error(), "count") {
 		t.Fatalf("expected type-mismatch on default, got %v", err)
 	}
@@ -105,7 +105,7 @@ scenario "untyped" {
     default = "Acme"
   }
 }`)
-	ps, err := LoadScenario(path, nil)
+	ps, err := LoadScenario(path, "", nil)
 	if err != nil {
 		t.Fatalf("LoadScenario: %v", err)
 	}
@@ -127,7 +127,7 @@ scenario "strings" {
     default = "default"
   }
 }`)
-	ps, err := LoadScenario(path, map[string]string{
+	ps, err := LoadScenario(path, "", map[string]string{
 		"explicit": "has spaces and symbols !@#",
 		"implicit": "also raw",
 	})

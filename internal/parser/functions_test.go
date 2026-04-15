@@ -31,7 +31,7 @@ scenario "s" {
 		t.Fatal(err)
 	}
 
-	ps, err := LoadScenario(path, nil)
+	ps, err := LoadScenario(path, "", nil)
 	if err != nil {
 		t.Fatalf("LoadScenario: %v", err)
 	}
@@ -70,7 +70,7 @@ scenario "s" {
 		t.Fatal(err)
 	}
 
-	ps, err := LoadScenario(path, nil)
+	ps, err := LoadScenario(path, "", nil)
 	if err != nil {
 		t.Fatalf("LoadScenario: %v", err)
 	}

@@ -70,7 +70,7 @@ func runScenarioWithRecord(
 ) (outputs map[string]cty.Value, rec *record.Record) {
 	t.Helper()
 
-	ps, err := parser.LoadScenario(path, vars)
+	ps, err := parser.LoadScenario(path, "", vars)
 	require.NoError(t, err)
 
 	g, err := graph.Build(ps)
@@ -131,7 +131,7 @@ func runScenarioWithRecord(
 func runTeardown(t *testing.T, scenarioPath string, rec *record.Record) {
 	t.Helper()
 
-	ps, err := parser.LoadScenario(scenarioPath, map[string]string{"dsn": testDSN})
+	ps, err := parser.LoadScenario(scenarioPath, "", map[string]string{"dsn": testDSN})
 	require.NoError(t, err)
 
 	g, err := graph.Build(ps)

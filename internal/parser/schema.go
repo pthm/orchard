@@ -5,8 +5,15 @@ import (
 )
 
 // ScenarioFile is the top-level HCL structure for a scenario file.
+//
+// Scenarios is a slice so a single file can hold multiple scenario
+// blocks — useful for grouping related scenarios (e.g. all UAT
+// cases for a feature) without proliferating files. Callers pick
+// one by name via LoadScenario's scenario parameter; a file
+// containing a single scenario can still pass "" and have it
+// auto-selected.
 type ScenarioFile struct {
-	Scenario *ScenarioBlock `hcl:"scenario,block"`
+	Scenarios []*ScenarioBlock `hcl:"scenario,block"`
 }
 
 // ScenarioBlock represents: scenario "name" { ... }

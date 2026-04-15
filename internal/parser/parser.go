@@ -3,6 +3,7 @@ package parser
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/ext/typeexpr"
@@ -84,13 +85,23 @@ func LoadScenario(path string, vars map[string]string) (*ParsedScenario, error) 
 		return nil, fmt.Errorf("required_providers: %w", err)
 	}
 
+	// Resolve `exec:<path>` sources against the scenario file's
+	// directory, mirroring component `source` resolution. Without
+	// this step, running `orchard run /abs/scenario.hcl` from any
+	// other cwd fails with "no such file or directory" because the
+	// binary path is interpreted relative to the process cwd rather
+	// than the scenario.
+	scenarioDir := filepath.Dir(path)
+	if err := resolveExecSources(required, scenarioDir); err != nil {
+		return nil, err
+	}
+
 	providerConfigs, err := evaluateProviderConfigs(sf.Scenario.Providers, required, resolved)
 	if err != nil {
 		return nil, fmt.Errorf("provider config: %w", err)
 	}
 
 	// Load component definitions from their source paths.
-	scenarioDir := filepath.Dir(path)
 	components := make(map[string]*ParsedComponent)
 
 	for _, ref := range sf.Scenario.Components {
@@ -119,6 +130,38 @@ func LoadScenario(path string, vars map[string]string) (*ParsedScenario, error) 
 		RequiredProviders: required,
 		ProviderConfigs:   providerConfigs,
 	}, nil
+}
+
+// resolveExecSources rewrites each `exec:<path>` source so the path
+// is absolute and anchored at scenarioDir. Non-exec sources and
+// already-absolute exec paths pass through untouched. Returns an
+// error on malformed sources (empty path) so callers don't discover
+// them later at Spawn time.
+//
+// The rewrite happens at parse time so the resolved source flows
+// through the entire pipeline — run, plan, and any cmd or test code
+// that reads ParsedScenario.RequiredProviders sees the same
+// absolute path.
+func resolveExecSources(required map[string]RequiredProviderSpec, scenarioDir string) error {
+	for name, spec := range required {
+		rest, ok := strings.CutPrefix(spec.Source, "exec:")
+		if !ok {
+			continue
+		}
+		if rest == "" {
+			return fmt.Errorf("provider %q: exec source requires a path", name)
+		}
+		if filepath.IsAbs(rest) {
+			continue
+		}
+		abs, err := filepath.Abs(filepath.Join(scenarioDir, rest))
+		if err != nil {
+			return fmt.Errorf("provider %q: resolve exec path %q: %w", name, rest, err)
+		}
+		spec.Source = "exec:" + abs
+		required[name] = spec
+	}
+	return nil
 }
 
 // extractRequiredProviders decodes the required_providers block into

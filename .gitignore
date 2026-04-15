@@ -1,3 +1,5 @@
+# ─── Project-specific ────────────────────────────────────────────────
+
 # Compiled external provider test fixture — rebuilt by TestMain.
 test/integration/testdata/echo/echo-provider
 
@@ -9,3 +11,57 @@ docs/content-generated/
 # Hugo build artefacts.
 docs/public/
 docs/resources/
+.hugo_build.lock
+
+# Claude Code local scratch.
+.claude/
+
+# ─── Go ──────────────────────────────────────────────────────────────
+
+# Compiled binaries — this project has no /bin or /dist we want tracked,
+# so catch the common extensions instead of directories.
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test / profiling output.
+*.test
+*.out
+coverage.*
+*.prof
+
+# Vendor directory if someone runs `go mod vendor` locally.
+/vendor/
+
+# Go workspace local overrides.
+go.work
+go.work.sum
+
+# ─── Tooling ─────────────────────────────────────────────────────────
+
+# jj colocated-repo state. jj stores its own data in .jj/ alongside
+# .git/; it must not be committed.
+.jj/
+
+# Editors.
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# direnv.
+.envrc.local
+.direnv/
+
+# ─── OS ──────────────────────────────────────────────────────────────
+
+.DS_Store
+Thumbs.db
+
+# ─── Secrets / env ───────────────────────────────────────────────────
+
+.env
+.env.*
+!.env.example

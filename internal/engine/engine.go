@@ -141,6 +141,18 @@ type Result struct {
 	Outputs map[string]cty.Value
 }
 
+// formatSourceLoc returns a " (filename:line)" suffix suitable for
+// decorating a runtime error, or an empty string when the source
+// range is zero-valued (in-memory scenarios, merged bodies without
+// position info). Kept as a single formatter so every error-path
+// call site uses identical formatting.
+func formatSourceLoc(r hcl.Range) string {
+	if r.Filename == "" {
+		return ""
+	}
+	return fmt.Sprintf(" (%s:%d)", r.Filename, r.Start.Line)
+}
+
 // New constructs an Engine over the given provider registry. It also
 // builds the action-type routing table, failing if two providers
 // declare the same action name — that ambiguity must be resolved by
@@ -275,7 +287,7 @@ func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *grap
 					vars, err := e.resolveComponentInputs(ps.Components[node.ComponentKey], ps.Variables, resolved)
 					if err != nil {
 						return nil, reportFailure(string(nodeID),
-							fmt.Errorf("resolving inputs for component %q: %w", node.ComponentKey, err))
+							fmt.Errorf("resolving inputs for component %q%s: %w", node.ComponentKey, formatSourceLoc(node.SourceRange), err))
 					}
 					compVars[node.ComponentKey] = vars
 				}
@@ -285,7 +297,7 @@ func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *grap
 			outputs, err := e.executeAction(ctx, node, ps.Variables, compVars, resolved)
 			if err != nil {
 				return nil, reportFailure(string(nodeID),
-					fmt.Errorf("executing %s: %w", nodeID, err))
+					fmt.Errorf("executing %s%s: %w", nodeID, formatSourceLoc(node.SourceRange), err))
 			}
 			resolved[string(nodeID)] = outputs
 			e.reporter.NodeCompleted(string(nodeID), outputs, time.Since(start))
@@ -297,7 +309,7 @@ func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *grap
 			outputs, err := e.resolveComponentOutputs(node, ps, compVars, resolved)
 			if err != nil {
 				return nil, reportFailure(string(nodeID),
-					fmt.Errorf("resolving outputs for %s: %w", nodeID, err))
+					fmt.Errorf("resolving outputs for %s%s: %w", nodeID, formatSourceLoc(node.SourceRange), err))
 			}
 			resolved[string(nodeID)] = outputs
 			e.reporter.NodeCompleted(string(nodeID), outputs, time.Since(start))

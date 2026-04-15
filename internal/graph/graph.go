@@ -46,6 +46,18 @@ type Node struct {
 	// once. When non-nil, the engine retries failed attempts with
 	// the configured backoff.
 	Retry *RetryConfig
+
+	// Teardown holds the body of a `lifecycle { teardown { ... } }`
+	// block if the action declares one. The body uses the same
+	// schema as the outer action body (provider-validated), so a
+	// sql action's teardown declares `query`, an http action's
+	// declares `method` and `url`, and so on.
+	//
+	// nil means the action has no teardown operation. Orchard's
+	// `orchard teardown <record>` command walks actions with
+	// non-nil Teardown in reverse topological order; actions with
+	// no Teardown are skipped.
+	Teardown hcl.Body
 }
 
 // Graph holds the dependency graph built from a parsed scenario.
@@ -86,6 +98,7 @@ func Build(ps *parser.ParsedScenario) (*Graph, error) {
 			Dependencies:  reserved.DependsOn,
 			Timeout:       reserved.Timeout,
 			Retry:         reserved.Retry,
+			Teardown:      reserved.Teardown,
 		}); err != nil {
 			return nil, err
 		}
@@ -113,6 +126,7 @@ func Build(ps *parser.ParsedScenario) (*Graph, error) {
 				Dependencies:  reserved.DependsOn,
 				Timeout:       reserved.Timeout,
 				Retry:         reserved.Retry,
+				Teardown:      reserved.Teardown,
 			}); err != nil {
 				return nil, err
 			}
@@ -321,6 +335,16 @@ var reservedActionSchema = &hcl.BodySchema{
 	},
 	Blocks: []hcl.BlockHeaderSchema{
 		{Type: "retry"},
+		{Type: "lifecycle"},
+	},
+}
+
+// lifecycleBodySchema parses the inside of a lifecycle { ... } block.
+// Today only `teardown { }` is supported; future additions (pre,
+// post, rollback) would live alongside it here.
+var lifecycleBodySchema = &hcl.BodySchema{
+	Blocks: []hcl.BlockHeaderSchema{
+		{Type: "teardown"},
 	},
 }
 
@@ -386,6 +410,11 @@ type reservedActionAttrs struct {
 	// means "no retry — one attempt". When non-nil, the engine
 	// wraps the action's Execute call in a bounded retry loop.
 	Retry *RetryConfig
+
+	// Teardown captures the body of a `lifecycle { teardown { ... } }`
+	// block. nil means the action has no teardown — it is skipped
+	// by `orchard teardown`.
+	Teardown hcl.Body
 }
 
 // extractReservedActionAttrs pulls orchard-reserved attributes off
@@ -466,7 +495,52 @@ func extractReservedActionAttrs(body hcl.Body, componentKey string) (reservedAct
 		out.Retry = cfg
 	}
 
+	// lifecycle { teardown { ... } } — at most one lifecycle per
+	// action. Multiple would leave it ambiguous which teardown
+	// block wins and is surely a mistake.
+	var lifecycleBlocks []*hcl.Block
+	for _, b := range content.Blocks {
+		if b.Type == "lifecycle" {
+			lifecycleBlocks = append(lifecycleBlocks, b)
+		}
+	}
+	if len(lifecycleBlocks) > 1 {
+		return out, nil, fmt.Errorf("lifecycle: at most one lifecycle block per action, got %d", len(lifecycleBlocks))
+	}
+	if len(lifecycleBlocks) == 1 {
+		tdBody, err := parseLifecycleBlock(lifecycleBlocks[0])
+		if err != nil {
+			return out, nil, fmt.Errorf("lifecycle: %w", err)
+		}
+		out.Teardown = tdBody
+	}
+
 	return out, remain, nil
+}
+
+// parseLifecycleBlock extracts the teardown block's body from a
+// lifecycle block. Returns nil when the lifecycle block has no
+// teardown — that is legal even if currently useless, because
+// future lifecycle members (pre, post, rollback) would also slot in
+// here without forcing existing scenarios to declare teardown.
+func parseLifecycleBlock(block *hcl.Block) (hcl.Body, error) {
+	content, diags := block.Body.Content(lifecycleBodySchema)
+	if diags.HasErrors() {
+		return nil, fmt.Errorf("%s", diags.Error())
+	}
+	var tds []*hcl.Block
+	for _, b := range content.Blocks {
+		if b.Type == "teardown" {
+			tds = append(tds, b)
+		}
+	}
+	if len(tds) > 1 {
+		return nil, fmt.Errorf("teardown: at most one teardown block per lifecycle, got %d", len(tds))
+	}
+	if len(tds) == 0 {
+		return nil, nil
+	}
+	return tds[0].Body, nil
 }
 
 // parseRetryBlock decodes the attributes of a retry { ... } block

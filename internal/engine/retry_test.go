@@ -20,13 +20,17 @@ import (
 // flakyProvider fails a configurable number of times before
 // succeeding. calls is incremented on every Execute to let tests
 // assert exactly how many attempts ran.
+//
+// The struct is always used behind a pointer — atomic.Int32 must
+// not be copied, and go vet enforces this via its copylocks check.
+// All methods therefore take a pointer receiver.
 type flakyProvider struct {
 	calls        atomic.Int32
 	failUntil    int32 // return an error while calls <= this value
 	errOnFailure error
 }
 
-func (flakyProvider) Schema() protocol.ProviderSchema {
+func (*flakyProvider) Schema() protocol.ProviderSchema {
 	return protocol.ProviderSchema{
 		Name: "flaky", Version: "1", Protocol: protocol.ProtocolVersion,
 		Actions: map[string]protocol.ActionSchema{
@@ -34,7 +38,7 @@ func (flakyProvider) Schema() protocol.ProviderSchema {
 		},
 	}
 }
-func (flakyProvider) Configure(context.Context, map[string]cty.Value) error { return nil }
+func (*flakyProvider) Configure(context.Context, map[string]cty.Value) error { return nil }
 func (p *flakyProvider) Execute(context.Context, string, map[string]cty.Value) (map[string]cty.Value, error) {
 	n := p.calls.Add(1)
 	if n <= p.failUntil {
@@ -42,7 +46,7 @@ func (p *flakyProvider) Execute(context.Context, string, map[string]cty.Value) (
 	}
 	return map[string]cty.Value{"attempt": cty.NumberIntVal(int64(n))}, nil
 }
-func (flakyProvider) Close() error { return nil }
+func (*flakyProvider) Close() error { return nil }
 
 func runWithRetry(t *testing.T, p *flakyProvider, cfg *graph.RetryConfig) (map[string]cty.Value, error) {
 	t.Helper()

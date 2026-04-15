@@ -4,7 +4,7 @@ scenario "combined_providers" {
       source = "builtin/postgres"
     }
     echo = {
-      source = "exec:./testdata/echo/echo-provider"
+      source = "exec:../echo/echo-provider"
     }
   }
 

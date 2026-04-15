@@ -24,9 +24,12 @@ required_providers {
 
 The source format is `exec:<path>`, where `<path>` is an executable file:
 
-- Relative paths are resolved against the directory of the scenario file that
-  declares the provider.
-- Absolute paths are used as-is.
+- **Relative paths** are resolved against the directory of the scenario file
+  that declares the provider, then converted to an absolute path at parse
+  time. `exec:./bin/foo` in `/projects/my-repo/scenarios/dev.hcl` refers to
+  `/projects/my-repo/scenarios/bin/foo` regardless of the current working
+  directory when you run `orchard`.
+- **Absolute paths** (starting with `/`) are used as-is.
 - The binary must be executable (`chmod +x`).
 
 ## Configuration and actions

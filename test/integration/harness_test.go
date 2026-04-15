@@ -100,9 +100,9 @@ func runMigrations(dsn string) error {
 
 // buildEchoProvider compiles the test-only echo external provider
 // into a known location inside testdata/echo so integration scenarios
-// can reference it via `exec:./testdata/echo/echo-provider`. The
-// relative path is what the scenario sees when go test sets cwd to
-// the package directory during the run.
+// can reference it via `exec:../echo/echo-provider` — the path is
+// resolved relative to the scenario file's directory, which lives at
+// testdata/scenarios/, so sibling testdata/echo/ is one level up.
 func buildEchoProvider() error {
 	echoBinaryPath = filepath.Join("testdata", "echo", "echo-provider")
 	cmd := exec.Command("go", "build", "-o", echoBinaryPath, "./testdata/echo")

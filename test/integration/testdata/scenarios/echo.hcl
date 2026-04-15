@@ -1,7 +1,7 @@
 scenario "echo_roundtrip" {
   required_providers {
     echo = {
-      source = "exec:./testdata/echo/echo-provider"
+      source = "exec:../echo/echo-provider"
     }
   }
 

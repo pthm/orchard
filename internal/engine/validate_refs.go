@@ -138,7 +138,10 @@ func (e *Engine) buildComponentTypedEvalContext(
 		variables["action"] = cty.ObjectVal(objs)
 	}
 
-	return &hcl.EvalContext{Variables: variables}
+	return &hcl.EvalContext{
+		Variables: variables,
+		Functions: parser.StdFunctions(),
+	}
 }
 
 // buildTypedEvalContext constructs an eval context where node
@@ -212,7 +215,10 @@ func (e *Engine) buildTypedEvalContext(ps *parser.ParsedScenario, g *graph.Graph
 		variables["component"] = cty.ObjectVal(objs)
 	}
 
-	return &hcl.EvalContext{Variables: variables}
+	return &hcl.EvalContext{
+		Variables: variables,
+		Functions: parser.StdFunctions(),
+	}
 }
 
 // componentOutputsObject returns a typed cty object value

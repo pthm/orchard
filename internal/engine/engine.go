@@ -613,7 +613,7 @@ func (e *Engine) resolveComponentInputs(
 		if defaultExpr == nil {
 			continue
 		}
-		val, diags := defaultExpr.Value(&hcl.EvalContext{})
+		val, diags := defaultExpr.Value(&hcl.EvalContext{Functions: parser.StdFunctions()})
 		if diags.HasErrors() {
 			return nil, fmt.Errorf("component %q variable %q default: %s",
 				compKey, v.Name, diags.Error())

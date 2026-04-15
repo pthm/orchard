@@ -131,21 +131,41 @@ action "sql" "seed" {
 
 ## Built-in functions
 
-HCL ships a standard library of functions (string manipulation, collections,
-encoding, math). Common ones:
+Orchard exposes a curated subset of the cty standard library in every
+expression — variable defaults, provider configs, component inputs, action
+attributes, scenario outputs, component outputs.
 
-| Function | Example |
-|----------|---------|
-| `length` | `length(var.tags)` |
-| `concat` | `concat(var.a, var.b)` |
-| `format` | `format("hello %s", var.name)` |
-| `upper` / `lower` | `upper(var.region)` |
-| `jsonencode` | `body = jsonencode({ name = var.name })` |
-| `jsondecode` | `jsondecode(action.request.x.body)` |
-| `lookup` | `lookup(var.config, "timeout", "30s")` |
+| Category | Functions |
+|----------|-----------|
+| Strings | `upper`, `lower`, `title`, `trim`, `trimspace`, `trimprefix`, `trimsuffix`, `substr`, `replace`, `format`, `formatlist`, `split`, `join`, `chomp`, `strlen` |
+| Collections | `concat`, `length`, `keys`, `values`, `lookup`, `contains`, `merge`, `reverse`, `sort`, `slice`, `distinct`, `element`, `range`, `zipmap` |
+| Encoding | `jsonencode`, `jsondecode`, `csvdecode` |
+| Math | `abs`, `ceil`, `floor`, `max`, `min`, `log`, `pow`, `signum` |
+| Regex | `regex`, `regexall` |
+| Time | `formatdate`, `timeadd` |
+| Sets | `setintersection`, `setproduct`, `setsubtract`, `setunion` |
 
-See the [HCL function reference](https://github.com/hashicorp/hcl/tree/main/ext/tryfunc)
-for the full catalog.
+Examples:
+
+```hcl
+variable "name" { default = upper("acme") }
+
+provider "http" {
+  base_url = format("https://%s.example.com", var.region)
+}
+
+action "request" "create" {
+  method = "POST"
+  body   = jsonencode({ name = var.name, tags = concat(var.base_tags, ["orchard"]) })
+}
+```
+
+Note that string-length uses `strlen` (not `length`, which operates on
+collections). Functions that take a collection — `length`, `concat`,
+`sort` — require lists, maps, or tuples.
+
+The function set is fixed at compile time. Adding new functions is additive
+to existing scenarios and can be proposed via the repo.
 
 ## Reference syntax in `depends_on`
 

@@ -5,6 +5,8 @@ import (
 
 	"github.com/hashicorp/hcl/v2"
 	"github.com/zclconf/go-cty/cty"
+
+	"github.com/pthm/orchard/internal/parser"
 )
 
 // buildEvalContext constructs an HCL EvalContext from resolved variables
@@ -61,7 +63,10 @@ func buildEvalContext(
 		variables["component"] = v
 	}
 
-	return &hcl.EvalContext{Variables: variables}
+	return &hcl.EvalContext{
+		Variables: variables,
+		Functions: parser.StdFunctions(),
+	}
 }
 
 // wrapGrouped folds a two-level type→name→value map into a single

@@ -212,7 +212,10 @@ func evaluateProviderConfigs(
 		result[name] = map[string]cty.Value{}
 	}
 
-	evalCtx := &hcl.EvalContext{Variables: map[string]cty.Value{}}
+	evalCtx := &hcl.EvalContext{
+		Variables: map[string]cty.Value{},
+		Functions: StdFunctions(),
+	}
 	if len(vars) > 0 {
 		evalCtx.Variables["var"] = cty.ObjectVal(vars)
 	}
@@ -352,7 +355,7 @@ func validateComponentUniqueness(c *ComponentDefBlock) error {
 
 func resolveVariables(blocks []*VariableBlock, overrides map[string]string) (map[string]cty.Value, error) {
 	result := make(map[string]cty.Value)
-	ctx := &hcl.EvalContext{}
+	ctx := &hcl.EvalContext{Functions: StdFunctions()}
 
 	for _, v := range blocks {
 		declaredType, err := ResolveVariableType(v)

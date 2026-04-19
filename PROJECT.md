@@ -653,33 +653,40 @@ Users choose the appropriate layer for each situation. Raw SQL for complex queri
 
 ```bash
 # Execute a scenario
-orchard run merchant_with_chargeback
+orchard run scenarios/dev.hcl
 
 # With variable overrides
-orchard run merchant_with_chargeback \
+orchard run scenarios/dev.hcl \
   --var merchant_name=Acme \
   --var transaction_count=50
 
-# Show execution plan without running
-orchard plan merchant_with_chargeback
+# Pick a scenario when a file declares multiple
+orchard run scenarios/uat.hcl --scenario subscription_three_failures
 
-# List available scenarios
-orchard list
+# Show execution plan without running
+orchard plan scenarios/dev.hcl
+
+# List available scenarios (styled: bold names, violet tags, muted descriptions)
+orchard list scenarios/
 
 # Render provider reference docs from a provider's schema
 orchard docs builtin/postgres
 orchard docs exec:./providers/stripe
 
 # Teardown a specific run by pointing at its record file
-orchard teardown orchard_scenario_run_20260415T000000Z_abc.json
+orchard teardown orchard_dev_run_20260415T000000Z_abc.json
 
-# Pull database schema for validation
+# Control where records land, or skip them entirely
+orchard run scenarios/dev.hcl --record-dir .orchard/runs
+orchard run scenarios/ci.hcl  --no-record
+
+# Pull database schema for validation (future — Milestone 4)
 orchard schema pull
 
-# Inspect a run
+# Inspect a run (future — Milestone 5)
 orchard inspect <run-id>
 
-# List past runs
+# List past runs (future — Milestone 5)
 orchard list runs
 ```
 
@@ -943,11 +950,12 @@ Harden the tool for real-world use and improve the authoring experience.
 | `orchard docs <source>` — schema-driven provider reference generator | Done |
 | Schema authoring extensions (`description`, `notes`, `example { }` on provider and action) | Done |
 | `justfile` task runner (test, docs, docs-watch, docs-provider) | Done |
-| Scenario and component `description` and `tags` metadata | Not started |
-| Improved error messages with HCL source locations | Partial — parser/plan errors carry HCL coordinates; runtime errors don't yet |
+| Scenario and component `description` and `tags` metadata | Done |
+| Styled `orchard list` with lipgloss (bold names, violet tags, muted paths/descriptions) | Done |
+| Runtime error messages with HCL source locations (`file:line`) | Done |
+| Multiple scenarios per file; `--scenario <name>` on `run` / `plan` | Done |
 | Dry-run mode (plan with expression evaluation but no execution) | Not started |
 | Execution logging with structured output | Not started |
-| Multiple scenarios per file support | Not started |
 | Parallel execution of independent nodes | Not started |
 | Transaction wrapping for atomic scenario execution | Not started |
 | Configuration file (`.orchard/config.hcl` or similar) | Not started |
@@ -984,7 +992,8 @@ cmd/
   root.go                       Cobra root, global --var flag
   run.go                        orchard run — parse → graph → validate → configure → execute
   plan.go                       orchard plan — parse → graph → schema-validate, print DAG
-  list.go                       orchard list — scan for scenario files
+  list.go                       orchard list — scan for scenario files, styled with
+                                lipgloss (bold names, violet tags, muted paths)
   docs.go                       orchard docs — resolve provider source, render schema to markdown
   teardown.go                   orchard teardown — load record, reload scenario, invoke engine.Teardown
   registry.go                   registerProviders + buildRegistry helpers (shared by run/plan/docs/teardown)
@@ -993,7 +1002,10 @@ internal/
   parser/
     schema.go                   HCL schema structs: Scenario, Component, RequiredProviders,
                                 ProviderConfig, Variable, Action, Output
-    parser.go                   LoadScenario: parse, decode, extract required_providers,
+    schema.go                   HCL schema structs — ScenarioBlock now supports
+                                description/tags and multiple scenarios per file
+    parser.go                   LoadScenario(path, name, vars): parse, pick scenario
+                                by name (auto-select when single), extract required_providers,
                                 evaluate provider configs, resolve components, merge vars,
                                 absolutize exec: provider paths against scenario dir
     functions.go                StdFunctions — the HCL stdlib subset Orchard exposes in
@@ -1002,15 +1014,18 @@ internal/
 
   graph/
     graph.go                    Build DAG from Expression.Variables() traversals;
-                                component-input expression deps propagate to internal actions
+                                component-input expression deps propagate to internal
+                                actions. Nodes carry SourceRange for error decoration
+                                and Teardown body from lifecycle { teardown { } } blocks.
     topo.go                     Kahn's algorithm topological sort
 
   engine/
     engine.go                   Walk topo order, resolve compVars per component,
                                 dispatch via pkg/provider.Provider. Reporter
-                                interface (RunStarted/NodeStarted/NodeCompleted/
-                                NodeFailed/RunCompleted) decouples the engine
-                                from presentation.
+                                interface (RunStarted/NodeStarted/NodeCompleted
+                                with outputs/NodeFailed/RunCompleted) decouples
+                                the engine from presentation. Runtime errors
+                                now carry source file:line via Node.SourceRange.
     evalattrs.go                Schema-driven HCL body → map[string]cty.Value with
                                 coercion to declared types and defaults from schema
     validate.go                 Engine.ValidateGraph — structural schema check, no eval

@@ -1,4 +1,7 @@
 component "merchant" {
+  description = "Insert a merchant row and expose its id, name, and region"
+  tags        = ["postgres", "seed"]
+
   variable "name" {
     default = "Default Merchant"
   }

@@ -1,4 +1,7 @@
 scenario "http_roundtrip" {
+  description = "HTTP GET and POST with base_url, default headers, and response capture"
+  tags        = ["http", "headers", "post"]
+
   required_providers {
     http = {
       source = "builtin/http"

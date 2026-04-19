@@ -1,4 +1,7 @@
 scenario "echo_roundtrip" {
+  description = "External echo provider: action chaining and string interpolation"
+  tags        = ["external", "echo", "chaining"]
+
   required_providers {
     echo = {
       source = "exec:../echo/echo-provider"

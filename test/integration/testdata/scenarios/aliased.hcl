@@ -1,4 +1,7 @@
 scenario "aliased_postgres" {
+  description = "Postgres registered under a non-default alias to verify config routing"
+  tags        = ["postgres", "alias", "routing"]
+
   # Register the postgres provider under a non-default local name.
   # Without the alias-based routing fix, Configure would look up
   # config under "postgres" (the schema name) and miss the "db"

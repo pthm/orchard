@@ -1,4 +1,7 @@
 scenario "basic_merchant_and_product" {
+  description = "Insert a merchant and a product linked by FK, capturing RETURNING outputs"
+  tags        = ["postgres", "fk-chain"]
+
   required_providers {
     postgres = {
       source = "builtin/postgres"

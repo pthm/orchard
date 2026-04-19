@@ -10,6 +10,8 @@ import (
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclparse"
 	"github.com/spf13/cobra"
+
+	"github.com/pthm/orchard/internal/cli/render"
 )
 
 func newListCmd() *cobra.Command {
@@ -22,6 +24,7 @@ func newListCmd() *cobra.Command {
 			if len(args) > 0 {
 				dir = args[0]
 			}
+			out := cmd.OutOrStdout()
 
 			scenarios, err := findScenarios(dir, cmd.ErrOrStderr())
 			if err != nil {
@@ -29,18 +32,25 @@ func newListCmd() *cobra.Command {
 			}
 
 			if len(scenarios) == 0 {
-				fmt.Println("No scenarios found.")
+				fmt.Fprintln(out, "No scenarios found.")
 				return nil
 			}
 
-			fmt.Println("Available scenarios:")
 			for _, s := range scenarios {
-				fmt.Printf("  %s  (%s)\n", s.name, s.path)
+				fmt.Fprintf(out, "  %s  %s\n",
+					render.Bold.Render(s.name),
+					render.Muted.Render("("+s.path+")"),
+				)
 				if s.description != "" {
-					fmt.Printf("      %s\n", s.description)
+					fmt.Fprintf(out, "  %s\n",
+						render.Muted.Render(s.description))
 				}
 				if len(s.tags) > 0 {
-					fmt.Printf("      tags: %s\n", strings.Join(s.tags, ", "))
+					var styled []string
+					for _, tag := range s.tags {
+						styled = append(styled, render.Kind.Render(tag))
+					}
+					fmt.Fprintf(out, "  %s\n", strings.Join(styled, " "))
 				}
 			}
 			return nil
@@ -90,9 +100,6 @@ func findScenarios(dir string, warn io.Writer) ([]scenarioInfo, error) {
 				name: block.Labels[0],
 				path: path,
 			}
-			// Pull description/tags out of the scenario body without
-			// decoding anything heavier. Failures here are non-fatal
-			// — metadata is best-effort in a listing context.
 			attrs, _, ad := block.Body.PartialContent(&hcl.BodySchema{
 				Attributes: []hcl.AttributeSchema{
 					{Name: "description"},

@@ -1,4 +1,7 @@
 scenario "teardown_demo" {
+  description = "Merchant and product with lifecycle teardown blocks for reverse-order cleanup"
+  tags        = ["postgres", "teardown", "lifecycle", "fk-chain"]
+
   required_providers {
     postgres = {
       source = "builtin/postgres"

@@ -1,4 +1,7 @@
 scenario "merchant_with_products" {
+  description = "Component composition: merchant loaded from an external file, outputs wired into a product insert"
+  tags        = ["postgres", "component", "composition"]
+
   required_providers {
     postgres = {
       source = "builtin/postgres"

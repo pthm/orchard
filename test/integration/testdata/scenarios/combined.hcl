@@ -1,4 +1,7 @@
 scenario "combined_providers" {
+  description = "Cross-provider wiring: echo output flows into postgres, diamond FK dependency"
+  tags        = ["postgres", "external", "cross-provider", "diamond"]
+
   required_providers {
     postgres = {
       source = "builtin/postgres"

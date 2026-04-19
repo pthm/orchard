@@ -37,20 +37,15 @@ func newListCmd() *cobra.Command {
 			}
 
 			for _, s := range scenarios {
-				fmt.Fprintf(out, "  %s  %s\n",
-					render.Bold.Render(s.name),
-					render.Muted.Render("("+s.path+")"),
-				)
+				line := render.Bold.Render(s.name)
+				if len(s.tags) > 0 {
+					line += "  " + render.Kind.Render("["+strings.Join(s.tags, ", ")+"]")
+				}
+				line += "  " + render.Muted.Render("("+s.path+")")
+				fmt.Fprintf(out, "  %s\n", line)
 				if s.description != "" {
 					fmt.Fprintf(out, "  %s\n",
 						render.Muted.Render(s.description))
-				}
-				if len(s.tags) > 0 {
-					var styled []string
-					for _, tag := range s.tags {
-						styled = append(styled, render.Kind.Render(tag))
-					}
-					fmt.Fprintf(out, "  %s\n", strings.Join(styled, " "))
 				}
 			}
 			return nil

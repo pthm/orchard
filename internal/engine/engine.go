@@ -429,7 +429,9 @@ func (e *Engine) executeActionOnce(
 	}
 	validated, err := validateOutputs(route.schema, outputs)
 	if err != nil {
-		return nil, fmt.Errorf("action %s: %w", node.ID, err)
+		// Don't prefix with node.ID here — the caller in Execute
+		// already wraps with "executing <nodeID> (file:line)".
+		return nil, fmt.Errorf("output validation: %w", err)
 	}
 	return validated, nil
 }

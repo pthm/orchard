@@ -405,7 +405,8 @@ th, td {
   border-bottom: none;
 }
 
-.orchard-search-result:hover {
+.orchard-search-result:hover,
+.orchard-search-result.active {
   background: rgba(153, 173, 122, 0.1);
   text-decoration: none;
 }

@@ -22,6 +22,40 @@ orchard <command> [arguments] [flags]
 |------|--------|
 | `NO_COLOR` | If set to any value, disables colored output. Equivalent to `--no-color`. |
 
+## `orchard init`
+
+```
+orchard init [directory]
+```
+
+Scaffold a new Orchard project with a starter scenario and component.
+
+| Argument | Description |
+|----------|-------------|
+| `[directory]` | Where to create the files. Defaults to `.`. Created if it doesn't exist. |
+
+**What it creates**
+
+| File | Purpose |
+|------|---------|
+| `scenarios/hello.hcl` | A single-component scenario that inserts a merchant row with a lifecycle teardown block. |
+| `components/merchant.hcl` | A reusable merchant component with typed inputs, outputs, and teardown. |
+
+**Behavior**
+
+- Existing files are skipped — re-running `init` in a directory that already
+  has some files is safe.
+- After scaffolding, prints actionable next steps: edit the DSN, plan, run.
+
+**Example**
+
+```sh
+orchard init my-project
+cd my-project
+orchard plan scenarios/hello.hcl --var dsn="postgres://localhost/dev"
+orchard run  scenarios/hello.hcl --var dsn="postgres://localhost/dev"
+```
+
 ## `orchard run`
 
 ```
@@ -41,6 +75,7 @@ prints declared outputs. Exits non-zero on validation or execution failure.
 |------|------|---------|-------------|
 | `--record-dir <path>` | string | `.` (cwd) | Directory to write the run record to. Created if missing. |
 | `--no-record` | bool | `false` | Skip writing a run record. |
+| `--scenario <name>` | string | — | Pick a scenario by name when the file defines multiple. Optional for single-scenario files. |
 
 **Behavior**
 
@@ -79,6 +114,12 @@ Validate a scenario and print its execution plan without side effects.
 | Argument | Description |
 |----------|-------------|
 | `<scenario>` | Path to an HCL scenario file. Required. |
+
+**Flags**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--scenario <name>` | string | — | Pick a scenario by name when the file defines multiple. |
 
 **Behavior**
 
@@ -147,6 +188,7 @@ orchard list [directory]
 ```
 
 Walk a directory tree and print every `scenario` block found in `.hcl` files.
+Files with multiple scenarios list each one as a separate entry.
 
 | Argument | Description |
 |----------|-------------|
@@ -156,9 +198,17 @@ Walk a directory tree and print every `scenario` block found in `.hcl` files.
 
 - Walks recursively from `[directory]`.
 - Reads every `.hcl` file and extracts `scenario "..." { }` blocks.
-- Prints `scenario_name  path/to/file.hcl`, one per line.
+- For each scenario, prints the name (bold), tags in violet brackets, file
+  path in gray, and description (if present) on the next line.
 - Skips the `.seed` directory if present.
 - Unparseable files are skipped silently (warnings go to stderr).
+
+**Example output**
+
+```
+  hello  [starter]  (scenarios/hello.hcl)
+  Insert a merchant and verify the pipeline works end-to-end
+```
 
 **Exit codes**
 
@@ -167,12 +217,26 @@ Walk a directory tree and print every `scenario` block found in `.hcl` files.
 
 ## Examples
 
+Scaffold a new project and run it:
+
+```sh
+orchard init my-project
+cd my-project
+orchard run scenarios/hello.hcl --var dsn="postgres://localhost/dev"
+```
+
 Run with variable overrides:
 
 ```sh
 orchard run scenarios/dev.hcl \
   --var dsn="postgres://localhost/dev" \
   --var merchant_name="Acme"
+```
+
+Run a specific scenario from a multi-scenario file:
+
+```sh
+orchard run scenarios/uat.hcl --scenario subscription_three_failures
 ```
 
 Plan in CI, fail the build on invalid scenarios:

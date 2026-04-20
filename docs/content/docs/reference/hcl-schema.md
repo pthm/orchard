@@ -16,6 +16,9 @@ A scenario file contains exactly one `scenario` block.
 
 ```hcl
 scenario "<name>" {
+  description = "..."           # optional
+  tags        = ["a", "b"]      # optional
+
   required_providers { ... }
   variable "<name>"  { ... }
   provider "<name>"  { ... }
@@ -24,6 +27,15 @@ scenario "<name>" {
   output "<name>"    { ... }
 }
 ```
+
+A single HCL file may contain **multiple scenario blocks**. When it does,
+`orchard run` and `orchard plan` require `--scenario <name>` to pick one.
+Single-scenario files work without the flag.
+
+| Attribute | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `description` | `string` | no | Free-text summary. Shown by `orchard list`. |
+| `tags` | `list(string)` | no | Categorisation labels. Shown by `orchard list` in violet brackets. |
 
 | Block | Cardinality | Purpose |
 |-------|-------------|---------|
@@ -199,6 +211,9 @@ A component file contains exactly one `component` block.
 
 ```hcl
 component "merchant" {
+  description = "..."           # optional
+  tags        = ["seed"]        # optional
+
   variable "<name>" { ... }
   action "<type>" "<name>" { ... }
   output "<name>"   { ... }
@@ -208,6 +223,11 @@ component "merchant" {
 The label is the component's type. Component files may not declare
 `required_providers` or `provider` blocks — components inherit providers from
 the enclosing scenario.
+
+| Attribute | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `description` | `string` | no | Free-text summary. |
+| `tags` | `list(string)` | no | Categorisation labels. |
 
 Inside a component, `variable`, `action`, and `output` have the same schema as
 in a scenario.

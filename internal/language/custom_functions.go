@@ -1,4 +1,4 @@
-package parser
+package language
 
 import (
 	"crypto/rand"
@@ -13,6 +13,18 @@ import (
 	"github.com/zclconf/go-cty/cty"
 	"github.com/zclconf/go-cty/cty/function"
 )
+
+// CustomFunc returns a custom function implementation by name.
+// Used by internal/language to reference individual implementations
+// without importing the entire function map.
+func CustomFunc(name string) function.Function {
+	m := customFunctions()
+	f, ok := m[name]
+	if !ok {
+		panic("parser: unknown custom function: " + name)
+	}
+	return f
+}
 
 // customFunctions returns Orchard-specific functions that don't have
 // a cty/stdlib equivalent. Merged into Functions() so they're

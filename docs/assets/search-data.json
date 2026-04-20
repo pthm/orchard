@@ -10,11 +10,18 @@
     "section": {{ (partial "docs/title" $page.Parent) | default $.Site.Title | jsonify }},
     "content": {{ $page.Plain | jsonify }},
     "headings": [
-      {{- range $hi, $h := $page.Fragments.Headings -}}
-        {{- if gt $hi 0 }},{{ end -}}
-        {"id":{{ $h.ID | jsonify }},"title":{{ $h.Title | jsonify }},"level":{{ $h.Level }}}
-        {{- range $si, $sub := $h.Headings -}}
-          ,{"id":{{ $sub.ID | jsonify }},"title":{{ $sub.Title | jsonify }},"level":{{ $sub.Level }}}
+      {{- $first := true -}}
+      {{- range $page.Fragments.Headings -}}
+        {{- if not $first }},{{ end -}}{{- $first = false -}}
+        {"id":{{ .ID | jsonify }},"title":{{ .Title | jsonify }},"level":{{ .Level }}}
+        {{- range .Headings -}}
+          ,{"id":{{ .ID | jsonify }},"title":{{ .Title | jsonify }},"level":{{ .Level }}}
+          {{- range .Headings -}}
+            ,{"id":{{ .ID | jsonify }},"title":{{ .Title | jsonify }},"level":{{ .Level }}}
+            {{- range .Headings -}}
+              ,{"id":{{ .ID | jsonify }},"title":{{ .Title | jsonify }},"level":{{ .Level }}}
+            {{- end -}}
+          {{- end -}}
         {{- end -}}
       {{- end -}}
     ]

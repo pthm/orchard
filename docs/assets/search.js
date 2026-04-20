@@ -71,6 +71,12 @@
       .trim();
   }
 
+  // stripHTML removes inline HTML tags from heading titles — Hugo's
+  // .Fragments includes rendered markup like <code>.
+  function stripHTML(s) {
+    return s.replace(/<[^>]*>/g, '');
+  }
+
   // splitCompound turns "formatdate" into "formatdate format date"
   // so both the compound name and its parts are searchable. Splits
   // at boundaries where a lowercase letter meets the next "word"
@@ -137,19 +143,21 @@
           // Per-heading sections.
           for (var i = 0; i < headings.length; i++) {
             var h = headings[i];
-            var pos = plain.indexOf(h.title);
+            var cleanTitle = stripHTML(h.title);
+            var pos = plain.indexOf(cleanTitle);
             if (pos < 0) continue;
 
             var nextPos = plain.length;
             if (i + 1 < headings.length) {
-              var np = plain.indexOf(headings[i + 1].title, pos + h.title.length);
+              var nextTitle = stripHTML(headings[i + 1].title);
+              var np = plain.indexOf(nextTitle, pos + cleanTitle.length);
               if (np > pos) nextPos = np;
             }
-            var rawSnippet = plain.slice(pos + h.title.length, Math.min(pos + 500, nextPos)).trim();
+            var rawSnippet = plain.slice(pos + cleanTitle.length, Math.min(pos + 500, nextPos)).trim();
 
             // Index with split compound words in the title so
             // "format date" matches "formatdate".
-            var indexTitle = splitCompound(h.title);
+            var indexTitle = splitCompound(cleanTitle);
 
             var sectionEntry = {
               id: id++,
@@ -159,8 +167,8 @@
               content: rawSnippet,
               preview: rawSnippet
             };
-            // Store the original title for display.
-            sectionEntry._displayTitle = h.title;
+            // Store the clean title for display.
+            sectionEntry._displayTitle = cleanTitle;
             sections.push(sectionEntry);
             index.add(sectionEntry);
           }

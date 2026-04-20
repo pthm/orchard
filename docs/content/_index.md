@@ -24,7 +24,16 @@ rows, calling APIs, running scripts, and wiring outputs between steps automatica
   them into complete environments you can stand up, tear down, and share.
 {{% /columns %}}
 
-## Start here
+## Quick start
+
+```sh
+go install github.com/pthm/orchard@latest
+orchard init my-project && cd my-project
+orchard plan scenarios/hello.hcl --var dsn="postgres://localhost/dev"
+orchard run  scenarios/hello.hcl --var dsn="postgres://localhost/dev"
+```
+
+## Learn more
 
 - [Getting started](docs/getting-started/) — install the CLI and run your first scenario
 - [Concepts](docs/concepts/) — scenarios, components, providers, and how they fit together

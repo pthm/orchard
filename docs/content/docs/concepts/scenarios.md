@@ -68,9 +68,39 @@ In practice that means:
 - Use **outputs** to surface the bits of state a caller will need to interact with
   the resulting environment (IDs, URLs, tokens).
 
+## Metadata
+
+Scenarios can carry a `description` and `tags` for discoverability:
+
+```hcl
+scenario "merchant_with_chargeback" {
+  description = "Merchant with three failed payments and a pending review"
+  tags        = ["demo", "chargebacks"]
+  # ...
+}
+```
+
+`orchard list` surfaces both — the description appears under the scenario name,
+and tags render in brackets alongside it.
+
+## Multiple scenarios per file
+
+A single `.hcl` file can declare more than one scenario block. This is useful
+for grouping related variants (a demo vs a load-test version of the same setup)
+without splitting into many files.
+
+When a file has multiple scenarios, `orchard run` and `orchard plan` require
+`--scenario <name>` to pick one. Single-scenario files still work with no flag.
+
+```sh
+orchard run  scenarios/uat.hcl --scenario happy_path
+orchard plan scenarios/uat.hcl --scenario edge_case
+```
+
 ## Running a scenario
 
 ```sh
+orchard init my-project                 # scaffold a starter project
 orchard plan scenarios/merchant.hcl     # validate, print the graph, no side effects
 orchard run  scenarios/merchant.hcl     # execute it for real
 orchard list scenarios/                 # list all scenarios in a directory

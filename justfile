@@ -4,16 +4,14 @@
 default:
     @just --list
 
-# Regenerate provider reference pages from their schemas.
-#
-# Built-ins that have backfilled schemas (description, notes,
-# examples) produce full pages; providers whose schemas are still
-# bare will render sparse placeholder pages until they're backfilled.
+# Regenerate docs pages from schemas and the function registry.
 docs-generate:
     mkdir -p docs/content-generated/docs/providers
+    mkdir -p docs/content-generated/docs/reference
     go run . docs builtin/postgres > docs/content-generated/docs/providers/postgres.md
     go run . docs builtin/http     > docs/content-generated/docs/providers/http.md
     go run . docs builtin/exec     > docs/content-generated/docs/providers/exec.md
+    go run . functions --hugo      > docs/content-generated/docs/reference/functions.md
 
 # Generate one provider page. Useful while iterating.
 docs-provider name:

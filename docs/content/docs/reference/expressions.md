@@ -152,70 +152,12 @@ action "postgres_query" "seed" {
 }
 ```
 
-## Built-in functions
+## Functions
 
-Orchard exposes a function library in every expression — variable defaults,
-provider configs, component inputs, action attributes, scenario outputs,
-component outputs, and teardown bodies. All names use lowercase compound
-words with no separators (`jsonencode`, `timeadd`, `timeseries`, ...).
-
-| Category | Functions |
-|----------|-----------|
-| Strings | `upper`, `lower`, `title`, `trim`, `trimspace`, `trimprefix`, `trimsuffix`, `substr`, `replace`, `format`, `formatlist`, `split`, `join`, `chomp`, `strlen` |
-| Collections | `concat`, `length`, `keys`, `values`, `lookup`, `contains`, `merge`, `reverse`, `sort`, `slice`, `distinct`, `element`, `range`, `zipmap` |
-| Encoding | `jsonencode`, `jsondecode`, `csvdecode` |
-| Math | `abs`, `ceil`, `floor`, `max`, `min`, `log`, `pow`, `signum` |
-| Regex | `regex`, `regexall` |
-| Time | `now`, `timeadd`, `timesub`, `formatdate`, `timeunix`, `timerandom`, `timeseries`, `timesequence` |
-| Identity | `uuid` |
-| Environment | `env` |
-| Sets | `setintersection`, `setproduct`, `setsubtract`, `setunion` |
-
-### Time functions
-
-| Function | Signature | Returns |
-|----------|-----------|---------|
-| `now` | `now()` | Current UTC as RFC3339 string |
-| `timeadd` | `timeadd(timestamp, duration)` | Timestamp plus a Go duration |
-| `timesub` | `timesub(timestamp, duration)` | Timestamp minus a duration (supports `d`, `w`) |
-| `formatdate` | `formatdate(format, timestamp)` | Formatted timestamp string |
-| `timeunix` | `timeunix(timestamp)` | Unix epoch seconds as number |
-| `timerandom` | `timerandom(start, end)` | Single random timestamp in range |
-| `timeseries` | `timeseries(start, end, count)` | Exactly N evenly-spaced timestamps |
-| `timesequence` | `timesequence(start, end, min [, max])` | Timestamps stepping by random intervals |
-
-Duration strings accept Go's standard units (`h`, `m`, `s`, `ms`) plus
-`d` (days = 24h) and `w` (weeks = 7d). Fractional values like `"0.5d"` work.
-
-### Examples
-
-```hcl
-variable "name"  { default = upper("acme") }
-variable "id"    { default = uuid() }
-variable "dates" { default = timeseries(timesub(now(), "90d"), now(), 30) }
-
-provider "postgres" {
-  dsn = env("DATABASE_URL")
-}
-
-action "http_request" "create" {
-  method = "POST"
-  body   = jsonencode({ name = var.name, id = var.id })
-}
-
-action "postgres_query" "insert" {
-  query = format("INSERT INTO events (id, ts) VALUES ('%s', '%s')",
-    uuid(), element(var.dates, 0))
-}
-```
-
-Note: `strlen` measures string length; `length` measures collection length
-(lists, maps, tuples). `now()`, `uuid()`, `timerandom()`, and `env()` are
-impure — they may return different values on each call. That's intentional:
-scenarios are single-shot imperative runs, not convergent plans.
-
-The function set is fixed at compile time. Adding new functions is additive
-to existing scenarios.
+See the [functions reference](../functions/) for the complete list of all
+available functions with signatures, descriptions, parameter tables, and
+examples. The reference is auto-generated from Orchard's function registry
+so it stays in sync with the binary.
 
 ## Reference syntax in `depends_on`
 

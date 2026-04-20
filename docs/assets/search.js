@@ -44,6 +44,44 @@
     }
   }
 
+  // cleanText strips markdown artefacts and HTML entities from plain
+  // text so search previews read as prose, not raw markup.
+  function cleanText(s) {
+    return s
+      // Strip markdown heading markers (# ## ### etc.)
+      .replace(/^#{1,6}\s+/gm, '')
+      // Strip markdown emphasis/bold markers
+      .replace(/\*{1,3}([^*]+)\*{1,3}/g, '$1')
+      .replace(/_{1,3}([^_]+)_{1,3}/g, '$1')
+      // Strip markdown code backticks
+      .replace(/`([^`]*)`/g, '$1')
+      // Decode common HTML entities
+      .replace(/&rsquo;/g, "'")
+      .replace(/&lsquo;/g, "'")
+      .replace(/&rdquo;/g, '"')
+      .replace(/&ldquo;/g, '"')
+      .replace(/&mdash;/g, '—')
+      .replace(/&ndash;/g, '–')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&nbsp;/g, ' ')
+      // Collapse multiple whitespace/newlines
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  // splitCompound turns "formatdate" into "formatdate format date"
+  // so both the compound name and its parts are searchable. Splits
+  // at boundaries where a lowercase letter meets the next "word"
+  // (heuristic: sequences of 3+ lowercase chars).
+  function splitCompound(name) {
+    // Split known compound patterns: lowercase runs of 3+ chars
+    var parts = name.match(/[a-z]{3,}/g);
+    if (!parts || parts.length <= 1) return name;
+    return name + ' ' + parts.join(' ');
+  }
+
   function init() {
     input.removeEventListener('focus', init);
     if (hint) hint.style.display = 'none';
@@ -58,14 +96,14 @@
             index: ['title', 'content'],
             store: true
           },
-          tokenize: 'forward',
+          tokenize: 'full',
           resolution: 9
         });
 
         var id = 0;
         pages.forEach(function (page) {
           var headings = page.headings || [];
-          var plain = page.content || '';
+          var plain = cleanText(page.content || '');
 
           if (headings.length === 0) {
             var entry = {
@@ -73,7 +111,8 @@
               href: page.href,
               title: page.title,
               section: page.section,
-              content: plain.slice(0, 500)
+              content: plain.slice(0, 500),
+              preview: plain.slice(0, 500)
             };
             sections.push(entry);
             index.add(entry);
@@ -88,7 +127,8 @@
               href: page.href,
               title: page.title,
               section: page.section,
-              content: plain.slice(0, Math.min(firstPos, 500))
+              content: plain.slice(0, Math.min(firstPos, 500)),
+              preview: plain.slice(0, Math.min(firstPos, 500))
             };
             sections.push(intro);
             index.add(intro);
@@ -105,15 +145,22 @@
               var np = plain.indexOf(headings[i + 1].title, pos + h.title.length);
               if (np > pos) nextPos = np;
             }
-            var snippet = plain.slice(pos, Math.min(pos + 400, nextPos));
+            var rawSnippet = plain.slice(pos + h.title.length, Math.min(pos + 500, nextPos)).trim();
+
+            // Index with split compound words in the title so
+            // "format date" matches "formatdate".
+            var indexTitle = splitCompound(h.title);
 
             var sectionEntry = {
               id: id++,
               href: page.href + '#' + h.id,
-              title: h.title,
+              title: indexTitle,
               section: page.title,
-              content: snippet
+              content: rawSnippet,
+              preview: rawSnippet
             };
+            // Store the original title for display.
+            sectionEntry._displayTitle = h.title;
             sections.push(sectionEntry);
             index.add(sectionEntry);
           }
@@ -150,6 +197,15 @@
       return;
     }
 
+    // Boost results from the current page to the top so in-page
+    // navigation via search feels natural.
+    var currentPath = window.location.pathname;
+    merged.sort(function (a, b) {
+      var aLocal = a.href && a.href.split('#')[0] === currentPath ? 0 : 1;
+      var bLocal = b.href && b.href.split('#')[0] === currentPath ? 0 : 1;
+      return aLocal - bLocal;
+    });
+
     merged.slice(0, 10).forEach(function (doc) {
       var item = document.createElement('a');
       item.href = doc.href;
@@ -157,20 +213,27 @@
 
       var title = document.createElement('div');
       title.className = 'orchard-search-result-title';
-      title.textContent = doc.title;
+      // Use the original display title if available,
+      // otherwise fall back to the indexed title.
+      title.textContent = doc._displayTitle || doc.title;
 
       var section = document.createElement('div');
       section.className = 'orchard-search-result-section';
       section.textContent = doc.section;
 
-      var preview = document.createElement('div');
-      preview.className = 'orchard-search-result-preview';
-      var text = (doc.content || '').replace(doc.title, '').trim();
-      preview.textContent = text.slice(0, 140) + (text.length > 140 ? '...' : '');
+      var previewText = (doc.preview || doc.content || '').trim();
+      if (previewText) {
+        var preview = document.createElement('div');
+        preview.className = 'orchard-search-result-preview';
+        preview.textContent = previewText.slice(0, 140) + (previewText.length > 140 ? '...' : '');
+        item.appendChild(title);
+        item.appendChild(section);
+        item.appendChild(preview);
+      } else {
+        item.appendChild(title);
+        item.appendChild(section);
+      }
 
-      item.appendChild(title);
-      item.appendChild(section);
-      if (text) item.appendChild(preview);
       resultsEl.appendChild(item);
     });
 

@@ -140,20 +140,41 @@
             index.add(intro);
           }
 
-          // Per-heading sections.
+          // Per-heading sections. Build a breadcrumb trail by
+          // tracking the last heading at each level.
+          var breadcrumbStack = {};
+          breadcrumbStack[1] = page.title;
+
           for (var i = 0; i < headings.length; i++) {
             var h = headings[i];
             var cleanTitle = stripHTML(h.title);
-            var pos = plain.indexOf(cleanTitle);
-            if (pos < 0) continue;
 
-            var nextPos = plain.length;
-            if (i + 1 < headings.length) {
-              var nextTitle = stripHTML(headings[i + 1].title);
-              var np = plain.indexOf(nextTitle, pos + cleanTitle.length);
-              if (np > pos) nextPos = np;
+            // Update the breadcrumb stack for this level.
+            breadcrumbStack[h.level] = cleanTitle;
+            // Clear deeper levels.
+            for (var l = h.level + 1; l <= 6; l++) {
+              delete breadcrumbStack[l];
             }
-            var rawSnippet = plain.slice(pos + cleanTitle.length, Math.min(pos + 500, nextPos)).trim();
+
+            // Build breadcrumb: page > h2 > h3 > ...
+            var crumbs = [page.section];
+            for (var l = 1; l <= h.level; l++) {
+              if (breadcrumbStack[l]) crumbs.push(breadcrumbStack[l]);
+            }
+            var breadcrumb = crumbs.join(' > ');
+
+            // Try to extract a content snippet around the heading.
+            var rawSnippet = '';
+            var pos = plain.indexOf(cleanTitle);
+            if (pos >= 0) {
+              var nextPos = plain.length;
+              if (i + 1 < headings.length) {
+                var nextTitle = stripHTML(headings[i + 1].title);
+                var np = plain.indexOf(nextTitle, pos + cleanTitle.length);
+                if (np > pos) nextPos = np;
+              }
+              rawSnippet = plain.slice(pos + cleanTitle.length, Math.min(pos + 500, nextPos)).trim();
+            }
 
             // Index with split compound words in the title so
             // "format date" matches "formatdate".
@@ -163,11 +184,10 @@
               id: id++,
               href: page.href + '#' + h.id,
               title: indexTitle,
-              section: page.title,
-              content: rawSnippet,
+              section: breadcrumb,
+              content: rawSnippet || cleanTitle,
               preview: rawSnippet
             };
-            // Store the clean title for display.
             sectionEntry._displayTitle = cleanTitle;
             sections.push(sectionEntry);
             index.add(sectionEntry);

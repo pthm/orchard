@@ -20,8 +20,8 @@ directory in your shell gives you runs in chronological order.
 $ orchard run scenarios/dev.hcl
 scenario: dev
 executing...
-  ok action.sql.create_merchant (4ms)
-  ok action.sql.create_product (2ms)
+  ok action.postgres_query.create_merchant (4ms)
+  ok action.postgres_query.create_product (2ms)
 ...
 
 $ ls orchard_dev_run_*.json
@@ -50,7 +50,7 @@ To make an action teardownable, attach a `lifecycle { teardown { } }` block
 whose body declares the inverse operation in the same provider's schema:
 
 ```hcl
-action "sql" "create_merchant" {
+action "postgres_query" "create_merchant" {
   query = "INSERT INTO merchants (name) VALUES ('${var.name}') RETURNING id, name"
 
   lifecycle {

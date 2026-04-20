@@ -77,7 +77,7 @@ func (p *Provider) Configure(_ context.Context, config map[string]cty.Value) err
 // Execute dispatches to run.
 func (p *Provider) Execute(ctx context.Context, action string, attrs map[string]cty.Value) (map[string]cty.Value, error) {
 	switch action {
-	case "run":
+	case "exec_run":
 		return p.runCommand(ctx, attrs)
 	}
 	return nil, fmt.Errorf("exec: unknown action %q", action)

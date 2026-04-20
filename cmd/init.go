@@ -126,7 +126,7 @@ component "merchant" {
     default = "us"
   }
 
-  action "sql" "create" {
+  action "postgres_query" "create" {
     query = "INSERT INTO merchants (name, region) VALUES ('${var.name}', '${var.region}') RETURNING id, name, region"
 
     lifecycle {
@@ -136,9 +136,9 @@ component "merchant" {
     }
   }
 
-  output "id"     { value = action.sql.create.id }
-  output "name"   { value = action.sql.create.name }
-  output "region" { value = action.sql.create.region }
+  output "id"     { value = action.postgres_query.create.id }
+  output "name"   { value = action.postgres_query.create.name }
+  output "region" { value = action.postgres_query.create.region }
 }
 `,
 	},

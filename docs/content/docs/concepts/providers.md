@@ -69,9 +69,9 @@ Each provider declares one or more **action types** it handles. An action block
 chooses the type with its first label:
 
 ```hcl
-action "sql"     "create_merchant" { query   = "..." }    # postgres
-action "request" "fetch_user"      { url     = "..." }    # http
-action "run"     "backup_db"       { command = "..." }    # exec
+action "postgres_query"     "create_merchant" { query   = "..." }    # postgres
+action "http_request" "fetch_user"      { url     = "..." }    # http
+action "exec_run"     "backup_db"       { command = "..." }    # exec
 ```
 
 Orchard looks up which provider offers the action type and routes the call there.
@@ -79,7 +79,7 @@ If multiple providers offer the same action type, disambiguate with an explicit
 `provider` attribute:
 
 ```hcl
-action "sql" "write_analytics" {
+action "postgres_query" "write_analytics" {
   provider = "analytics_db"
   query    = "INSERT ..."
 }

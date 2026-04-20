@@ -21,11 +21,11 @@ scenario "aliased_postgres" {
     dsn = var.dsn
   }
 
-  action "sql" "ping" {
+  action "postgres_query" "ping" {
     query = "SELECT 1 AS ok"
   }
 
   output "ok" {
-    value = action.sql.ping.ok
+    value = action.postgres_query.ping.ok
   }
 }

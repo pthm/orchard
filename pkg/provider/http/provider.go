@@ -93,7 +93,7 @@ func (p *Provider) Execute(ctx context.Context, action string, attrs map[string]
 		return nil, fmt.Errorf("http: not configured")
 	}
 	switch action {
-	case "request":
+	case "http_request":
 		return p.executeRequest(ctx, attrs)
 	default:
 		return nil, fmt.Errorf("http: unknown action %q", action)

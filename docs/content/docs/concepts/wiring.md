@@ -25,11 +25,11 @@ configs (variables only), output values, or component inputs.
 
 ## Implicit dependencies
 
-When you reference `action.sql.create_merchant.id` inside another action's body,
+When you reference `action.postgres_query.create_merchant.id` inside another action's body,
 Orchard:
 
 1. Parses the expression.
-2. Extracts the traversal — "this block depends on `action.sql.create_merchant`".
+2. Extracts the traversal — "this block depends on `action.postgres_query.create_merchant`".
 3. Adds an edge to the dependency graph.
 4. Executes `create_merchant` first, captures its output, and evaluates the
    dependent expression with the value in scope.
@@ -46,14 +46,14 @@ that must happen before a SQL insert, with nothing flowing between them. Use
 `depends_on`:
 
 ```hcl
-action "request" "provision_tenant" {
+action "http_request" "provision_tenant" {
   url    = "/provision"
   method = "POST"
   body   = "..."
 }
 
-action "sql" "seed_tenant_data" {
-  depends_on = [action.request.provision_tenant]
+action "postgres_query" "seed_tenant_data" {
+  depends_on = [action.http_request.provision_tenant]
   query      = "INSERT INTO tenant_settings ..."
 }
 ```
@@ -74,16 +74,16 @@ actions that depend on each other.
 
 Each provider decides what the outputs of its action look like. For example:
 
-- The `sql` action returns the first row of the result set as an object, keyed
+- The `postgres_query` action returns the first row of the result set as an object, keyed
   by column name.
-- The `request` action returns an object with `status`, `body`, and `headers`.
-- The `run` action returns an object with `stdout`, `stderr`, and `exit_code`.
+- The `http_request` action returns an object with `status`, `body`, and `headers`.
+- The `exec_run` action returns an object with `stdout`, `stderr`, and `exit_code`.
 
 Downstream expressions access these as ordinary HCL attribute traversals:
 
 ```hcl
-action "sql" "next" {
-  query = "SELECT * FROM users WHERE id = ${action.sql.previous.user_id}"
+action "postgres_query" "next" {
+  query = "SELECT * FROM users WHERE id = ${action.postgres_query.previous.user_id}"
 }
 ```
 

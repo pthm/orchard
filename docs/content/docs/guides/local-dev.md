@@ -41,7 +41,7 @@ scenario "dev" {
   provider "exec" {}
 
   # Confirm the database is reachable before we try to seed it.
-  action "run" "check_db" {
+  action "exec_run" "check_db" {
     command = "psql"
     args    = [var.dsn, "-c", "SELECT 1"]
   }

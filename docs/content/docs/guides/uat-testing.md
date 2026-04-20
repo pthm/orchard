@@ -60,15 +60,15 @@ scenario "uat_subscription_three_failures" {
     }
   }
 
-  action "sql" "failed_attempt_1" {
+  action "postgres_query" "failed_attempt_1" {
     query = "INSERT INTO payment_attempts (subscription_id, status, failure_code, attempted_at) VALUES (${component.subscription.plan.id}, 'failed', 'card_declined', NOW() - INTERVAL '14 days')"
   }
 
-  action "sql" "failed_attempt_2" {
+  action "postgres_query" "failed_attempt_2" {
     query = "INSERT INTO payment_attempts (subscription_id, status, failure_code, attempted_at) VALUES (${component.subscription.plan.id}, 'failed', 'insufficient_funds', NOW() - INTERVAL '7 days')"
   }
 
-  action "sql" "failed_attempt_3" {
+  action "postgres_query" "failed_attempt_3" {
     query = "INSERT INTO payment_attempts (subscription_id, status, failure_code, attempted_at) VALUES (${component.subscription.plan.id}, 'failed', 'card_declined', NOW() - INTERVAL '1 day')"
   }
 
@@ -97,7 +97,7 @@ the test plan.
   run:
 
   ```hcl
-  action "sql" "create_subscription" {
+  action "postgres_query" "create_subscription" {
     query = "INSERT INTO subscriptions (...) RETURNING id"
     lifecycle {
       teardown {

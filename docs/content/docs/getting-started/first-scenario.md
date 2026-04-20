@@ -52,20 +52,20 @@ scenario "hello" {
     dsn = var.dsn
   }
 
-  action "sql" "create_merchant" {
+  action "postgres_query" "create_merchant" {
     query = "INSERT INTO merchants (name, region) VALUES ('${var.merchant_name}', 'us') RETURNING id, name"
   }
 
-  action "sql" "create_product" {
-    query = "INSERT INTO products (merchant_id, name, price) VALUES (${action.sql.create_merchant.id}, 'Widget', 9.99) RETURNING id, name"
+  action "postgres_query" "create_product" {
+    query = "INSERT INTO products (merchant_id, name, price) VALUES (${action.postgres_query.create_merchant.id}, 'Widget', 9.99) RETURNING id, name"
   }
 
   output "merchant_id" {
-    value = action.sql.create_merchant.id
+    value = action.postgres_query.create_merchant.id
   }
 
   output "product_id" {
-    value = action.sql.create_product.id
+    value = action.postgres_query.create_product.id
   }
 }
 ```
@@ -74,10 +74,11 @@ A few things to notice:
 
 - **`required_providers`** declares which providers the scenario uses and where
   they come from. `builtin/postgres` is compiled into the `orchard` binary.
-- **`action "sql" "create_merchant"`** is an action of type `sql` (supplied by
-  the postgres provider) named `create_merchant`. The `query` attribute is passed
-  to the provider; the first returned row becomes the action's outputs.
-- **`action.sql.create_merchant.id`** is how the second action references the
+- **`action "postgres_query" "create_merchant"`** is an action of type `postgres_query`
+  (supplied by the postgres provider) named `create_merchant`. The `query`
+  attribute is passed to the provider; the first returned row becomes the
+  action's outputs.
+- **`action.postgres_query.create_merchant.id`** is how the second action references the
   first action's output. Orchard parses this reference, adds an edge to the
   dependency graph, and runs `create_merchant` before `create_product`.
 - **`output` blocks** expose values from the scenario when it finishes.

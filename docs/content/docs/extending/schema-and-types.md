@@ -222,7 +222,7 @@ load.
 
 | Form | Meaning |
 |------|---------|
-| `type = any` | Open-ended object. Useful when field names depend on runtime — e.g. `builtin/postgres`'s `sql` action, whose columns vary per query. Orchard can't type-check downstream references against the action's output. |
+| `type = any` | Open-ended object. Useful when field names depend on runtime — e.g. `builtin/postgres`'s `postgres_query` action, whose columns vary per query. Orchard can't type-check downstream references against the action's output. |
 | `type = object({...})` | Concrete object shape. Orchard type-checks every downstream reference (`action.x.y.field`) at plan time. |
 
 Prefer a concrete `object({...})` whenever the shape is fixed — scenario

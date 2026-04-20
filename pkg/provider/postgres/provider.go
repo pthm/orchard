@@ -74,9 +74,9 @@ func (p *Provider) Execute(ctx context.Context, action string, attrs map[string]
 		return nil, fmt.Errorf("postgres: not configured")
 	}
 	switch action {
-	case "sql":
+	case "postgres_query":
 		return p.executeSQL(ctx, attrs)
-	case "copy":
+	case "postgres_copy":
 		return p.executeCopy(ctx, attrs)
 	default:
 		return nil, fmt.Errorf("postgres: unknown action %q", action)

@@ -29,7 +29,7 @@ scenario "teardown_demo" {
   # merchant, avoiding the FK constraint violation the opposite
   # order would hit.
 
-  action "sql" "create_merchant" {
+  action "postgres_query" "create_merchant" {
     query = "INSERT INTO merchants (name, region) VALUES ('${var.merchant_name}', '${var.region}') RETURNING id, name"
 
     lifecycle {
@@ -39,8 +39,8 @@ scenario "teardown_demo" {
     }
   }
 
-  action "sql" "create_product" {
-    query = "INSERT INTO products (merchant_id, name, price) VALUES (${action.sql.create_merchant.id}, 'Teardown Widget', 9.99) RETURNING id, name"
+  action "postgres_query" "create_product" {
+    query = "INSERT INTO products (merchant_id, name, price) VALUES (${action.postgres_query.create_merchant.id}, 'Teardown Widget', 9.99) RETURNING id, name"
 
     lifecycle {
       teardown {
@@ -49,6 +49,6 @@ scenario "teardown_demo" {
     }
   }
 
-  output "merchant_id" { value = action.sql.create_merchant.id }
-  output "product_id"  { value = action.sql.create_product.id }
+  output "merchant_id" { value = action.postgres_query.create_merchant.id }
+  output "product_id"  { value = action.postgres_query.create_product.id }
 }

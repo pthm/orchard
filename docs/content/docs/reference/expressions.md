@@ -27,7 +27,7 @@ provider "postgres" {
   dsn = var.dsn
 }
 
-action "sql" "insert" {
+action "postgres_query" "insert" {
   query = "INSERT INTO t (name) VALUES ('${var.name}')"
 }
 ```
@@ -39,12 +39,12 @@ output instead.
 ### Action references
 
 ```hcl
-action "sql" "next" {
-  query = "SELECT * FROM users WHERE id = ${action.sql.previous.user_id}"
+action "postgres_query" "next" {
+  query = "SELECT * FROM users WHERE id = ${action.postgres_query.previous.user_id}"
 }
 
 output "merchant_id" {
-  value = action.sql.create_merchant.id
+  value = action.postgres_query.create_merchant.id
 }
 ```
 
@@ -54,7 +54,7 @@ output "merchant_id" {
 ### Component references
 
 ```hcl
-action "sql" "attach" {
+action "postgres_query" "attach" {
   query = "INSERT ... VALUES (${component.merchant.acme.id})"
 }
 ```
@@ -70,7 +70,7 @@ action's own recorded outputs. This lets authors write teardowns without
 repeating the node name:
 
 ```hcl
-action "sql" "create_merchant" {
+action "postgres_query" "create_merchant" {
   query = "INSERT INTO merchants (name) VALUES ('${var.name}') RETURNING id"
 
   lifecycle {
@@ -147,7 +147,7 @@ Standard HCL operators are available:
 ```hcl
 variable "environment" { default = "dev" }
 
-action "sql" "seed" {
+action "postgres_query" "seed" {
   query = var.environment == "prod" ? "SELECT 1" : "INSERT INTO ..."
 }
 ```
@@ -177,7 +177,7 @@ provider "http" {
   base_url = format("https://%s.example.com", var.region)
 }
 
-action "request" "create" {
+action "http_request" "create" {
   method = "POST"
   body   = jsonencode({ name = var.name, tags = concat(var.base_tags, ["orchard"]) })
 }
@@ -195,8 +195,8 @@ to existing scenarios and can be proposed via the repo.
 `depends_on` accepts references as bare traversals — not strings:
 
 ```hcl
-action "sql" "b" {
-  depends_on = [action.sql.a, component.merchant.acme]
+action "postgres_query" "b" {
+  depends_on = [action.postgres_query.a, component.merchant.acme]
   query      = "..."
 }
 ```

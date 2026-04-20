@@ -43,8 +43,8 @@ func TestLoadScenario_Simple(t *testing.T) {
 
 	// Check action labels.
 	a0 := ps.Scenario.Actions[0]
-	if a0.Type != "sql" || a0.Name != "create_merchant" {
-		t.Errorf("expected action sql.create_merchant, got %s.%s", a0.Type, a0.Name)
+	if a0.Type != "postgres_query" || a0.Name != "create_merchant" {
+		t.Errorf("expected action postgres_query.create_merchant, got %s.%s", a0.Type, a0.Name)
 	}
 }
 

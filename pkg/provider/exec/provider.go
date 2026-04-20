@@ -61,13 +61,13 @@ func (p *Provider) Schema() protocol.ProviderSchema {
 func (p *Provider) Configure(_ context.Context, config map[string]cty.Value) error {
 	if v, ok := config["dir"]; ok && !v.IsNull() {
 		if v.Type() != cty.String {
-			return fmt.Errorf("exec:dir must be a string, got %s", v.Type().FriendlyName())
+			return fmt.Errorf("exec: dir must be a string, got %s", v.Type().FriendlyName())
 		}
 		p.defaultDir = v.AsString()
 	}
 	if v, ok := config["env"]; ok && !v.IsNull() {
 		if !v.Type().IsMapType() && !v.Type().IsObjectType() {
-			return fmt.Errorf("exec:env must be a map(string), got %s", v.Type().FriendlyName())
+			return fmt.Errorf("exec: env must be a map(string), got %s", v.Type().FriendlyName())
 		}
 		p.defaultEnv = ctyMapToStringMap(v)
 	}
@@ -146,12 +146,12 @@ func (p *Provider) runCommand(ctx context.Context, attrs map[string]cty.Value) (
 			// Start failed: executable missing, permission denied,
 			// ctx cancelled. Surface the raw error rather than
 			// pretending the command exited with a code.
-			return nil, fmt.Errorf("exec.run%s: %w", command, runErr)
+			return nil, fmt.Errorf("exec: run %s: %w", command, runErr)
 		}
 	}
 
 	if exitCode != 0 {
-		return nil, fmt.Errorf("exec.run%s exited with code %d\n%s",
+		return nil, fmt.Errorf("exec: run %s exited with code %d\n%s",
 			quoteCommand(command, args),
 			exitCode,
 			formatStderrPreview(stderr.String()))

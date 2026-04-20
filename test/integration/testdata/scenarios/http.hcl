@@ -19,14 +19,14 @@ scenario "http_roundtrip" {
     }
   }
 
-  action "request" "fetch" {
+  action "http_request" "fetch" {
     url = "/ping"
     headers = {
       X-Test-Case = "fetch"
     }
   }
 
-  action "request" "submit" {
+  action "http_request" "submit" {
     method = "POST"
     url    = "/submit"
     body   = "{\"hello\":\"world\"}"
@@ -36,14 +36,14 @@ scenario "http_roundtrip" {
   }
 
   output "fetch_status" {
-    value = action.request.fetch.status
+    value = action.http_request.fetch.status
   }
 
   output "fetch_body" {
-    value = action.request.fetch.body
+    value = action.http_request.fetch.body
   }
 
   output "submit_status" {
-    value = action.request.submit.status
+    value = action.http_request.submit.status
   }
 }

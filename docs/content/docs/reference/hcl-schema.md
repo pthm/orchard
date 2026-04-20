@@ -117,7 +117,7 @@ component "merchant" "acme" {
 ### `action`
 
 ```hcl
-action "sql" "create_merchant" {
+action "postgres_query" "create_merchant" {
   query = "INSERT INTO ..."
 }
 ```
@@ -141,7 +141,7 @@ reserves a few attributes for engine-level behavior:
 #### `retry` block
 
 ```hcl
-action "request" "flaky" {
+action "http_request" "flaky" {
   url = "https://example.com"
   retry {
     max_attempts = 5
@@ -165,7 +165,7 @@ Declares a teardown operation for the action. Read by `orchard teardown <record>
 when walking the graph in reverse.
 
 ```hcl
-action "sql" "create_merchant" {
+action "postgres_query" "create_merchant" {
   query = "INSERT INTO merchants (name) VALUES ('${var.name}') RETURNING id, name"
 
   lifecycle {
@@ -195,7 +195,7 @@ See [lifecycle](../../concepts/lifecycle/) for authoring guidance and the
 
 ```hcl
 output "merchant_id" {
-  value = action.sql.create_merchant.id
+  value = action.postgres_query.create_merchant.id
 }
 ```
 

@@ -15,7 +15,7 @@ scenario "copy_demo" {
   }
 
   # Inline CSV — small fixture, no external file needed.
-  action "copy" "seed_merchants" {
+  action "postgres_copy" "seed_merchants" {
     table   = "merchants"
     columns = ["name", "region"]
     format  = "csv"
@@ -28,7 +28,7 @@ scenario "copy_demo" {
   # File-based CSV — the engine resolves the path relative to this
   # scenario file before the provider sees it, so it works from any
   # working directory.
-  action "copy" "seed_products" {
+  action "postgres_copy" "seed_products" {
     table   = "products"
     columns = ["merchant_id", "name", "price"]
     format  = "csv"
@@ -36,6 +36,6 @@ scenario "copy_demo" {
     file    = "../fixtures/products.csv"
   }
 
-  output "merchants_copied" { value = action.copy.seed_merchants.rows_copied }
-  output "products_copied"  { value = action.copy.seed_products.rows_copied }
+  output "merchants_copied" { value = action.postgres_copy.seed_merchants.rows_copied }
+  output "products_copied"  { value = action.postgres_copy.seed_products.rows_copied }
 }

@@ -31,11 +31,11 @@ func TestSchemaLoadsFromEmbeddedHCL(t *testing.T) {
 	if s.Config["dsn"].Type != "string" || !s.Config["dsn"].Required {
 		t.Fatalf("config.dsn: %+v", s.Config["dsn"])
 	}
-	if _, ok := s.Actions["sql"]; !ok {
-		t.Fatal("schema missing action.sql")
+	if _, ok := s.Actions["postgres_query"]; !ok {
+		t.Fatal("schema missing action.postgres_query")
 	}
-	if s.Actions["sql"].Attrs["query"].Type != "string" {
-		t.Fatalf("action.sql.query type: %q", s.Actions["sql"].Attrs["query"].Type)
+	if s.Actions["postgres_query"].Attrs["query"].Type != "string" {
+		t.Fatalf("action.postgres_query.query type: %q", s.Actions["postgres_query"].Attrs["query"].Type)
 	}
 }
 
@@ -63,7 +63,7 @@ func TestConfigureRequiresDSN(t *testing.T) {
 
 func TestExecuteBeforeConfigure(t *testing.T) {
 	p := New()
-	_, err := p.Execute(context.Background(), "sql", map[string]cty.Value{})
+	_, err := p.Execute(context.Background(), "postgres_query", map[string]cty.Value{})
 	if err == nil || !strings.Contains(err.Error(), "not configured") {
 		t.Fatalf("expected not-configured error, got %v", err)
 	}

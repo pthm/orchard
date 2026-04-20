@@ -7,15 +7,15 @@ component "merchant" {
     default = "us"
   }
 
-  action "sql" "create" {
+  action "postgres_query" "create" {
     query = "INSERT INTO merchants (name, region) VALUES ('${var.name}', '${var.region}') RETURNING id, name, region"
   }
 
   output "id" {
-    value = action.sql.create.id
+    value = action.postgres_query.create.id
   }
 
   output "name" {
-    value = action.sql.create.name
+    value = action.postgres_query.create.name
   }
 }

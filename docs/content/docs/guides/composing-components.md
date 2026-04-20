@@ -49,14 +49,14 @@ component "merchant" {
     default = false
   }
 
-  action "sql" "insert" {
+  action "postgres_query" "insert" {
     query = "INSERT INTO merchants (name, region, verified) VALUES ('${var.name}', '${var.region}', ${var.verified}) RETURNING id, name, region, verified"
   }
 
-  output "id"       { value = action.sql.insert.id }
-  output "name"     { value = action.sql.insert.name }
-  output "region"   { value = action.sql.insert.region }
-  output "verified" { value = action.sql.insert.verified }
+  output "id"       { value = action.postgres_query.insert.id }
+  output "name"     { value = action.postgres_query.insert.name }
+  output "region"   { value = action.postgres_query.insert.region }
+  output "verified" { value = action.postgres_query.insert.verified }
 }
 ```
 

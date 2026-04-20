@@ -28,7 +28,7 @@ scenario "merchant_with_products" {
     }
   }
 
-  action "sql" "create_product" {
+  action "postgres_query" "create_product" {
     query = "INSERT INTO products (merchant_id, name, price) VALUES (${component.merchant.base.id}, 'Gadget', 19.99) RETURNING id, name"
   }
 
@@ -41,6 +41,6 @@ scenario "merchant_with_products" {
   }
 
   output "product_id" {
-    value = action.sql.create_product.id
+    value = action.postgres_query.create_product.id
   }
 }

@@ -24,23 +24,23 @@ scenario "basic_merchant_and_product" {
     dsn = var.dsn
   }
 
-  action "sql" "create_merchant" {
+  action "postgres_query" "create_merchant" {
     query = "INSERT INTO merchants (name, region) VALUES ('${var.merchant_name}', '${var.region}') RETURNING id, name, region"
   }
 
-  action "sql" "create_product" {
-    query = "INSERT INTO products (merchant_id, name, price) VALUES (${action.sql.create_merchant.id}, 'Widget', 9.99) RETURNING id, name"
+  action "postgres_query" "create_product" {
+    query = "INSERT INTO products (merchant_id, name, price) VALUES (${action.postgres_query.create_merchant.id}, 'Widget', 9.99) RETURNING id, name"
   }
 
   output "merchant_id" {
-    value = action.sql.create_merchant.id
+    value = action.postgres_query.create_merchant.id
   }
 
   output "merchant_name" {
-    value = action.sql.create_merchant.name
+    value = action.postgres_query.create_merchant.name
   }
 
   output "product_id" {
-    value = action.sql.create_product.id
+    value = action.postgres_query.create_product.id
   }
 }

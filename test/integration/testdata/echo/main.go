@@ -77,13 +77,13 @@ func schema() map[string]any {
 		"version":  "1",
 		"protocol": "1",
 		"actions": map[string]any{
-			"echo": map[string]any{
+			"echo_say": map[string]any{
 				"attrs": map[string]any{
 					"message": map[string]any{"type": "string", "required": true},
 				},
 				"outputs": map[string]any{"type": "any"},
 			},
-			"randomize": map[string]any{
+			"echo_randomize": map[string]any{
 				"attrs": map[string]any{
 					"prefix": map[string]any{"type": "string", "required": true},
 				},
@@ -103,9 +103,9 @@ func handleExecute(w *os.File, req request) {
 		return
 	}
 	switch params.Action {
-	case "echo":
+	case "echo_say":
 		writeResult(w, req.ID, map[string]any{"outputs": params.Attrs})
-	case "randomize":
+	case "echo_randomize":
 		var prefix string
 		if err := json.Unmarshal(params.Attrs["prefix"], &prefix); err != nil {
 			writeError(w, req.ID, "invalid_request", "prefix: "+err.Error())

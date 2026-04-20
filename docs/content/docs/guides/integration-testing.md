@@ -98,11 +98,11 @@ scenario "test_with_chargeback" {
     dsn = var.dsn
   }
 
-  action "sql" "add_chargeback" {
+  action "postgres_query" "add_chargeback" {
     query = "INSERT INTO chargebacks (merchant_id, amount) VALUES (${var.merchant_id}, 100.00) RETURNING id"
   }
 
-  output "chargeback_id" { value = action.sql.add_chargeback.id }
+  output "chargeback_id" { value = action.postgres_query.add_chargeback.id }
 }
 ```
 

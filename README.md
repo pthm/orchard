@@ -58,16 +58,16 @@ scenario "hello" {
     dsn = var.dsn
   }
 
-  action "sql" "create_merchant" {
+  action "postgres_query" "create_merchant" {
     query = "INSERT INTO merchants (name, region) VALUES ('Acme', 'us') RETURNING id, name"
   }
 
-  action "sql" "create_product" {
-    query = "INSERT INTO products (merchant_id, name, price) VALUES (${action.sql.create_merchant.id}, 'Widget', 9.99) RETURNING id"
+  action "postgres_query" "create_product" {
+    query = "INSERT INTO products (merchant_id, name, price) VALUES (${action.postgres_query.create_merchant.id}, 'Widget', 9.99) RETURNING id"
   }
 
-  output "merchant_id" { value = action.sql.create_merchant.id }
-  output "product_id"  { value = action.sql.create_product.id }
+  output "merchant_id" { value = action.postgres_query.create_merchant.id }
+  output "product_id"  { value = action.postgres_query.create_product.id }
 }
 ```
 
@@ -110,11 +110,11 @@ Full reference at [orchard.pthm.dev/docs/reference/cli/](https://orchard.pthm.de
 
 ## Built-in providers
 
-| Source | What it does |
-|--------|--------------|
-| `builtin/postgres` | Execute SQL against a PostgreSQL database; capture the first row as outputs. |
-| `builtin/http` | Issue HTTP requests; capture status, body, and headers. |
-| `builtin/exec` | Run a shell command; capture stdout, stderr, and exit code. |
+| Source | Actions | What it does |
+|--------|---------|--------------|
+| `builtin/postgres` | `postgres_query`, `postgres_copy` | Execute SQL or bulk-load CSV via COPY; capture outputs. |
+| `builtin/http` | `http_request` | Issue HTTP requests; capture status, body, and headers. |
+| `builtin/exec` | `exec_run` | Run a shell command; capture stdout, stderr, and exit code. |
 
 Custom providers are any binary that implements the provider protocol. See
 [Extending Orchard](https://orchard.pthm.dev/docs/extending/) for the wire

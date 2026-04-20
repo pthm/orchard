@@ -36,10 +36,10 @@ func TestSchemaLoadsFromEmbeddedHCL(t *testing.T) {
 	if s.Name != "exec" {
 		t.Fatalf("name: got %q want exec", s.Name)
 	}
-	if _, ok := s.Actions["run"]; !ok {
+	if _, ok := s.Actions["exec_run"]; !ok {
 		t.Fatal("missing run action")
 	}
-	attrs := s.Actions["run"].Attrs
+	attrs := s.Actions["exec_run"].Attrs
 	if attrs["command"].Type != "string" || !attrs["command"].Required {
 		t.Errorf("run.command: %+v", attrs["command"])
 	}
@@ -48,7 +48,7 @@ func TestSchemaLoadsFromEmbeddedHCL(t *testing.T) {
 func TestExecSimpleEcho(t *testing.T) {
 	skipIfWindows(t)
 	p := configured(t, nil)
-	out, err := p.Execute(context.Background(), "run", map[string]cty.Value{
+	out, err := p.Execute(context.Background(), "exec_run", map[string]cty.Value{
 		"command": cty.StringVal("echo"),
 		"args":    cty.ListVal([]cty.Value{cty.StringVal("hello")}),
 	})
@@ -67,7 +67,7 @@ func TestExecSimpleEcho(t *testing.T) {
 func TestExecArgsPassedInOrder(t *testing.T) {
 	skipIfWindows(t)
 	p := configured(t, nil)
-	out, err := p.Execute(context.Background(), "run", map[string]cty.Value{
+	out, err := p.Execute(context.Background(), "exec_run", map[string]cty.Value{
 		"command": cty.StringVal("echo"),
 		"args": cty.ListVal([]cty.Value{
 			cty.StringVal("one"), cty.StringVal("two"), cty.StringVal("three"),
@@ -84,7 +84,7 @@ func TestExecArgsPassedInOrder(t *testing.T) {
 func TestExecNonZeroExitErrors(t *testing.T) {
 	skipIfWindows(t)
 	p := configured(t, nil)
-	_, err := p.Execute(context.Background(), "run", map[string]cty.Value{
+	_, err := p.Execute(context.Background(), "exec_run", map[string]cty.Value{
 		"command": cty.StringVal("sh"),
 		"args": cty.ListVal([]cty.Value{
 			cty.StringVal("-c"),
@@ -105,7 +105,7 @@ func TestExecNonZeroExitErrors(t *testing.T) {
 func TestExecStdinPassed(t *testing.T) {
 	skipIfWindows(t)
 	p := configured(t, nil)
-	out, err := p.Execute(context.Background(), "run", map[string]cty.Value{
+	out, err := p.Execute(context.Background(), "exec_run", map[string]cty.Value{
 		"command": cty.StringVal("cat"),
 		"stdin":   cty.StringVal("line one\nline two\n"),
 	})
@@ -125,7 +125,7 @@ func TestExecEnvMerging(t *testing.T) {
 			"ORCHARD_TEST_OVERRIDE": cty.StringVal("provider-value"),
 		}),
 	})
-	out, err := p.Execute(context.Background(), "run", map[string]cty.Value{
+	out, err := p.Execute(context.Background(), "exec_run", map[string]cty.Value{
 		"command": cty.StringVal("sh"),
 		"args": cty.ListVal([]cty.Value{
 			cty.StringVal("-c"),
@@ -150,7 +150,7 @@ func TestExecWorkingDir(t *testing.T) {
 	skipIfWindows(t)
 	dir := t.TempDir()
 	p := configured(t, nil)
-	out, err := p.Execute(context.Background(), "run", map[string]cty.Value{
+	out, err := p.Execute(context.Background(), "exec_run", map[string]cty.Value{
 		"command": cty.StringVal("pwd"),
 		"dir":     cty.StringVal(dir),
 	})
@@ -171,7 +171,7 @@ func TestExecCtxCancellation(t *testing.T) {
 	defer cancel()
 
 	start := time.Now()
-	_, err := p.Execute(ctx, "run", map[string]cty.Value{
+	_, err := p.Execute(ctx, "exec_run", map[string]cty.Value{
 		"command": cty.StringVal("sleep"),
 		"args":    cty.ListVal([]cty.Value{cty.StringVal("5")}),
 	})
@@ -187,7 +187,7 @@ func TestExecCtxCancellation(t *testing.T) {
 
 func TestExecMissingCommandErrors(t *testing.T) {
 	p := configured(t, nil)
-	_, err := p.Execute(context.Background(), "run", map[string]cty.Value{
+	_, err := p.Execute(context.Background(), "exec_run", map[string]cty.Value{
 		"command": cty.StringVal("/definitely/not/a/real/binary"),
 	})
 	if err == nil {

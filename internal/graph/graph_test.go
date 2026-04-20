@@ -34,18 +34,18 @@ func TestBuild_SimpleScenario(t *testing.T) {
 	productIdx := -1
 	for i, id := range g.Order {
 		switch id {
-		case "action.sql.create_merchant":
+		case "action.postgres_query.create_merchant":
 			merchantIdx = i
-		case "action.sql.create_product":
+		case "action.postgres_query.create_product":
 			productIdx = i
 		}
 	}
 
 	if merchantIdx == -1 {
-		t.Fatal("action.sql.create_merchant not in order")
+		t.Fatal("action.postgres_query.create_merchant not in order")
 	}
 	if productIdx == -1 {
-		t.Fatal("action.sql.create_product not in order")
+		t.Fatal("action.postgres_query.create_product not in order")
 	}
 	if merchantIdx >= productIdx {
 		t.Errorf("create_merchant (idx %d) should come before create_product (idx %d)", merchantIdx, productIdx)
@@ -63,7 +63,7 @@ func TestBuild_WithComponent(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 
-	// Should have: component.merchant.base, component.merchant.base.action.sql.create
+	// Should have: component.merchant.base, component.merchant.base.action.postgres_query.create
 	if len(g.Nodes) != 2 {
 		t.Fatalf("expected 2 nodes, got %d: %v", len(g.Nodes), nodeIDs(g))
 	}
@@ -73,7 +73,7 @@ func TestBuild_WithComponent(t *testing.T) {
 	compIdx := -1
 	for i, id := range g.Order {
 		switch id {
-		case "component.merchant.base.action.sql.create":
+		case "component.merchant.base.action.postgres_query.create":
 			actionIdx = i
 		case "component.merchant.base":
 			compIdx = i

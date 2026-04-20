@@ -32,11 +32,11 @@ func TestSchemaLoadsFromEmbeddedHCL(t *testing.T) {
 	if s.Name != "http" {
 		t.Fatalf("name: got %q", s.Name)
 	}
-	if _, ok := s.Actions["request"]; !ok {
+	if _, ok := s.Actions["http_request"]; !ok {
 		t.Fatal("missing request action")
 	}
-	if s.Actions["request"].Attrs["url"].Type != "string" {
-		t.Errorf("url type: %q", s.Actions["request"].Attrs["url"].Type)
+	if s.Actions["http_request"].Attrs["url"].Type != "string" {
+		t.Errorf("url type: %q", s.Actions["http_request"].Attrs["url"].Type)
 	}
 }
 
@@ -47,7 +47,7 @@ func TestExecuteHappyPath(t *testing.T) {
 	defer srv.Close()
 
 	p := configured(t, srv)
-	out, err := p.Execute(context.Background(), "request", map[string]cty.Value{
+	out, err := p.Execute(context.Background(), "http_request", map[string]cty.Value{
 		"url": cty.StringVal("/users/1"),
 	})
 	if err != nil {
@@ -80,7 +80,7 @@ func TestExecuteAbsoluteURLBypassesBaseURL(t *testing.T) {
 	}
 	defer p.Close()
 
-	out, err := p.Execute(context.Background(), "request", map[string]cty.Value{
+	out, err := p.Execute(context.Background(), "http_request", map[string]cty.Value{
 		"url": cty.StringVal(real.URL + "/"),
 	})
 	if err != nil {
@@ -99,7 +99,7 @@ func TestExecutePOSTWithBody(t *testing.T) {
 	defer srv.Close()
 
 	p := configured(t, srv)
-	_, err := p.Execute(context.Background(), "request", map[string]cty.Value{
+	_, err := p.Execute(context.Background(), "http_request", map[string]cty.Value{
 		"method": cty.StringVal("POST"),
 		"url":    cty.StringVal("/submit"),
 		"body":   cty.StringVal(`{"name":"acme"}`),
@@ -134,7 +134,7 @@ func TestExecuteHeadersMergeDefaults(t *testing.T) {
 	}
 	defer p.Close()
 
-	_, err := p.Execute(context.Background(), "request", map[string]cty.Value{
+	_, err := p.Execute(context.Background(), "http_request", map[string]cty.Value{
 		"url": cty.StringVal("/"),
 		"headers": cty.MapVal(map[string]cty.Value{
 			"X-Override": cty.StringVal("per-request-wins"),
@@ -162,7 +162,7 @@ func TestExecuteResponseHeaders(t *testing.T) {
 	defer srv.Close()
 
 	p := configured(t, srv)
-	out, err := p.Execute(context.Background(), "request", map[string]cty.Value{
+	out, err := p.Execute(context.Background(), "http_request", map[string]cty.Value{
 		"url": cty.StringVal("/"),
 	})
 	if err != nil {
@@ -180,7 +180,7 @@ func TestExecuteResponseHeaders(t *testing.T) {
 
 func TestExecuteRejectsBeforeConfigure(t *testing.T) {
 	p := New()
-	_, err := p.Execute(context.Background(), "request", map[string]cty.Value{
+	_, err := p.Execute(context.Background(), "http_request", map[string]cty.Value{
 		"url": cty.StringVal("http://example"),
 	})
 	if err == nil || !strings.Contains(err.Error(), "not configured") {

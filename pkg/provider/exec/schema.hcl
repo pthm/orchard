@@ -17,7 +17,7 @@ provider "exec" {
       shell, run `sh -c "..."` explicitly:
 
       ```hcl
-      action "run" "pipeline" {
+      action "exec_run" "pipeline" {
         command = "sh"
         args    = ["-c", "ls | wc -l"]
       }
@@ -26,7 +26,7 @@ provider "exec" {
     - **Timeouts.** Use the action-level `timeout` attribute to bound execution:
 
       ```hcl
-      action "run" "long_job" {
+      action "exec_run" "long_job" {
         timeout = "5m"
         command = "./slow-script.sh"
       }
@@ -44,7 +44,7 @@ provider "exec" {
     }
   }
 
-  action "run" {
+  action "exec_run" {
     description = <<-MD
       Run a program and capture stdout/stderr/exit_code.
 
@@ -96,7 +96,7 @@ provider "exec" {
     example {
       description = "Run a program with explicit arguments."
       code        = <<-HCL
-        action "run" "migrate" {
+        action "exec_run" "migrate" {
           command = "psql"
           args    = ["-f", "migrations/001.sql"]
         }
@@ -119,18 +119,18 @@ provider "exec" {
           }
         }
 
-        action "run" "build" {
+        action "exec_run" "build" {
           command = "go"
           args    = ["build", "-o", "bin/app", "./cmd/app"]
         }
 
-        action "run" "hash" {
-          depends_on = [action.run.build]
+        action "exec_run" "hash" {
+          depends_on = [action.exec_run.build]
           command    = "shasum"
           args       = ["-a", "256", "bin/app"]
         }
 
-        output "checksum" { value = action.run.hash.stdout }
+        output "checksum" { value = action.exec_run.hash.stdout }
       }
     HCL
   }

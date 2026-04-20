@@ -27,7 +27,7 @@ provider "postgres" {
     }
   }
 
-  action "sql" {
+  action "postgres_query" {
     description = <<-MD
       Execute a SQL statement. The first row returned (typically from a `RETURNING`
       clause) is exposed as outputs keyed by column name.
@@ -62,18 +62,18 @@ provider "postgres" {
     example {
       description = "Insert a row and capture its generated ID with `RETURNING`."
       code        = <<-HCL
-        action "sql" "create_merchant" {
+        action "postgres_query" "create_merchant" {
           query = "INSERT INTO merchants (name, region) VALUES ('Acme', 'us') RETURNING id, name"
         }
 
-        action "sql" "create_product" {
-          query = "INSERT INTO products (merchant_id, name) VALUES ($${action.sql.create_merchant.id}, 'Widget') RETURNING id, name"
+        action "postgres_query" "create_product" {
+          query = "INSERT INTO products (merchant_id, name) VALUES ($${action.postgres_query.create_merchant.id}, 'Widget') RETURNING id, name"
         }
       HCL
     }
   }
 
-  action "copy" {
+  action "postgres_copy" {
     description = <<-MD
       Bulk-load rows into a table via PostgreSQL `COPY FROM STDIN`. Dramatically
       faster than row-by-row `INSERT` for fixture data — a 10,000-row CSV loads
@@ -125,7 +125,7 @@ provider "postgres" {
     example {
       description = "Inline CSV for a handful of seed rows."
       code = <<-HCL
-        action "copy" "seed_merchants" {
+        action "postgres_copy" "seed_merchants" {
           table   = "merchants"
           columns = ["name", "region"]
           format  = "csv"
@@ -140,7 +140,7 @@ provider "postgres" {
     example {
       description = "Load a larger fixture from a checked-in file."
       code = <<-HCL
-        action "copy" "seed_products" {
+        action "postgres_copy" "seed_products" {
           table   = "products"
           columns = ["merchant_id", "name", "price"]
           format  = "csv"
@@ -165,16 +165,16 @@ provider "postgres" {
           dsn = var.dsn
         }
 
-        action "sql" "create_merchant" {
+        action "postgres_query" "create_merchant" {
           query = "INSERT INTO merchants (name, region) VALUES ('Acme Corp', 'us') RETURNING id, name"
         }
 
-        action "sql" "create_product" {
-          query = "INSERT INTO products (merchant_id, name, price) VALUES ($${action.sql.create_merchant.id}, 'Widget', 9.99) RETURNING id"
+        action "postgres_query" "create_product" {
+          query = "INSERT INTO products (merchant_id, name, price) VALUES ($${action.postgres_query.create_merchant.id}, 'Widget', 9.99) RETURNING id"
         }
 
-        output "merchant_id" { value = action.sql.create_merchant.id }
-        output "product_id"  { value = action.sql.create_product.id }
+        output "merchant_id" { value = action.postgres_query.create_merchant.id }
+        output "product_id"  { value = action.postgres_query.create_product.id }
       }
     HCL
   }

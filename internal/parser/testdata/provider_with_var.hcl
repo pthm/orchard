@@ -13,7 +13,7 @@ scenario "provider_with_var" {
     dsn = var.dsn
   }
 
-  action "sql" "noop" {
+  action "postgres_query" "noop" {
     query = "SELECT 1"
   }
 }

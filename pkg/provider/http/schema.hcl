@@ -34,7 +34,7 @@ provider "http" {
     }
   }
 
-  action "request" {
+  action "http_request" {
     description = "Issue an HTTP request and capture the response."
 
     attribute "method" {
@@ -76,7 +76,7 @@ provider "http" {
     example {
       description = "Simple GET against a relative path resolved via `base_url`."
       code        = <<-HCL
-        action "request" "fetch_user" {
+        action "http_request" "fetch_user" {
           method = "GET"
           url    = "/users/42"
         }
@@ -100,7 +100,7 @@ provider "http" {
           timeout_seconds = 10
         }
 
-        action "request" "create_user" {
+        action "http_request" "create_user" {
           method = "POST"
           url    = "/users"
           headers = {
@@ -109,12 +109,12 @@ provider "http" {
           body = jsonencode({ name = "Alice", email = "alice@example.com" })
         }
 
-        action "request" "fetch_user" {
-          url = "/users/$${action.request.create_user.body}"
+        action "http_request" "fetch_user" {
+          url = "/users/$${action.http_request.create_user.body}"
         }
 
-        output "created_status" { value = action.request.create_user.status }
-        output "fetched_body"   { value = action.request.fetch_user.body }
+        output "created_status" { value = action.http_request.create_user.status }
+        output "fetched_body"   { value = action.http_request.fetch_user.body }
       }
     HCL
   }

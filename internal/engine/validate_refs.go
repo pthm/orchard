@@ -140,7 +140,7 @@ func (e *Engine) buildComponentTypedEvalContext(
 
 	return &hcl.EvalContext{
 		Variables: variables,
-		Functions: parser.StdFunctions(),
+		Functions: parser.Functions(),
 	}
 }
 
@@ -217,7 +217,7 @@ func (e *Engine) buildTypedEvalContext(ps *parser.ParsedScenario, g *graph.Graph
 
 	return &hcl.EvalContext{
 		Variables: variables,
-		Functions: parser.StdFunctions(),
+		Functions: parser.Functions(),
 	}
 }
 

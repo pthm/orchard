@@ -14,19 +14,20 @@ import (
 	"github.com/zclconf/go-cty/cty/function"
 )
 
-// customFunctions returns Orchard-specific HCL functions that don't
-// come from cty's stdlib. Merged into StdFunctions so they're
-// available everywhere expressions are evaluated.
+// customFunctions returns Orchard-specific functions that don't have
+// a cty/stdlib equivalent. Merged into Functions() so they're
+// available everywhere expressions are evaluated. All names use
+// lowercase compound words, matching the cty convention.
 func customFunctions() map[string]function.Function {
 	return map[string]function.Function{
 		"uuid":          uuidFunc(),
 		"env":           envFunc(),
 		"now":           nowFunc(),
-		"time_sub":      timeSubFunc(),
-		"time_sequence": timeSequenceFunc(),
-		"time_series":   timeSeriesFunc(),
-		"time_unix":     timeUnixFunc(),
-		"time_random":   timeRandomFunc(),
+		"timesub":      timeSubFunc(),
+		"timesequence": timeSequenceFunc(),
+		"timeseries":   timeSeriesFunc(),
+		"timeunix":     timeUnixFunc(),
+		"timerandom":   timeRandomFunc(),
 	}
 }
 
@@ -101,11 +102,11 @@ func timeSubFunc() function.Function {
 		Impl: func(args []cty.Value, retType cty.Type) (cty.Value, error) {
 			t, err := time.Parse(time.RFC3339, args[0].AsString())
 			if err != nil {
-				return cty.NilVal, fmt.Errorf("time_sub: parse timestamp: %w", err)
+				return cty.NilVal, fmt.Errorf("timesub: parse timestamp: %w", err)
 			}
 			d, err := parseExtendedDuration(args[1].AsString())
 			if err != nil {
-				return cty.NilVal, fmt.Errorf("time_sub: %w", err)
+				return cty.NilVal, fmt.Errorf("timesub: %w", err)
 			}
 			return cty.StringVal(t.Add(-d).UTC().Format(time.RFC3339)), nil
 		},
@@ -121,8 +122,8 @@ func timeSubFunc() function.Function {
 // chronologically. The list ends when the next step would exceed
 // end.
 //
-//	time_sequence(
-//	  time_sub(now(), "180d"),  # start
+//	timesequence(
+//	  timesub(now(), "180d"),  # start
 //	  now(),                    # end
 //	  "1d",                     # min interval
 //	  "5d",                     # max interval (optional)
@@ -145,25 +146,25 @@ func timeSequenceFunc() function.Function {
 		Impl: func(args []cty.Value, retType cty.Type) (cty.Value, error) {
 			start, err := time.Parse(time.RFC3339, args[0].AsString())
 			if err != nil {
-				return cty.NilVal, fmt.Errorf("time_sequence: parse start: %w", err)
+				return cty.NilVal, fmt.Errorf("timesequence: parse start: %w", err)
 			}
 			end, err := time.Parse(time.RFC3339, args[1].AsString())
 			if err != nil {
-				return cty.NilVal, fmt.Errorf("time_sequence: parse end: %w", err)
+				return cty.NilVal, fmt.Errorf("timesequence: parse end: %w", err)
 			}
 			minInterval, err := parseExtendedDuration(args[2].AsString())
 			if err != nil {
-				return cty.NilVal, fmt.Errorf("time_sequence: min_interval: %w", err)
+				return cty.NilVal, fmt.Errorf("timesequence: min_interval: %w", err)
 			}
 			maxInterval := minInterval
 			if len(args) > 3 {
 				maxInterval, err = parseExtendedDuration(args[3].AsString())
 				if err != nil {
-					return cty.NilVal, fmt.Errorf("time_sequence: max_interval: %w", err)
+					return cty.NilVal, fmt.Errorf("timesequence: max_interval: %w", err)
 				}
 			}
 			if maxInterval < minInterval {
-				return cty.NilVal, fmt.Errorf("time_sequence: max_interval (%s) < min_interval (%s)", maxInterval, minInterval)
+				return cty.NilVal, fmt.Errorf("timesequence: max_interval (%s) < min_interval (%s)", maxInterval, minInterval)
 			}
 
 			// Safety cap: don't generate unbounded lists from
@@ -192,11 +193,11 @@ func timeSequenceFunc() function.Function {
 }
 
 // timeSeriesFunc distributes exactly N timestamps evenly between
-// start and end: time_series(start, end, count). When you know how
+// start and end: timeseries(start, end, count). When you know how
 // many data points you need rather than the step size, this is the
-// right function — time_sequence is the step-based alternative.
+// right function — timesequence is the step-based alternative.
 //
-//	time_series(time_sub(now(), "90d"), now(), 10)
+//	timeseries(timesub(now(), "90d"), now(), 10)
 //	→ list of 10 timestamps, ~9 days apart
 func timeSeriesFunc() function.Function {
 	return function.New(&function.Spec{
@@ -209,11 +210,11 @@ func timeSeriesFunc() function.Function {
 		Impl: func(args []cty.Value, retType cty.Type) (cty.Value, error) {
 			start, err := time.Parse(time.RFC3339, args[0].AsString())
 			if err != nil {
-				return cty.NilVal, fmt.Errorf("time_series: parse start: %w", err)
+				return cty.NilVal, fmt.Errorf("timeseries: parse start: %w", err)
 			}
 			end, err := time.Parse(time.RFC3339, args[1].AsString())
 			if err != nil {
-				return cty.NilVal, fmt.Errorf("time_series: parse end: %w", err)
+				return cty.NilVal, fmt.Errorf("timeseries: parse end: %w", err)
 			}
 			bf := args[2].AsBigFloat()
 			count64, _ := bf.Int64()
@@ -247,8 +248,8 @@ func timeSeriesFunc() function.Function {
 // integer (seconds since 1970-01-01T00:00:00Z). Useful for APIs
 // and databases that expect epoch-second columns.
 //
-//	time_unix(now())        → 1745165458
-//	time_unix("2026-01-01T00:00:00Z") → 1767225600
+//	timeunix(now())        → 1745165458
+//	timeunix("2026-01-01T00:00:00Z") → 1767225600
 func timeUnixFunc() function.Function {
 	return function.New(&function.Spec{
 		Params: []function.Parameter{
@@ -258,7 +259,7 @@ func timeUnixFunc() function.Function {
 		Impl: func(args []cty.Value, retType cty.Type) (cty.Value, error) {
 			t, err := time.Parse(time.RFC3339, args[0].AsString())
 			if err != nil {
-				return cty.NilVal, fmt.Errorf("time_unix: %w", err)
+				return cty.NilVal, fmt.Errorf("timeunix: %w", err)
 			}
 			return cty.NumberIntVal(t.Unix()), nil
 		},
@@ -269,7 +270,7 @@ func timeUnixFunc() function.Function {
 // and end (inclusive of start, exclusive of end). Useful for one-off
 // timestamp fields where a full sequence is overkill.
 //
-//	time_random(time_sub(now(), "30d"), now())
+//	timerandom(timesub(now(), "30d"), now())
 //	→ "2026-04-05T14:22:31Z"
 func timeRandomFunc() function.Function {
 	return function.New(&function.Spec{
@@ -281,11 +282,11 @@ func timeRandomFunc() function.Function {
 		Impl: func(args []cty.Value, retType cty.Type) (cty.Value, error) {
 			start, err := time.Parse(time.RFC3339, args[0].AsString())
 			if err != nil {
-				return cty.NilVal, fmt.Errorf("time_random: parse start: %w", err)
+				return cty.NilVal, fmt.Errorf("timerandom: parse start: %w", err)
 			}
 			end, err := time.Parse(time.RFC3339, args[1].AsString())
 			if err != nil {
-				return cty.NilVal, fmt.Errorf("time_random: parse end: %w", err)
+				return cty.NilVal, fmt.Errorf("timerandom: parse end: %w", err)
 			}
 			span := end.Sub(start)
 			if span <= 0 {

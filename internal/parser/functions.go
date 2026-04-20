@@ -5,44 +5,43 @@ import (
 	"github.com/zclconf/go-cty/cty/function/stdlib"
 )
 
-// StdFunctions returns the HCL functions Orchard makes available to
-// every expression in a scenario or component. The returned map is
-// the single source of truth: every EvalContext constructed by the
-// parser, engine, or plan-time validators pulls from here, so
-// adding an entry here makes the function available everywhere.
+// Functions returns the complete set of HCL functions Orchard
+// exposes to expressions — variable defaults, provider configs,
+// component inputs, action attributes, scenario outputs, component
+// outputs, and teardown bodies. Every EvalContext in the parser,
+// engine, and plan-time validators pulls from this single source.
 //
-// Selection rationale: the set mirrors a curated subset of
-// Terraform's function library — common string/collection/encoding
-// helpers plus some math and regex. Nothing side-effectful (no
-// file/env/http access); scenarios stay pure transformations over
-// declared inputs.
+// All names use lowercase compound words with no separators,
+// matching the convention established by HCL's cty function
+// library: jsonencode, formatdate, timeadd, etc. Orchard-specific
+// functions (uuid, env, timesub, timesequence, ...) follow the
+// same pattern.
 //
-// Expanding the set is safe for existing scenarios (functions names
-// can't collide with HCL keywords or references). Shrinking it is
-// a breaking change.
+// Expanding the set is safe (additive for existing scenarios).
+// Shrinking or renaming is a breaking change.
 //
-// A fresh map is returned each call so callers are free to merge
-// scenario-specific helpers on top without polluting the shared set.
-func StdFunctions() map[string]function.Function {
+// A fresh map is returned each call so callers can overlay
+// scenario-specific helpers without polluting the shared set.
+func Functions() map[string]function.Function {
 	m := map[string]function.Function{
-		// Strings
-		"upper":      stdlib.UpperFunc,
-		"lower":      stdlib.LowerFunc,
-		"title":      stdlib.TitleFunc,
-		"trim":       stdlib.TrimFunc,
+		// ── Strings ──────────────────────────────────────────────
+		"upper":       stdlib.UpperFunc,
+		"lower":       stdlib.LowerFunc,
+		"title":       stdlib.TitleFunc,
+		"trim":        stdlib.TrimFunc,
 		"trimspace":  stdlib.TrimSpaceFunc,
 		"trimprefix": stdlib.TrimPrefixFunc,
 		"trimsuffix": stdlib.TrimSuffixFunc,
-		"substr":     stdlib.SubstrFunc,
-		"replace":    stdlib.ReplaceFunc,
-		"format":     stdlib.FormatFunc,
+		"substr":      stdlib.SubstrFunc,
+		"replace":     stdlib.ReplaceFunc,
+		"format":      stdlib.FormatFunc,
 		"formatlist": stdlib.FormatListFunc,
-		"split":      stdlib.SplitFunc,
-		"join":       stdlib.JoinFunc,
-		"chomp":      stdlib.ChompFunc,
-		"strlen":     stdlib.StrlenFunc,
+		"split":       stdlib.SplitFunc,
+		"join":        stdlib.JoinFunc,
+		"chomp":       stdlib.ChompFunc,
+		"strlen":      stdlib.StrlenFunc,
 
-		// Collections
+		// ── Collections ─────────────────────────────────────────
 		"concat":   stdlib.ConcatFunc,
 		"length":   stdlib.LengthFunc,
 		"keys":     stdlib.KeysFunc,
@@ -58,12 +57,12 @@ func StdFunctions() map[string]function.Function {
 		"range":    stdlib.RangeFunc,
 		"zipmap":   stdlib.ZipmapFunc,
 
-		// Encoding
+		// ── Encoding ────────────────────────────────────────────
 		"jsonencode": stdlib.JSONEncodeFunc,
 		"jsondecode": stdlib.JSONDecodeFunc,
 		"csvdecode":  stdlib.CSVDecodeFunc,
 
-		// Math
+		// ── Math ────────────────────────────────────────────────
 		"abs":    stdlib.AbsoluteFunc,
 		"ceil":   stdlib.CeilFunc,
 		"floor":  stdlib.FloorFunc,
@@ -73,24 +72,25 @@ func StdFunctions() map[string]function.Function {
 		"pow":    stdlib.PowFunc,
 		"signum": stdlib.SignumFunc,
 
-		// Regex
-		"regex":    stdlib.RegexFunc,
+		// ── Regex ───────────────────────────────────────────────
+		"regex":     stdlib.RegexFunc,
 		"regexall": stdlib.RegexAllFunc,
 
-		// Time
+		// ── Time ────────────────────────────────────────────────
 		"formatdate": stdlib.FormatDateFunc,
 		"timeadd":    stdlib.TimeAddFunc,
 
-		// Sets
+		// ── Sets ────────────────────────────────────────────────
 		"setintersection": stdlib.SetIntersectionFunc,
 		"setproduct":      stdlib.SetProductFunc,
 		"setsubtract":     stdlib.SetSubtractFunc,
 		"setunion":        stdlib.SetUnionFunc,
 	}
 
-	// Merge Orchard-specific functions (uuid, env, time utilities).
+	// Orchard-specific functions: uuid, env, time utilities.
 	for name, fn := range customFunctions() {
 		m[name] = fn
 	}
 	return m
 }
+

@@ -32,6 +32,14 @@ type ParsedScenario struct {
 	// the Configure contract that lets providers start up with
 	// default or zero configuration.
 	ProviderConfigs map[string]map[string]cty.Value
+
+	// ScenarioDir is the absolute directory containing the scenario
+	// file. The engine uses it to resolve `file` attributes on
+	// action bodies to absolute paths before dispatching to
+	// providers — the same convention as component source paths and
+	// exec: provider sources, extended to any action that reads a
+	// file.
+	ScenarioDir string
 }
 
 // RequiredProviderSpec captures the declared source of a provider.
@@ -145,12 +153,14 @@ func LoadScenario(path, name string, vars map[string]string) (*ParsedScenario, e
 		}
 	}
 
+	absDir, _ := filepath.Abs(scenarioDir)
 	return &ParsedScenario{
 		Scenario:          scenario,
 		Components:        components,
 		Variables:         resolved,
 		RequiredProviders: required,
 		ProviderConfigs:   providerConfigs,
+		ScenarioDir:       absDir,
 	}, nil
 }
 

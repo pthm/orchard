@@ -76,6 +76,8 @@ func (p *Provider) Execute(ctx context.Context, action string, attrs map[string]
 	switch action {
 	case "sql":
 		return p.executeSQL(ctx, attrs)
+	case "copy":
+		return p.executeCopy(ctx, attrs)
 	default:
 		return nil, fmt.Errorf("postgres: unknown action %q", action)
 	}

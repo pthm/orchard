@@ -73,6 +73,84 @@ provider "postgres" {
     }
   }
 
+  action "copy" {
+    description = <<-MD
+      Bulk-load rows into a table via PostgreSQL `COPY FROM STDIN`. Dramatically
+      faster than row-by-row `INSERT` for fixture data — a 10,000-row CSV loads
+      in a single network round-trip.
+
+      Provide data inline via `data` or reference a file via `file`. The two are
+      mutually exclusive. `file` paths are resolved relative to the scenario file
+      by the engine, so `file = "./fixtures/merchants.csv"` works from any cwd.
+    MD
+
+    attribute "table" {
+      type        = string
+      required    = true
+      description = "Target table name."
+    }
+    attribute "columns" {
+      type        = list(string)
+      required    = true
+      description = "Column names in the order the data provides them."
+    }
+    attribute "format" {
+      type        = string
+      default     = "csv"
+      description = "Data format: csv, tsv, or text (PostgreSQL COPY formats)."
+    }
+    attribute "header" {
+      type        = bool
+      default     = false
+      description = "When true, skip the first row as a header line."
+    }
+    attribute "data" {
+      type        = string
+      description = "Inline data string. Mutually exclusive with file."
+    }
+    attribute "file" {
+      type        = string
+      description = "Path to a data file. Resolved relative to the scenario file by the engine. Mutually exclusive with data."
+    }
+    attribute "delimiter" {
+      type        = string
+      description = "Field delimiter override. Defaults to comma for csv, tab for tsv."
+    }
+
+    output {
+      type = object({ rows_copied = number })
+      description = "Number of rows successfully loaded."
+    }
+
+    example {
+      description = "Inline CSV for a handful of seed rows."
+      code = <<-HCL
+        action "copy" "seed_merchants" {
+          table   = "merchants"
+          columns = ["name", "region"]
+          format  = "csv"
+          data    = <<-CSV
+            Acme Corp,us
+            Globex,eu
+          CSV
+        }
+      HCL
+    }
+
+    example {
+      description = "Load a larger fixture from a checked-in file."
+      code = <<-HCL
+        action "copy" "seed_products" {
+          table   = "products"
+          columns = ["merchant_id", "name", "price"]
+          format  = "csv"
+          header  = true
+          file    = "./fixtures/products.csv"
+        }
+      HCL
+    }
+  }
+
   example {
     description = "Seed a merchant and product, wiring the merchant's generated ID into the product insert."
     code        = <<-HCL

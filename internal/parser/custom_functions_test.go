@@ -180,6 +180,120 @@ scenario "s" {
 	}
 }
 
+func TestTimeSeriesFunction(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.hcl")
+	if err := os.WriteFile(path, []byte(`
+scenario "s" {
+  variable "ten" {
+    default = time_series("2026-01-01T00:00:00Z", "2026-01-10T00:00:00Z", 10)
+  }
+  variable "one" {
+    default = time_series("2026-01-01T00:00:00Z", "2026-01-10T00:00:00Z", 1)
+  }
+  variable "zero" {
+    default = time_series("2026-01-01T00:00:00Z", "2026-01-10T00:00:00Z", 0)
+  }
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ps, err := LoadScenario(path, "", nil)
+	if err != nil {
+		t.Fatalf("LoadScenario: %v", err)
+	}
+
+	ten := ps.Variables["ten"]
+	if ten.LengthInt() != 10 {
+		t.Errorf("time_series count=10: got %d entries", ten.LengthInt())
+	}
+	// First should be start, last should be end.
+	it := ten.ElementIterator()
+	it.Next()
+	_, first := it.Element()
+	if first.AsString() != "2026-01-01T00:00:00Z" {
+		t.Errorf("first: got %q", first.AsString())
+	}
+	// Advance to last.
+	var last string
+	for it.Next() {
+		_, v := it.Element()
+		last = v.AsString()
+	}
+	if last != "2026-01-10T00:00:00Z" {
+		t.Errorf("last: got %q want 2026-01-10T00:00:00Z", last)
+	}
+
+	one := ps.Variables["one"]
+	if one.LengthInt() != 1 {
+		t.Errorf("time_series count=1: got %d entries", one.LengthInt())
+	}
+
+	zero := ps.Variables["zero"]
+	if zero.LengthInt() != 0 {
+		t.Errorf("time_series count=0: got %d entries", zero.LengthInt())
+	}
+}
+
+func TestTimeUnixFunction(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.hcl")
+	if err := os.WriteFile(path, []byte(`
+scenario "s" {
+  variable "epoch" { default = time_unix("2026-01-01T00:00:00Z") }
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ps, err := LoadScenario(path, "", nil)
+	if err != nil {
+		t.Fatalf("LoadScenario: %v", err)
+	}
+
+	epoch, _ := ps.Variables["epoch"].AsBigFloat().Int64()
+	want := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Unix()
+	if epoch != want {
+		t.Errorf("time_unix: got %d want %d", epoch, want)
+	}
+}
+
+func TestTimeRandomFunction(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.hcl")
+	if err := os.WriteFile(path, []byte(`
+scenario "s" {
+  variable "r1" { default = time_random("2026-01-01T00:00:00Z", "2026-12-31T23:59:59Z") }
+  variable "r2" { default = time_random("2026-01-01T00:00:00Z", "2026-12-31T23:59:59Z") }
+  # Same start and end: should return start.
+  variable "same" { default = time_random("2026-06-15T00:00:00Z", "2026-06-15T00:00:00Z") }
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ps, err := LoadScenario(path, "", nil)
+	if err != nil {
+		t.Fatalf("LoadScenario: %v", err)
+	}
+
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 12, 31, 23, 59, 59, 0, time.UTC)
+
+	for _, name := range []string{"r1", "r2"} {
+		ts, err := time.Parse(time.RFC3339, ps.Variables[name].AsString())
+		if err != nil {
+			t.Fatalf("%s: parse: %v", name, err)
+		}
+		if ts.Before(start) || ts.After(end) {
+			t.Errorf("%s: %s outside [%s, %s]", name, ts, start, end)
+		}
+	}
+
+	same := ps.Variables["same"].AsString()
+	if same != "2026-06-15T00:00:00Z" {
+		t.Errorf("same start/end: got %q want 2026-06-15T00:00:00Z", same)
+	}
+}
+
 func TestParseExtendedDuration(t *testing.T) {
 	cases := []struct {
 		in   string

@@ -113,7 +113,7 @@ component "merchant" {
     default = "us"
   }
 
-  action "sql" "create" {
+  action "postgres_query" "create" {
     query = <<-SQL
       INSERT INTO merchants (name, region)
       VALUES ('${var.name}', '${var.region}')
@@ -122,11 +122,11 @@ component "merchant" {
   }
 
   output "id" {
-    value = action.sql.create.id
+    value = action.postgres_query.create.id
   }
 
   output "name" {
-    value = action.sql.create.name
+    value = action.postgres_query.create.name
   }
 }
 ```
@@ -136,7 +136,7 @@ component "merchant" {
 An **Action** is the smallest executable unit. It performs a side effect — running SQL, calling an HTTP endpoint, executing a command — and produces outputs that downstream actions and components can reference. Actions use a two-label syntax where the first label is the action type (which selects the provider) and the second is the instance name:
 
 ```hcl
-action "sql" "create_merchant" { ... }
+action "postgres_query" "create_merchant" { ... }
 action "cmd" "generate_data" { ... }
 action "http" "trigger_sync" { ... }
 ```
@@ -177,13 +177,13 @@ References follow structured, typed paths:
 
 ```
 component.<type>.<name>.<output>    — component.merchant.base.id
-action.<type>.<name>.<output>       — action.sql.create.id
+action.<type>.<name>.<output>       — action.postgres_query.create.id
 var.<name>                          — var.merchant_name
 ```
 
 These references serve double duty:
 
-1. **Dependency graph construction** — at parse time, Orchard inspects all expressions for variable references (using HCL's `Expression.Variables()`) to build an implicit execution graph. If action B references `action.sql.A.id`, then A must execute before B.
+1. **Dependency graph construction** — at parse time, Orchard inspects all expressions for variable references (using HCL's `Expression.Variables()`) to build an implicit execution graph. If action B references `action.postgres_query.A.id`, then A must execute before B.
 2. **Value resolution** — at execution time, after upstream nodes have executed, their outputs are placed into an `EvalContext` and downstream expressions are evaluated against it.
 
 ### Variables and Types
@@ -272,7 +272,7 @@ provider "postgres" {
     }
   }
 
-  action "sql" {
+  action "postgres_query" {
     attribute "query" {
       type     = string
       required = true
@@ -311,15 +311,15 @@ provider "cache" { dsn = var.cache_dsn }
 
 This lets two instances of the same provider coexist with independent config.
 
-When a single registered provider offers an action type, scenarios write it bare (`action "sql" "x"`) and the engine resolves it unambiguously. When multiple providers expose the same action type, the action body picks one with the reserved `provider` attribute:
+When a single registered provider offers an action type, scenarios write it bare (`action "postgres_query" "x"`) and the engine resolves it unambiguously. When multiple providers expose the same action type, the action body picks one with the reserved `provider` attribute:
 
 ```hcl
-action "sql" "insert_row" {
+action "postgres_query" "insert_row" {
   provider = "db"
   query    = "INSERT INTO ..."
 }
 
-action "sql" "warm_cache" {
+action "postgres_query" "warm_cache" {
   provider = "cache"
   query    = "SELECT ..."
 }
@@ -371,14 +371,14 @@ See `test/integration/testdata/echo/main.go` for a minimal reference (~100 lines
 
 ## Action Types
 
-The system supports multiple action types, each implemented by a provider. A scenario's `required_providers` block decides which ones are available for that run.
+The system supports multiple action types, each implemented by a provider. Action type names follow the convention `<provider>_<action>` to prevent collisions and make the provider explicit at a glance (the same pattern Terraform uses for resource types). A scenario's `required_providers` block decides which providers — and therefore which action types — are available for that run.
 
-### SQL (builtin/postgres)
+### postgres_query (builtin/postgres)
 
 Execute arbitrary SQL against the configured PostgreSQL connection. Results from `RETURNING` clauses are captured as outputs.
 
 ```hcl
-action "sql" "create_merchant" {
+action "postgres_query" "create_merchant" {
   query = <<-SQL
     INSERT INTO merchants (name, region)
     VALUES ('${var.name}', '${var.region}')
@@ -387,7 +387,33 @@ action "sql" "create_merchant" {
 }
 ```
 
-### HTTP Request (builtin/http)
+### postgres_copy (builtin/postgres)
+
+Bulk-load rows via PostgreSQL `COPY FROM STDIN`. Dramatically faster than row-by-row inserts for fixture data. Supports inline CSV/TSV data or a file path (resolved relative to the scenario file by the engine).
+
+```hcl
+action "postgres_copy" "seed_merchants" {
+  table   = "merchants"
+  columns = ["name", "region"]
+  format  = "csv"
+  data    = <<-CSV
+    Acme Corp,us
+    Globex,eu
+  CSV
+}
+
+action "postgres_copy" "seed_products" {
+  table   = "products"
+  columns = ["merchant_id", "name", "price"]
+  format  = "csv"
+  header  = true
+  file    = "./fixtures/products.csv"
+}
+```
+
+Outputs: `{rows_copied = number}`.
+
+### http_request (builtin/http)
 
 Make HTTP requests to APIs or services. The provider supports a `base_url` config for relative paths, `default_headers` merged across every request, and a request-level timeout. Responses expose `status`, `body`, and `headers` (first value per key) as outputs.
 
@@ -399,7 +425,7 @@ provider "http" {
   }
 }
 
-action "request" "trigger_sync" {
+action "http_request" "trigger_sync" {
   method = "POST"
   url    = "/sync"
   headers = {
@@ -426,18 +452,18 @@ provider "stripe" {
   api_key = var.stripe_key
 }
 
-action "charge" "test_payment" {
+action "stripe_charge" "test_payment" {
   customer_id = component.customer.base.id
   amount      = 500
   currency    = "usd"
 }
 ```
 
-The action-type label (`"charge"`) matches an entry in the provider's schema. The full set of actions a scenario can use is the union of all declared providers' action names.
+The action-type label (`"stripe_charge"`) matches an entry in the provider's schema. External providers should follow the same `<provider>_<action>` naming convention for ecosystem consistency.
 
-### Shell Commands (builtin/exec)
+### exec_run (builtin/exec)
 
-Run external programs and capture stdout, stderr, and exit code. Non-zero exit is an error by default (documented behaviour changes when retry / success-codes land).
+Run external programs and capture stdout, stderr, and exit code. Non-zero exit is an error by default.
 
 ```hcl
 provider "exec" {
@@ -445,15 +471,14 @@ provider "exec" {
   env = { PATH = "/usr/local/bin:/usr/bin" }
 }
 
-action "run" "seed" {
+action "exec_run" "seed" {
   command = "./scripts/seed"
   args    = ["--env", "test"]
   env     = { DATABASE_URL = var.dsn }
-  stdin   = file("fixtures.sql")
 }
 
-action "run" "reindex" {
-  depends_on = [action.run.seed]
+action "exec_run" "reindex" {
+  depends_on = [action.exec_run.seed]
   command    = "./scripts/reindex"
   timeout    = "30s"
 }
@@ -490,7 +515,7 @@ For side-effect-only dependencies — where one action must run after another wi
 
 ```hcl
 action "request" "reindex" {
-  depends_on = [action.sql.seed_data]
+  depends_on = [action.postgres_query.seed_data]
   method = "POST"
   url    = "/reindex"
 }
@@ -565,7 +590,7 @@ The teardown body uses the **same schema as the outer action's provider**. A sql
 Example:
 
 ```hcl
-action "sql" "create_merchant" {
+action "postgres_query" "create_merchant" {
   query = "INSERT INTO merchants (name) VALUES ('${var.name}') RETURNING id"
 
   lifecycle {
@@ -641,8 +666,9 @@ The database interaction model provides three layers, from most flexible to most
 
 | Layer | Description | Example |
 |-------|-------------|---------|
-| **Raw SQL** | Maximum flexibility, no validation | `action "sql" "seed" { query = "..." }` |
-| **Typed DB** | Schema-aware, validated operations | `action "db.insert" "merchant" { table = "merchants" ... }` |
+| **Raw SQL** | Maximum flexibility, no validation | `action "postgres_query" "seed" { query = "..." }` |
+| **Bulk load** | High-throughput fixture import | `action "postgres_copy" "seed" { table = "..." file = "..." }` |
+| **Typed DB** | Schema-aware, validated operations (future — M4) | `action "postgres_insert" "merchant" { table = "merchants" ... }` |
 | **Components** | Business-level abstractions | `component "merchant" "base" { source = "..." }` |
 
 Users choose the appropriate layer for each situation. Raw SQL for complex queries and migrations. Typed DB for common CRUD. Components for reusable business-level state.
@@ -652,6 +678,9 @@ Users choose the appropriate layer for each situation. Raw SQL for complex queri
 ## CLI Design
 
 ```bash
+# Scaffold a new project
+orchard init my-project
+
 # Execute a scenario
 orchard run scenarios/dev.hcl
 
@@ -668,6 +697,10 @@ orchard plan scenarios/dev.hcl
 
 # List available scenarios (styled: bold names, violet tags, muted descriptions)
 orchard list scenarios/
+
+# List all available HCL functions (markdown or JSON for tooling)
+orchard functions
+orchard functions --json
 
 # Render provider reference docs from a provider's schema
 orchard docs builtin/postgres
@@ -881,7 +914,7 @@ Fill in the remaining action-layer features that were in the original Milestone 
 
 **Reserved action attributes and blocks.** Four items now live under orchard's reservation namespace, stripped from action bodies before provider schema validation runs: `provider = "<alias>"`, `depends_on = [...]`, `timeout = "..."`, and the `retry { ... }` block. The reservation mechanism sits in one place (`internal/graph/graph.go`), so any future addition is a localised change.
 
-**Plan-time reference type-checking.** `orchard plan` (and `orchard run` before Configure) now builds a typed eval context — `var.*` with resolved values, each `action.<type>.<name>` as `cty.UnknownVal` of the provider's declared output type — and walks every scenario expression against it. Typos like `action.request.fetch.bdy` surface as HCL "Unsupported attribute" errors with source coordinates, not at runtime. Actions whose provider declares `output { type = any }` (postgres.sql today) remain dynamic; those typos stay runtime errors until the provider narrows its schema.
+**Plan-time reference type-checking.** `orchard plan` (and `orchard run` before Configure) now builds a typed eval context — `var.*` with resolved values, each `action.<type>.<name>` as `cty.UnknownVal` of the provider's declared output type — and walks every scenario expression against it. Typos like `action.http_request.fetch.bdy` surface as HCL "Unsupported attribute" errors with source coordinates, not at runtime. Actions whose provider declares `output { type = any }` (postgres.sql today) remain dynamic; those typos stay runtime errors until the provider narrows its schema.
 
 **Routing today.** The engine routes actions by the scenario's local provider alias. `required_providers { db = { source = "builtin/postgres" } }` registers the postgres provider under the name `db`; `provider "db" {}` configures it; and an action body can pick it explicitly with `provider = "db"`. When only one registered provider offers a given action type, the action body can omit `provider =` and the engine resolves it automatically. When two or more providers offer the same action type, the engine returns a clear error listing the candidates and pointing at the `provider = "<alias>"` escape.
 
@@ -944,7 +977,17 @@ Harden the tool for real-world use and improve the authoring experience.
 | `orchard plan` as a DAG-shaped dependency tree | Done |
 | Engine-Reporter split so CLI presentation lives outside the engine | Done |
 | `--no-color` / `NO_COLOR` respect | Done |
-| HCL stdlib function library (`upper`, `jsonencode`, `format`, `concat`, `regex`, ...) | Done |
+| HCL function library (55+ functions: strings, collections, encoding, math, regex, time, identity, environment, sets) | Done |
+| Custom time functions (`now`, `timesub`, `timeseries`, `timesequence`, `timerandom`, `timeunix`) | Done |
+| `uuid()` and `env()` functions | Done |
+| Unified function registry (`internal/language`) with metadata for docs/LSP/grammars | Done |
+| `orchard functions` subcommand (markdown + `--json` for tooling) | Done |
+| Auto-generated functions reference page via `just docs-generate` | Done |
+| Action type namespacing (`<provider>_<action>`: `postgres_query`, `http_request`, `exec_run`) | Done |
+| `postgres_copy` action for bulk CSV/TSV loading via `COPY FROM STDIN` | Done |
+| Engine-level `file` attribute resolution (relative to scenario file) | Done |
+| `orchard init` project scaffolding | Done |
+| Error message polish (exec provider formatting, SilenceUsage, no double-wrapping) | Done |
 | Scenario-portable provider paths (`exec:` resolved against scenario file) | Done |
 | Documentation site (Hugo + hugo-book) with concepts/providers/guides/extending/reference | Done |
 | `orchard docs <source>` — schema-driven provider reference generator | Done |
@@ -954,6 +997,8 @@ Harden the tool for real-world use and improve the authoring experience.
 | Styled `orchard list` with lipgloss (bold names, violet tags, muted paths/descriptions) | Done |
 | Runtime error messages with HCL source locations (`file:line`) | Done |
 | Multiple scenarios per file; `--scenario <name>` on `run` / `plan` | Done |
+| FlexSearch-powered docs search with heading-level indexing, breadcrumbs, keyboard nav | Done |
+| Function naming convention: lowercase compound words matching cty (`formatdate`, `timesub`) | Done |
 | Dry-run mode (plan with expression evaluation but no execution) | Not started |
 | Execution logging with structured output | Not started |
 | Parallel execution of independent nodes | Not started |
@@ -992,25 +1037,38 @@ cmd/
   root.go                       Cobra root, global --var flag
   run.go                        orchard run — parse → graph → validate → configure → execute
   plan.go                       orchard plan — parse → graph → schema-validate, print DAG
+  init.go                       orchard init — scaffold a starter project
   list.go                       orchard list — scan for scenario files, styled with
                                 lipgloss (bold names, violet tags, muted paths)
   docs.go                       orchard docs — resolve provider source, render schema to markdown
+  functions.go                  orchard functions — render function registry as markdown
+                                or JSON (--json for tooling, --hugo for docs generation)
   teardown.go                   orchard teardown — load record, reload scenario, invoke engine.Teardown
   registry.go                   registerProviders + buildRegistry helpers (shared by run/plan/docs/teardown)
 
 internal/
   parser/
-    schema.go                   HCL schema structs: Scenario, Component, RequiredProviders,
-                                ProviderConfig, Variable, Action, Output
-    schema.go                   HCL schema structs — ScenarioBlock now supports
+    schema.go                   HCL schema structs — ScenarioBlock supports
                                 description/tags and multiple scenarios per file
     parser.go                   LoadScenario(path, name, vars): parse, pick scenario
                                 by name (auto-select when single), extract required_providers,
                                 evaluate provider configs, resolve components, merge vars,
-                                absolutize exec: provider paths against scenario dir
-    functions.go                StdFunctions — the HCL stdlib subset Orchard exposes in
-                                every eval context (strings, collections, encoding, math,
-                                regex, time, sets)
+                                absolutize exec: provider paths and file attrs against
+                                scenario dir
+    functions.go                Functions() — delegates to language.Map(), the unified
+                                function registry
+
+  language/
+    registry.go                 FunctionDef type + All/ByName/ByCategory/Map helpers.
+                                The single source of truth for function implementations
+                                and metadata (name, category, description, params,
+                                return type, purity, examples). Drives the engine,
+                                the docs generator, and future LSP.
+    registry_*.go               Per-category function definitions: strings, collections,
+                                encoding, math, regex, time, sets, identity, environment.
+    custom_functions.go         Orchard-specific implementations: uuid, env, now,
+                                timesub, timesequence, timeseries, timeunix, timerandom.
+                                Extended duration parsing (d, w on top of Go units).
 
   graph/
     graph.go                    Build DAG from Expression.Variables() traversals;
@@ -1081,10 +1139,11 @@ pkg/ (public SDK surface)
   provider/
     provider.go                 Provider interface (Schema/Configure/Execute/Close) + Registry
     builtins.go                 Source-string → factory-function registry for "builtin/*"
-    postgres/                   builtin/postgres — raw SQL against pgx pool
+    postgres/                   builtin/postgres — postgres_query (raw SQL) +
+                                postgres_copy (COPY FROM STDIN bulk load)
       schema.hcl                Embedded via //go:embed; carries description, notes,
                                 examples consumed by the docs renderer
-      provider.go, sql.go, cty.go, register.go
+      provider.go, sql.go, copy.go, cty.go, register.go
     http/                       builtin/http — net/http-backed request action
       schema.hcl                Embedded via //go:embed (with description/notes/examples)
       provider.go, register.go
@@ -1102,10 +1161,17 @@ docs/                           Hugo site sources (https://orchard.pthm.dev)
                                 same URLs as hand-written sections
   content/                      Tracked sections: getting-started, concepts, providers/_index,
                                 providers/external, guides, extending, reference
-  content-generated/            (gitignored) Output of `just docs-generate` — one file
-                                per builtin provider rendered from its schema.hcl
-  static/                       Brand assets (orchard_logo.png, favicon)
-  assets/                       SCSS overrides (container width, etc.)
+  content-generated/            (gitignored) Output of `just docs-generate`:
+                                provider pages from schema.hcl + functions reference
+                                from the language registry
+  static/                       Brand assets (orchard_logo.png, favicon),
+                                vendored flexsearch.bundle.min.js
+  assets/                       SCSS overrides (_custom.scss, _variables.scss),
+                                search.js (FlexSearch with heading-level indexing,
+                                breadcrumbs, keyboard nav), search-data.json template
+  layouts/                      Theme overrides: html-head (FlexSearch instead of Fuse),
+                                search (emptied — moved to content-before inject),
+                                content-before (search bar at top of content area)
 
 test/
   integration/                  Separate go module with testcontainers-go Postgres
@@ -1133,7 +1199,7 @@ test/
 
 **Two-pass HCL decode** — Structural decode at parse time with `hcl.Expression` for deferred fields. Expression evaluation at execution time with a populated `EvalContext`. This is the foundation that makes dependency graph construction and lazy evaluation work together.
 
-**Component-scoped namespacing** — A component's internal actions get node IDs like `component.merchant.base.action.sql.create`. At execution time, the engine remaps these to bare `action.sql.create` references within the component's scope, so component authors write `action.sql.create.id` without knowing their component's instance name. The `var.*` namespace visible inside a component is the component's resolved inputs (merged with its declared variable defaults), not the scenario's — scoping is enforced in both directions.
+**Component-scoped namespacing** — A component's internal actions get node IDs like `component.merchant.base.action.postgres_query.create`. At execution time, the engine remaps these to bare `action.postgres_query.create` references within the component's scope, so component authors write `action.postgres_query.create.id` without knowing their component's instance name. The `var.*` namespace visible inside a component is the component's resolved inputs (merged with its declared variable defaults), not the scenario's — scoping is enforced in both directions.
 
 **cty type system as the universal type DSL** — All values flowing through the system use `cty` (from HCL). Provider schemas declare types in HCL's own type-expression syntax (`string`, `map(number)`, `object({id=number})`); on the wire these travel as compact strings (`"object({id=number})"`), parseable by any JSON-capable language without an HCL library. This is what makes the multi-language provider story work without forcing external authors to ship an HCL parser.
 
@@ -1158,6 +1224,12 @@ test/
 **Records + teardown are stateless at the engine boundary** — `engine.Teardown` takes a scenario, a graph, and pre-decoded `vars map[string]cty.Value` + `outputs map[string]map[string]cty.Value`. The record file format lives in `internal/record`; the engine doesn't import it. That avoids a cycle (record already imports engine for its Reporter), and — more usefully — keeps the teardown pass testable without producing a file on disk. Higher-level callers (the CLI subcommand, the integration test) compose the pieces.
 
 **Teardown reuses the provider's Execute** — a `lifecycle { teardown { } }` body is evaluated against the outer action's provider schema and dispatched through the same `Provider.Execute`. No teardown-specific surface: a sql action's teardown is "another sql action"; an http action's is "another http request". This makes teardown feasible for any existing provider (builtin or external) without an interface change, and it keeps the mental model simple — teardown is just "execute these actions in reverse".
+
+**Action types are `<provider>_<action>`** — bare names like `sql` and `run` would collide the moment a second database or HTTP provider appeared. Namespacing with the provider name (`postgres_query`, `http_request`, `exec_run`) prevents collisions and makes the routing self-documenting. Provider authors declare the full name in their schema — no engine-side auto-prefix magic. External providers follow the same convention for ecosystem consistency.
+
+**One function registry, multiple consumers** — `internal/language` is the single source of truth for every function available in HCL expressions. Each `FunctionDef` carries the cty implementation alongside structured metadata (name, category, description, parameters, return type, purity, examples). The engine builds its `map[string]function.Function` from the registry via `language.Map()`; the `orchard functions` command renders it as markdown or JSON; the docs site generates the functions reference page from it; a future LSP server will serve completions and hover docs from the same data. Adding a function means adding one struct — implementation and documentation live together and can't drift.
+
+**Engine resolves `file` attributes generically** — any action attribute named `file` that evaluates to a relative path is resolved against `ParsedScenario.ScenarioDir` before dispatching to the provider. This matches the resolution already done for component `source` paths and `exec:` provider sources, extended to action bodies as a convention. Any provider that declares a `file` attribute gets scenario-relative path resolution for free.
 
 ### Dependencies
 

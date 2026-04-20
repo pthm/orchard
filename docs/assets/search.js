@@ -37,11 +37,42 @@
     }
   }
 
+  var activeIndex = -1;
+
   function handleKey(e) {
     if (e.key === 'Escape') {
       input.blur();
       resultsEl.classList.add('hidden');
+      activeIndex = -1;
+      return;
     }
+
+    var items = resultsEl.querySelectorAll('.orchard-search-result');
+    if (!items.length) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      activeIndex = Math.min(activeIndex + 1, items.length - 1);
+      updateActive(items);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      activeIndex = Math.max(activeIndex - 1, -1);
+      updateActive(items);
+    } else if (e.key === 'Enter' && activeIndex >= 0 && items[activeIndex]) {
+      e.preventDefault();
+      items[activeIndex].click();
+    }
+  }
+
+  function updateActive(items) {
+    items.forEach(function (el, i) {
+      if (i === activeIndex) {
+        el.classList.add('active');
+        el.scrollIntoView({ block: 'nearest' });
+      } else {
+        el.classList.remove('active');
+      }
+    });
   }
 
   // cleanText strips markdown artefacts and HTML entities from plain
@@ -142,8 +173,17 @@
 
           // Per-heading sections. Build a breadcrumb trail by
           // tracking the last heading at each level.
+          //
+          // Snippet extraction: find each heading's title in the
+          // plain text IN ORDER (each search starts after the
+          // previous hit), then grab the prose between this heading
+          // and the next. This avoids matching a random occurrence
+          // of the title in body text. After the title position, skip
+          // past any non-letter lead-in (#, whitespace, code fences)
+          // to reach the actual prose.
           var breadcrumbStack = {};
           breadcrumbStack[1] = page.title;
+          var cursor = 0; // sequential search cursor
 
           for (var i = 0; i < headings.length; i++) {
             var h = headings[i];
@@ -163,17 +203,27 @@
             }
             var breadcrumb = crumbs.join(' > ');
 
-            // Try to extract a content snippet around the heading.
+            // Find this heading in the plain text, searching forward
+            // from the last heading's position.
             var rawSnippet = '';
-            var pos = plain.indexOf(cleanTitle);
+            var pos = plain.indexOf(cleanTitle, cursor);
             if (pos >= 0) {
-              var nextPos = plain.length;
+              // Skip past the title and any leading non-prose chars
+              // (# from anchors, whitespace, code-fence markers).
+              var bodyStart = pos + cleanTitle.length;
+              while (bodyStart < plain.length && /[#\s`→|_\-=]/.test(plain[bodyStart])) {
+                bodyStart++;
+              }
+
+              // Find the end: next heading's position or 500 chars.
+              var endPos = plain.length;
               if (i + 1 < headings.length) {
                 var nextTitle = stripHTML(headings[i + 1].title);
-                var np = plain.indexOf(nextTitle, pos + cleanTitle.length);
-                if (np > pos) nextPos = np;
+                var np = plain.indexOf(nextTitle, bodyStart);
+                if (np > bodyStart) endPos = np;
               }
-              rawSnippet = plain.slice(pos + cleanTitle.length, Math.min(pos + 500, nextPos)).trim();
+              rawSnippet = plain.slice(bodyStart, Math.min(bodyStart + 500, endPos)).trim();
+              cursor = pos + cleanTitle.length;
             }
 
             // Index with split compound words in the title so
@@ -200,6 +250,7 @@
 
   function search() {
     resultsEl.innerHTML = '';
+    activeIndex = -1;
 
     if (!input.value || !index) {
       resultsEl.classList.add('hidden');

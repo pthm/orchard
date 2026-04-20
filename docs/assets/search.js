@@ -47,6 +47,11 @@
   // cleanText strips markdown artefacts and HTML entities from plain
   // text so search previews read as prose, not raw markup.
   function cleanText(s) {
+    // Use a temporary DOM element to decode ALL HTML entities
+    // (named, numeric decimal &#34;, and hex &#x22;) in one pass.
+    var el = document.createElement('textarea');
+    el.innerHTML = s;
+    s = el.value;
     return s
       // Strip markdown heading markers (# ## ### etc.)
       .replace(/^#{1,6}\s+/gm, '')
@@ -55,17 +60,12 @@
       .replace(/_{1,3}([^_]+)_{1,3}/g, '$1')
       // Strip markdown code backticks
       .replace(/`([^`]*)`/g, '$1')
-      // Decode common HTML entities
-      .replace(/&rsquo;/g, "'")
-      .replace(/&lsquo;/g, "'")
-      .replace(/&rdquo;/g, '"')
-      .replace(/&ldquo;/g, '"')
-      .replace(/&mdash;/g, '—')
-      .replace(/&ndash;/g, '–')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&nbsp;/g, ' ')
+      // Strip markdown link syntax [text](url) → text
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+      // Strip markdown table separators
+      .replace(/^\|[-:| ]+\|$/gm, '')
+      // Strip table pipes
+      .replace(/\|/g, ' ')
       // Collapse multiple whitespace/newlines
       .replace(/\s+/g, ' ')
       .trim();

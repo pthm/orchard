@@ -65,7 +65,7 @@ func buildEvalContext(
 
 	return &hcl.EvalContext{
 		Variables: variables,
-		Functions: parser.StdFunctions(),
+		Functions: parser.Functions(),
 	}
 }
 

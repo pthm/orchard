@@ -96,9 +96,9 @@ func TestTimeSubFunction(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`
 scenario "s" {
   variable "base"     { default = "2026-04-20T12:00:00Z" }
-  variable "minus_1d" { default = time_sub("2026-04-20T12:00:00Z", "1d") }
-  variable "minus_2w" { default = time_sub("2026-04-20T12:00:00Z", "2w") }
-  variable "minus_6h" { default = time_sub("2026-04-20T12:00:00Z", "6h") }
+  variable "minus_1d" { default = timesub("2026-04-20T12:00:00Z", "1d") }
+  variable "minus_2w" { default = timesub("2026-04-20T12:00:00Z", "2w") }
+  variable "minus_6h" { default = timesub("2026-04-20T12:00:00Z", "6h") }
 }`), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -128,15 +128,15 @@ func TestTimeSequenceFunction(t *testing.T) {
 scenario "s" {
   # 10 days at 2-day intervals = 5 timestamps (days 0, 2, 4, 6, 8)
   variable "even" {
-    default = time_sequence("2026-01-01T00:00:00Z", "2026-01-11T00:00:00Z", "2d")
+    default = timesequence("2026-01-01T00:00:00Z", "2026-01-11T00:00:00Z", "2d")
   }
   # Same range but randomized intervals between 1d and 3d
   variable "random" {
-    default = time_sequence("2026-01-01T00:00:00Z", "2026-01-11T00:00:00Z", "1d", "3d")
+    default = timesequence("2026-01-01T00:00:00Z", "2026-01-11T00:00:00Z", "1d", "3d")
   }
   # Empty: start >= end
   variable "empty" {
-    default = time_sequence("2026-01-11T00:00:00Z", "2026-01-01T00:00:00Z", "1d")
+    default = timesequence("2026-01-11T00:00:00Z", "2026-01-01T00:00:00Z", "1d")
   }
 }`), 0o644); err != nil {
 		t.Fatal(err)
@@ -186,13 +186,13 @@ func TestTimeSeriesFunction(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`
 scenario "s" {
   variable "ten" {
-    default = time_series("2026-01-01T00:00:00Z", "2026-01-10T00:00:00Z", 10)
+    default = timeseries("2026-01-01T00:00:00Z", "2026-01-10T00:00:00Z", 10)
   }
   variable "one" {
-    default = time_series("2026-01-01T00:00:00Z", "2026-01-10T00:00:00Z", 1)
+    default = timeseries("2026-01-01T00:00:00Z", "2026-01-10T00:00:00Z", 1)
   }
   variable "zero" {
-    default = time_series("2026-01-01T00:00:00Z", "2026-01-10T00:00:00Z", 0)
+    default = timeseries("2026-01-01T00:00:00Z", "2026-01-10T00:00:00Z", 0)
   }
 }`), 0o644); err != nil {
 		t.Fatal(err)
@@ -205,7 +205,7 @@ scenario "s" {
 
 	ten := ps.Variables["ten"]
 	if ten.LengthInt() != 10 {
-		t.Errorf("time_series count=10: got %d entries", ten.LengthInt())
+		t.Errorf("timeseries count=10: got %d entries", ten.LengthInt())
 	}
 	// First should be start, last should be end.
 	it := ten.ElementIterator()
@@ -226,12 +226,12 @@ scenario "s" {
 
 	one := ps.Variables["one"]
 	if one.LengthInt() != 1 {
-		t.Errorf("time_series count=1: got %d entries", one.LengthInt())
+		t.Errorf("timeseries count=1: got %d entries", one.LengthInt())
 	}
 
 	zero := ps.Variables["zero"]
 	if zero.LengthInt() != 0 {
-		t.Errorf("time_series count=0: got %d entries", zero.LengthInt())
+		t.Errorf("timeseries count=0: got %d entries", zero.LengthInt())
 	}
 }
 
@@ -240,7 +240,7 @@ func TestTimeUnixFunction(t *testing.T) {
 	path := filepath.Join(dir, "s.hcl")
 	if err := os.WriteFile(path, []byte(`
 scenario "s" {
-  variable "epoch" { default = time_unix("2026-01-01T00:00:00Z") }
+  variable "epoch" { default = timeunix("2026-01-01T00:00:00Z") }
 }`), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +253,7 @@ scenario "s" {
 	epoch, _ := ps.Variables["epoch"].AsBigFloat().Int64()
 	want := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Unix()
 	if epoch != want {
-		t.Errorf("time_unix: got %d want %d", epoch, want)
+		t.Errorf("timeunix: got %d want %d", epoch, want)
 	}
 }
 
@@ -262,10 +262,10 @@ func TestTimeRandomFunction(t *testing.T) {
 	path := filepath.Join(dir, "s.hcl")
 	if err := os.WriteFile(path, []byte(`
 scenario "s" {
-  variable "r1" { default = time_random("2026-01-01T00:00:00Z", "2026-12-31T23:59:59Z") }
-  variable "r2" { default = time_random("2026-01-01T00:00:00Z", "2026-12-31T23:59:59Z") }
+  variable "r1" { default = timerandom("2026-01-01T00:00:00Z", "2026-12-31T23:59:59Z") }
+  variable "r2" { default = timerandom("2026-01-01T00:00:00Z", "2026-12-31T23:59:59Z") }
   # Same start and end: should return start.
-  variable "same" { default = time_random("2026-06-15T00:00:00Z", "2026-06-15T00:00:00Z") }
+  variable "same" { default = timerandom("2026-06-15T00:00:00Z", "2026-06-15T00:00:00Z") }
 }`), 0o644); err != nil {
 		t.Fatal(err)
 	}

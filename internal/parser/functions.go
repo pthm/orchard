@@ -24,7 +24,7 @@ import (
 // A fresh map is returned each call so callers are free to merge
 // scenario-specific helpers on top without polluting the shared set.
 func StdFunctions() map[string]function.Function {
-	return map[string]function.Function{
+	m := map[string]function.Function{
 		// Strings
 		"upper":      stdlib.UpperFunc,
 		"lower":      stdlib.LowerFunc,
@@ -87,4 +87,10 @@ func StdFunctions() map[string]function.Function {
 		"setsubtract":     stdlib.SetSubtractFunc,
 		"setunion":        stdlib.SetUnionFunc,
 	}
+
+	// Merge Orchard-specific functions (uuid, env, time utilities).
+	for name, fn := range customFunctions() {
+		m[name] = fn
+	}
+	return m
 }

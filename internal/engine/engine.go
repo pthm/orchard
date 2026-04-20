@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -46,6 +47,12 @@ type Engine struct {
 	// schemas.
 	routes   map[string][]actionRoute
 	reporter Reporter
+
+	// scenarioDir is the absolute directory of the scenario file.
+	// Set at the start of Execute/Teardown from ParsedScenario.
+	// Used to resolve `file` attributes on actions to absolute
+	// paths before dispatching to providers.
+	scenarioDir string
 }
 
 // Reporter receives observability events from the engine's
@@ -139,6 +146,32 @@ type actionRoute struct {
 // Result holds the outputs from executing a scenario.
 type Result struct {
 	Outputs map[string]cty.Value
+}
+
+// resolveFileAttrs rewrites any attribute named "file" from a
+// relative path to an absolute path anchored at scenarioDir. This
+// is the generic mechanism that lets providers declare a `file`
+// attribute and receive an absolute path regardless of the user's
+// cwd — the same convention applied to component source paths and
+// exec: provider sources, extended to action bodies.
+//
+// Attributes named anything other than "file", or whose value is
+// already absolute, are untouched. A zero scenarioDir (empty string)
+// disables resolution — this happens in test scenarios where no
+// real file was loaded.
+func resolveFileAttrs(attrs map[string]cty.Value, scenarioDir string) {
+	if scenarioDir == "" {
+		return
+	}
+	v, ok := attrs["file"]
+	if !ok || v.IsNull() || v.Type() != cty.String {
+		return
+	}
+	p := v.AsString()
+	if p == "" || filepath.IsAbs(p) {
+		return
+	}
+	attrs["file"] = cty.StringVal(filepath.Join(scenarioDir, p))
 }
 
 // formatSourceLoc returns a " (filename:line)" suffix suitable for
@@ -251,6 +284,7 @@ func (e *Engine) resolveRoute(actionType, providerAlias string) (actionRoute, er
 
 // Execute runs all nodes in topological order and returns scenario outputs.
 func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *graph.Graph) (*Result, error) {
+	e.scenarioDir = ps.ScenarioDir
 	resolved := make(map[string]map[string]cty.Value)
 	// compVars holds each component's resolved inputs, indexed by
 	// component key. Populated lazily on first access so components
@@ -403,6 +437,13 @@ func (e *Engine) executeActionOnce(
 	if err != nil {
 		return nil, err
 	}
+
+	// Resolve `file` attributes to absolute paths against the
+	// scenario directory, so providers that read files work
+	// regardless of the caller's cwd. Convention: any action
+	// attribute named "file" that evaluates to a relative path
+	// gets resolved here, before the provider sees it.
+	resolveFileAttrs(attrs, e.scenarioDir)
 
 	// Apply the action-level timeout (if any) on top of the
 	// caller's ctx. Providers that respect ctx will see the

@@ -72,7 +72,7 @@ func NewClient(r io.Reader, w io.Writer) *Client {
 // which unblocks the still-in-flight reader goroutine and lets
 // it exit cleanly. This avoids ever having two goroutines reading
 // from the same pipe.
-func (c *Client) Roundtrip(ctx context.Context, method string, params any, result any) error {
+func (c *Client) Roundtrip(ctx context.Context, method string, params, result any) error {
 	if c.poisoned.Load() {
 		return ErrClientPoisoned
 	}

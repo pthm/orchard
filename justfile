@@ -27,6 +27,14 @@ docs: docs-generate
 docs-watch: docs-generate
     cd docs && hugo server --disableFastRender
 
+# Format Go code with gofumpt.
+fmt:
+    go tool gofumpt -w .
+
+# Lint Go code with golangci-lint.
+lint:
+    go tool golangci-lint run ./...
+
 # Run the Go test suite.
 test:
     go test ./...
@@ -35,3 +43,6 @@ test:
 test-all:
     go test ./...
     cd test/integration && go test ./...
+
+# Run all checks (fmt, lint, test).
+check: fmt lint test

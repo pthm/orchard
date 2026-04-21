@@ -18,14 +18,14 @@ import (
 
 // TestTeardown_EndToEnd exercises the full records + teardown cycle.
 //
-// 1. Run a scenario that inserts a merchant and a product (FK to
-//    the merchant) with lifecycle.teardown declared on both.
-// 2. Write the run record to a temp dir via the RecordingReporter
-//    (same path the CLI uses in `orchard run`).
-// 3. Query the DB directly to confirm both rows exist.
-// 4. Load the record from disk.
-// 5. Invoke engine.Teardown with the decoded record state.
-// 6. Query again to confirm both rows are gone.
+//  1. Run a scenario that inserts a merchant and a product (FK to
+//     the merchant) with lifecycle.teardown declared on both.
+//  2. Write the run record to a temp dir via the RecordingReporter
+//     (same path the CLI uses in `orchard run`).
+//  3. Query the DB directly to confirm both rows exist.
+//  4. Load the record from disk.
+//  5. Invoke engine.Teardown with the decoded record state.
+//  6. Query again to confirm both rows are gone.
 //
 // The FK between products.merchant_id and merchants.id is the
 // teeth of the test: teardown must walk reverse-topologically

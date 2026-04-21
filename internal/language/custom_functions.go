@@ -32,9 +32,9 @@ func CustomFunc(name string) function.Function {
 // lowercase compound words, matching the cty convention.
 func customFunctions() map[string]function.Function {
 	return map[string]function.Function{
-		"uuid":          uuidFunc(),
-		"env":           envFunc(),
-		"now":           nowFunc(),
+		"uuid":         uuidFunc(),
+		"env":          envFunc(),
+		"now":          nowFunc(),
 		"timesub":      timeSubFunc(),
 		"timesequence": timeSequenceFunc(),
 		"timeseries":   timeSeriesFunc(),
@@ -341,10 +341,10 @@ func parseExtendedDuration(s string) (time.Duration, error) {
 // cryptoRandInt64 returns a cryptographically random int64 in [0, max).
 // Falls back to math/rand if crypto/rand fails — fine for interval
 // jitter, not for security.
-func cryptoRandInt64(max int64) (int64, error) {
-	n, err := rand.Int(rand.Reader, big.NewInt(max))
+func cryptoRandInt64(upper int64) (int64, error) { //nolint:unparam // error kept for API consistency with callers
+	n, err := rand.Int(rand.Reader, big.NewInt(upper))
 	if err != nil {
-		return mrand.Int63n(max), nil //nolint:gosec
+		return mrand.Int63n(upper), nil //nolint:gosec // mrand is fine for non-crypto jitter
 	}
 	return n.Int64(), nil
 }

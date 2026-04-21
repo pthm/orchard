@@ -34,7 +34,7 @@ func (p *Provider) executeSQL(ctx context.Context, attrs map[string]cty.Value) (
 			return nil, fmt.Errorf("postgres.sql: read row: %w", err)
 		}
 		for i, desc := range descs {
-			outputs[string(desc.Name)] = toCtyValue(values[i])
+			outputs[desc.Name] = toCtyValue(values[i])
 		}
 	}
 	if err := rows.Err(); err != nil {

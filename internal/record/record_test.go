@@ -22,7 +22,7 @@ func TestNewIDSortableAndUnique(t *testing.T) {
 	// so lexicographic comparison to any earlier ID shows the earlier
 	// one first.
 	earlier := NewID(now.Add(-time.Minute))
-	if !(earlier < a && earlier < b) {
+	if earlier >= a || earlier >= b {
 		t.Errorf("earlier ID should sort before later: earlier=%s a=%s b=%s", earlier, a, b)
 	}
 	if !strings.HasPrefix(a, "20260414T201530Z_") {
@@ -32,12 +32,12 @@ func TestNewIDSortableAndUnique(t *testing.T) {
 
 func TestFilenameSanitisesScenarioName(t *testing.T) {
 	cases := map[string]string{
-		"seed_dev":        "orchard_seed_dev_run_X.json",
-		"Seed Dev":        "orchard_Seed_Dev_run_X.json",
-		"demo/case:2":     "orchard_demo_case_2_run_X.json",
-		"":                "orchard_unnamed_run_X.json",
-		"  ":              "orchard____run_X.json",
-		"name.with.dots":  "orchard_name_with_dots_run_X.json",
+		"seed_dev":       "orchard_seed_dev_run_X.json",
+		"Seed Dev":       "orchard_Seed_Dev_run_X.json",
+		"demo/case:2":    "orchard_demo_case_2_run_X.json",
+		"":               "orchard_unnamed_run_X.json",
+		"  ":             "orchard____run_X.json",
+		"name.with.dots": "orchard_name_with_dots_run_X.json",
 	}
 	for in, want := range cases {
 		got := Filename(in, "X")
@@ -74,7 +74,7 @@ func TestFileWriterAtomicWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var names []string
+	names := make([]string, 0, len(entries))
 	for _, e := range entries {
 		names = append(names, e.Name())
 	}

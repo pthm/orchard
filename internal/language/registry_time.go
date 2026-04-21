@@ -2,7 +2,6 @@ package language
 
 import (
 	"github.com/zclconf/go-cty/cty/function/stdlib"
-
 )
 
 func init() {

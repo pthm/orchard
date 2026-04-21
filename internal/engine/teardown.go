@@ -206,4 +206,3 @@ func buildTeardownEvalContext(
 		Functions: parser.Functions(),
 	}
 }
-

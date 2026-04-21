@@ -332,7 +332,7 @@ func checkExpr(ctx *hcl.EvalContext, expr hcl.Expression, location string) error
 // "component.merchant.base.action.sql.create" into (type, name).
 // Mirrors planview's helper of the same name; duplicated here so
 // engine internals don't pull in the CLI rendering package.
-func parseActionID(id string) (string, string) {
+func parseActionID(id string) (kind, name string) {
 	rest := id
 	if after, ok := strings.CutPrefix(rest, "component."); ok {
 		if idx := strings.Index(after, ".action."); idx >= 0 {
@@ -349,7 +349,7 @@ func parseActionID(id string) (string, string) {
 }
 
 // splitComponentKey turns "merchant.base" into ("merchant", "base").
-func splitComponentKey(key string) (string, string) {
+func splitComponentKey(key string) (prefix, suffix string) {
 	if parts := strings.SplitN(key, ".", 2); len(parts) == 2 {
 		return parts[0], parts[1]
 	}

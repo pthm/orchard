@@ -122,8 +122,8 @@ type PlainReporter struct {
 
 // RunStarted implements engine.Reporter.
 func (r *PlainReporter) RunStarted(scenario string) {
-	fmt.Fprintf(r.Out, "scenario: %s\n", scenario)
-	fmt.Fprintln(r.Out, "executing...")
+	_, _ = fmt.Fprintf(r.Out, "scenario: %s\n", scenario)
+	_, _ = fmt.Fprintln(r.Out, "executing...")
 }
 
 // NodeStarted implements engine.Reporter. Plain reporter stays
@@ -133,28 +133,28 @@ func (r *PlainReporter) NodeStarted(string) {}
 
 // NodeCompleted implements engine.Reporter.
 func (r *PlainReporter) NodeCompleted(nodeID string, _ map[string]cty.Value, d time.Duration) {
-	fmt.Fprintf(r.Out, "  ok %s (%s)\n", nodeID, formatDuration(d))
+	_, _ = fmt.Fprintf(r.Out, "  ok %s (%s)\n", nodeID, formatDuration(d))
 }
 
 // NodeFailed implements engine.Reporter.
 func (r *PlainReporter) NodeFailed(nodeID string, err error) {
-	fmt.Fprintf(r.Out, "  fail %s: %v\n", nodeID, err)
+	_, _ = fmt.Fprintf(r.Out, "  fail %s: %v\n", nodeID, err)
 }
 
 // RunCompleted implements engine.Reporter.
 func (r *PlainReporter) RunCompleted(s engine.RunSummary) {
 	if !s.OK {
-		fmt.Fprintf(r.Out, "failed after %s (%d ok, %d failed)\n",
+		_, _ = fmt.Fprintf(r.Out, "failed after %s (%d ok, %d failed)\n",
 			formatDuration(s.Duration), s.Succeeded, s.Failed)
 		return
 	}
 	if len(s.Outputs) > 0 {
-		fmt.Fprintln(r.Out, "\noutputs:")
+		_, _ = fmt.Fprintln(r.Out, "\noutputs:")
 		for _, name := range sortedKeys(s.Outputs) {
-			fmt.Fprintf(r.Out, "  %s = %s\n", name, formatValue(s.Outputs[name]))
+			_, _ = fmt.Fprintf(r.Out, "  %s = %s\n", name, formatValue(s.Outputs[name]))
 		}
 	}
-	fmt.Fprintf(r.Out, "\ndone in %s (%d nodes).\n",
+	_, _ = fmt.Fprintf(r.Out, "\ndone in %s (%d nodes).\n",
 		formatDuration(s.Duration), s.Succeeded)
 }
 
@@ -167,9 +167,9 @@ type TTYReporter struct {
 
 // RunStarted implements engine.Reporter.
 func (r *TTYReporter) RunStarted(scenario string) {
-	fmt.Fprintln(r.Out,
+	_, _ = fmt.Fprintln(r.Out,
 		render.Header.Render("▸ Scenario:")+" "+render.Bold.Render(scenario))
-	fmt.Fprintln(r.Out)
+	_, _ = fmt.Fprintln(r.Out)
 }
 
 // NodeStarted implements engine.Reporter. Currently silent —
@@ -179,7 +179,7 @@ func (r *TTYReporter) NodeStarted(string) {}
 
 // NodeCompleted implements engine.Reporter.
 func (r *TTYReporter) NodeCompleted(nodeID string, _ map[string]cty.Value, d time.Duration) {
-	fmt.Fprintf(r.Out, "  %s %s  %s\n",
+	_, _ = fmt.Fprintf(r.Out, "  %s %s  %s\n",
 		render.SuccessMark.Render("✓"),
 		nodeID,
 		render.Muted.Render("("+formatDuration(d)+")"))
@@ -187,7 +187,7 @@ func (r *TTYReporter) NodeCompleted(nodeID string, _ map[string]cty.Value, d tim
 
 // NodeFailed implements engine.Reporter.
 func (r *TTYReporter) NodeFailed(nodeID string, err error) {
-	fmt.Fprintf(r.Out, "  %s %s\n     %s\n",
+	_, _ = fmt.Fprintf(r.Out, "  %s %s\n     %s\n",
 		render.ErrorMark.Render("✗"),
 		render.Bold.Render(nodeID),
 		render.Error.Render(err.Error()))
@@ -196,25 +196,25 @@ func (r *TTYReporter) NodeFailed(nodeID string, err error) {
 // RunCompleted implements engine.Reporter.
 func (r *TTYReporter) RunCompleted(s engine.RunSummary) {
 	if !s.OK {
-		fmt.Fprintf(r.Out, "\n%s  %s\n",
+		_, _ = fmt.Fprintf(r.Out, "\n%s  %s\n",
 			render.Error.Render("✗ Failed"),
 			render.Muted.Render(fmt.Sprintf("after %s  (%d ok, %d failed)",
 				formatDuration(s.Duration), s.Succeeded, s.Failed)))
 		return
 	}
 	if len(s.Outputs) > 0 {
-		fmt.Fprintln(r.Out)
-		fmt.Fprintln(r.Out, render.Label.Render("Outputs"))
+		_, _ = fmt.Fprintln(r.Out)
+		_, _ = fmt.Fprintln(r.Out, render.Label.Render("Outputs"))
 		names := sortedKeys(s.Outputs)
 		width := longestName(names)
 		for _, name := range names {
-			fmt.Fprintf(r.Out, "  %s %s %s\n",
+			_, _ = fmt.Fprintf(r.Out, "  %s %s %s\n",
 				padRight(name, width),
 				render.Muted.Render("="),
 				render.Value.Render(formatValue(s.Outputs[name])))
 		}
 	}
-	fmt.Fprintf(r.Out, "\n%s  %s\n",
+	_, _ = fmt.Fprintf(r.Out, "\n%s  %s\n",
 		render.Success.Render("✓ Done"),
 		render.Muted.Render(fmt.Sprintf("in %s  (%d nodes)",
 			formatDuration(s.Duration), s.Succeeded)))

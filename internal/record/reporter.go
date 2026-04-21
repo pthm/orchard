@@ -52,16 +52,16 @@ func (fw FileWriter) Write(r *Record) error {
 	enc := json.NewEncoder(tmp)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(r); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("record: encode: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("record: close: %w", err)
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("record: rename: %w", err)
 	}
 	return nil
@@ -164,7 +164,7 @@ func (r *Reporter) NodeCompleted(nodeID string, outputs map[string]cty.Value, d 
 		// concerned; surfacing the encode failure in the log lets
 		// the user know the record is less useful than expected
 		// without failing the run.
-		fmt.Fprintf(r.log, "orchard: record: encode outputs for %s: %v\n", nodeID, err)
+		_, _ = fmt.Fprintf(r.log, "orchard: record: encode outputs for %s: %v\n", nodeID, err)
 		encoded = nil
 	}
 
@@ -211,7 +211,7 @@ func (r *Reporter) RunCompleted(summary engine.RunSummary) {
 
 	outputs, err := EncodeCty(summary.Outputs)
 	if err != nil {
-		fmt.Fprintf(r.log, "orchard: record: encode scenario outputs: %v\n", err)
+		_, _ = fmt.Fprintf(r.log, "orchard: record: encode scenario outputs: %v\n", err)
 		outputs = nil
 	}
 
@@ -235,7 +235,7 @@ func (r *Reporter) RunCompleted(summary engine.RunSummary) {
 	}
 	if err := r.writer.Write(rec); err != nil {
 		r.WriteErr = err
-		fmt.Fprintf(r.log, "orchard: record: %v\n", err)
+		_, _ = fmt.Fprintf(r.log, "orchard: record: %v\n", err)
 	}
 }
 

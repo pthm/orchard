@@ -105,13 +105,13 @@ type Reporter interface {
 
 // RunSummary is the end-of-run event payload.
 type RunSummary struct {
-	Scenario   string
-	Outputs    map[string]cty.Value
-	Duration   time.Duration
-	Succeeded  int
-	Failed     int
-	OK         bool
-	Err        error // non-nil when the run aborted
+	Scenario  string
+	Outputs   map[string]cty.Value
+	Duration  time.Duration
+	Succeeded int
+	Failed    int
+	OK        bool
+	Err       error // non-nil when the run aborted
 }
 
 // NopReporter discards all events. Engine uses it by default so

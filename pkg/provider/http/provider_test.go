@@ -67,10 +67,10 @@ func TestExecuteAbsoluteURLBypassesBaseURL(t *testing.T) {
 	// a base_url is configured. Tests by pointing base_url at an
 	// unreachable host and using an absolute URL to the real test
 	// server.
-	real := httptest.NewServer(httpHandler(t, func(w io.Writer) {
+	realServer := httptest.NewServer(httpHandler(t, func(w io.Writer) {
 		io.WriteString(w, "absolute")
 	}))
-	defer real.Close()
+	defer realServer.Close()
 
 	p := New()
 	if err := p.Configure(context.Background(), map[string]cty.Value{
@@ -81,7 +81,7 @@ func TestExecuteAbsoluteURLBypassesBaseURL(t *testing.T) {
 	defer p.Close()
 
 	out, err := p.Execute(context.Background(), "http_request", map[string]cty.Value{
-		"url": cty.StringVal(real.URL + "/"),
+		"url": cty.StringVal(realServer.URL + "/"),
 	})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -126,7 +126,7 @@ func TestExecuteHeadersMergeDefaults(t *testing.T) {
 	if err := p.Configure(context.Background(), map[string]cty.Value{
 		"base_url": cty.StringVal(srv.URL),
 		"default_headers": cty.MapVal(map[string]cty.Value{
-			"X-Default": cty.StringVal("from-config"),
+			"X-Default":  cty.StringVal("from-config"),
 			"X-Override": cty.StringVal("default-value"),
 		}),
 	}); err != nil {
@@ -242,7 +242,7 @@ func (b *httpHandlerBuilder) withRequestCapture(method, body *string) *httpHandl
 	return b
 }
 
-func (b *httpHandlerBuilder) withHeaderCapture(h *map[string]string) *httpHandlerBuilder {
+func (b *httpHandlerBuilder) withHeaderCapture(h *map[string]string) *httpHandlerBuilder { //nolint:gocritic // pointer-to-map intentional for optional capture
 	b.captureH = h
 	return b
 }

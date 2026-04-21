@@ -58,9 +58,9 @@ func init() {
 		FunctionDef{
 			Name: "merge", Category: "collections", Pure: true,
 			Description: "Merge two or more maps. Later keys override earlier ones.",
-			VarParam:   &ParamDef{Name: "maps", Type: "map"},
-			ReturnType: "map",
-			Func:       stdlib.MergeFunc,
+			VarParam:    &ParamDef{Name: "maps", Type: "map"},
+			ReturnType:  "map",
+			Func:        stdlib.MergeFunc,
 		},
 		FunctionDef{
 			Name: "reverse", Category: "collections", Pure: true,

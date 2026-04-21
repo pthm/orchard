@@ -104,4 +104,3 @@ func instantiateProvider(source string, mode providerMode) (provider.Provider, e
 		return nil, fmt.Errorf("unknown provider source %q (expected builtin/<name> or exec:<path>)", source)
 	}
 }
-

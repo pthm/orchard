@@ -22,9 +22,9 @@ import (
 // argument parser writes into them, matching the pattern the
 // existing global flags use.
 var (
-	recordDirFlag    string
-	noRecordFlag     bool
-	runScenarioFlag  string
+	recordDirFlag   string
+	noRecordFlag    bool
+	runScenarioFlag string
 )
 
 func newRunCmd() *cobra.Command {
@@ -91,7 +91,7 @@ func newRunCmd() *cobra.Command {
 			// unless the user opted out. Records persist to the
 			// --record-dir (default cwd) after the run finishes,
 			// including on failure so partial runs stay inspectable.
-			finalReporter := engine.Reporter(cliRep)
+			finalReporter := cliRep
 			var recRep *record.Reporter
 			if !noRecordFlag {
 				recRep, err = record.NewReporter(record.Options{

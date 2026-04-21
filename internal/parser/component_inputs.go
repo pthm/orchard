@@ -82,7 +82,7 @@ func ValidateComponentInputs(comp *ParsedComponent) error {
 // was possible — a false result means the expression is more
 // complex than a literal (e.g. a merge() call) and plan-time key
 // checks should be skipped.
-func componentInputKeys(body hcl.Body) ([]string, bool, error) {
+func componentInputKeys(body hcl.Body) (_ []string, _ bool, _ error) { //nolint:gocritic // named returns conflict with local vars
 	if body == nil {
 		return nil, true, nil
 	}

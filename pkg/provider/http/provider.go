@@ -140,7 +140,7 @@ func (p *Provider) executeRequest(ctx context.Context, attrs map[string]cty.Valu
 	if err != nil {
 		return nil, fmt.Errorf("http.request: do: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

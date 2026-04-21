@@ -39,17 +39,17 @@ func Render(w io.Writer, ps *parser.ParsedScenario, g *graph.Graph, providerOf P
 		providerOf = func(*graph.Node) string { return "" }
 	}
 
-	fmt.Fprintf(w, "%s %s\n",
+	_, _ = fmt.Fprintf(w, "%s %s\n",
 		render.Header.Render("▸"),
 		render.Bold.Render(ps.Scenario.Name))
-	fmt.Fprintln(w,
+	_, _ = fmt.Fprintln(w,
 		render.Muted.Render("  "+summary(ps, g)))
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w)
 
 	forest := buildForest(g)
 	for i, root := range forest {
 		if i > 0 {
-			fmt.Fprintln(w)
+			_, _ = fmt.Fprintln(w)
 		}
 		renderNode(w, ps, g, providerOf, root, 0)
 	}
@@ -59,7 +59,7 @@ func Render(w io.Writer, ps *parser.ParsedScenario, g *graph.Graph, providerOf P
 
 // RenderSuccess writes the final success line.
 func RenderSuccess(w io.Writer) {
-	fmt.Fprintf(w, "%s\n", render.Success.Render("✓ Plan is valid"))
+	_, _ = fmt.Fprintf(w, "%s\n", render.Success.Render("✓ Plan is valid"))
 }
 
 // summary returns a one-line description of the plan's shape:
@@ -222,7 +222,7 @@ func renderNode(
 		// line together are what the eye uses to tell "inside the
 		// component" from "runs after the component".
 		if len(dn.children) > 0 {
-			fmt.Fprintln(w)
+			_, _ = fmt.Fprintln(w)
 		}
 	}
 
@@ -238,7 +238,7 @@ func renderActionHeader(w io.Writer, indent string, n *graph.Node, providerOf Pr
 	if alias := providerOf(n); alias != "" {
 		suffix = "  " + render.Muted.Render("via ") + render.Ref.Render(alias)
 	}
-	fmt.Fprintf(w, "%s%s%s\n", indent, header, suffix)
+	_, _ = fmt.Fprintf(w, "%s%s%s\n", indent, header, suffix)
 }
 
 func renderComponentBlock(
@@ -253,7 +253,7 @@ func renderComponentBlock(
 	comp := ps.Components[key]
 
 	typ, name := splitComponentKey(key)
-	fmt.Fprintf(w, "%s%s\n", indent, formatComponentHeader(typ, name))
+	_, _ = fmt.Fprintf(w, "%s%s\n", indent, formatComponentHeader(typ, name))
 
 	// Component interior sits at indent+1 — the same indent
 	// dependents would get, but the ↳ glyph plus the blank line
@@ -261,14 +261,14 @@ func renderComponentBlock(
 	// visually separates "inside the component" from "runs after".
 	interior := indent + indentUnit
 	if comp != nil && comp.Ref.Source != "" {
-		fmt.Fprintf(w, "%s%s  %s\n",
+		_, _ = fmt.Fprintf(w, "%s%s  %s\n",
 			interior,
 			render.Muted.Render("source"),
 			render.Ref.Render(comp.Ref.Source))
 	}
 	if comp != nil {
 		if keys := extractStaticInputKeys(comp.Ref.Inputs); len(keys) > 0 {
-			fmt.Fprintf(w, "%s%s  %s\n",
+			_, _ = fmt.Fprintf(w, "%s%s  %s\n",
 				interior,
 				render.Muted.Render("inputs"),
 				strings.Join(keys, ", "))
@@ -331,7 +331,7 @@ func quote(s string) string {
 // parseActionID splits an "action.<type>.<name>" NodeID into its
 // parts. Component-internal action IDs look like
 // "component.<key>.action.<type>.<name>"; we also handle those.
-func parseActionID(id string) (string, string) {
+func parseActionID(id string) (kind, name string) {
 	rest := id
 	if after, ok := strings.CutPrefix(rest, "component."); ok {
 		if idx := strings.Index(after, ".action."); idx >= 0 {
@@ -348,7 +348,7 @@ func parseActionID(id string) (string, string) {
 }
 
 // splitComponentKey turns "merchant.base" into ("merchant", "base").
-func splitComponentKey(key string) (string, string) {
+func splitComponentKey(key string) (prefix, suffix string) {
 	if parts := strings.SplitN(key, ".", 2); len(parts) == 2 {
 		return parts[0], parts[1]
 	}
@@ -361,8 +361,8 @@ func renderOutputs(w io.Writer, ps *parser.ParsedScenario) {
 	if len(ps.Scenario.Outputs) == 0 {
 		return
 	}
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, render.Label.Render("Outputs"))
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, render.Label.Render("Outputs"))
 
 	names := make([]string, 0, len(ps.Scenario.Outputs))
 	byName := make(map[string]*parser.OutputBlock, len(ps.Scenario.Outputs))

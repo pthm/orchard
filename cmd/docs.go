@@ -41,7 +41,7 @@ Output goes to stdout. Intended for pipelines like:
 			if err != nil {
 				return fmt.Errorf("resolve %q: %w", source, err)
 			}
-			defer p.Close()
+			defer func() { _ = p.Close() }()
 
 			out := docs.Render(p.Schema(), source)
 			if _, err := fmt.Fprint(cmd.OutOrStdout(), out); err != nil {

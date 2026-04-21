@@ -100,7 +100,7 @@ func openDataSource(attrs map[string]cty.Value) (io.Reader, func(), error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("open %s: %w", path, err)
 	}
-	return f, func() { f.Close() }, nil
+	return f, func() { _ = f.Close() }, nil
 }
 
 // buildCopySQL assembles the COPY ... FROM STDIN WITH (...) command.

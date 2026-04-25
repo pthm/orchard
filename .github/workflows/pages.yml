@@ -1,0 +1,61 @@
+name: Deploy docs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: peaceiris/actions-hugo@v3
+        with:
+          hugo-version: '0.158.0'
+          extended: true
+
+      - uses: actions/configure-pages@v5
+
+      - name: Generate provider and reference pages
+        run: |
+          mkdir -p docs/content-generated/docs/providers
+          mkdir -p docs/content-generated/docs/reference
+          go run . docs builtin/postgres > docs/content-generated/docs/providers/postgres.md
+          go run . docs builtin/http     > docs/content-generated/docs/providers/http.md
+          go run . docs builtin/exec     > docs/content-generated/docs/providers/exec.md
+          go run . functions --hugo      > docs/content-generated/docs/reference/functions.md
+
+      - name: Build site
+        working-directory: docs
+        run: hugo --minify
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -113,6 +113,7 @@ component "merchant" "acme" {
 |-----------|------|----------|-------------|
 | `source` | `string` | yes | Path to the component file. Resolved relative to this scenario file. |
 | `inputs` | object | — | Values for the component's declared variables. Required if the component has any required variables. |
+| `count` / `for_each` | number / collection | — | Create several instances. See [Repetition](../../concepts/wiring/#repetition). |
 
 ### `action`
 
@@ -135,6 +136,8 @@ reserves a few attributes for engine-level behavior:
 | `provider` | `string` | Explicit provider alias. Required only when two providers offer the same action type. |
 | `depends_on` | `list(reference)` | Explicit dependency edges. Each entry is a reference to another action or component node. |
 | `timeout` | `string` | Go-style duration (e.g. `"30s"`, `"5m"`). Wraps the provider's `Execute` call. |
+| `count` | `number` | Create this many instances. See [Repetition](../../concepts/wiring/#repetition). Scenario-level actions only. |
+| `for_each` | map, object, or list/set of strings | One instance per element. Scenario-level actions only. |
 | `retry` | block | Retry policy. See below. |
 | `lifecycle` | block | Teardown configuration. See below. |
 

@@ -999,6 +999,7 @@ Harden the tool for real-world use and improve the authoring experience.
 | Multiple scenarios per file; `--scenario <name>` on `run` / `plan` | Done |
 | FlexSearch-powered docs search with heading-level indexing, breadcrumbs, keyboard nav | Done |
 | Function naming convention: lowercase compound words matching cty (`formatdate`, `timesub`) | Done |
+| `count` / `for_each` on scenario actions and components (`count.index`, `each.key/value`, `x[0]` / `x["k"]` / `x[*]` references) | Done |
 | Dry-run mode (plan with expression evaluation but no execution) | Not started |
 | Execution logging with structured output | Not started |
 | Parallel execution of independent nodes | Not started |

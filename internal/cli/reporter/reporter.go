@@ -14,6 +14,7 @@ import (
 
 	"github.com/mattn/go-isatty"
 	"github.com/zclconf/go-cty/cty"
+	ctyjson "github.com/zclconf/go-cty/cty/json"
 
 	"github.com/pthm/orchard/internal/cli/render"
 	"github.com/pthm/orchard/internal/engine"
@@ -75,7 +76,7 @@ func formatDuration(d time.Duration) string {
 // formatValue renders a scenario output value for display. Strings
 // lose their quotes (they're already obviously strings), numbers
 // print as integers when possible, bools as true/false, nulls as
-// "null". Complex values round-trip through cty's GoString.
+// "null". Complex values (lists, objects) render as JSON.
 func formatValue(v cty.Value) string {
 	if v.IsNull() {
 		return "null"
@@ -97,6 +98,9 @@ func formatValue(v cty.Value) string {
 		}
 		return "false"
 	default:
+		if b, err := ctyjson.Marshal(v, v.Type()); err == nil {
+			return string(b)
+		}
 		return v.GoString()
 	}
 }

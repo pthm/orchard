@@ -312,7 +312,7 @@ func renderSecondaryParents(w io.Writer, indent string, parents []graph.NodeID) 
 func formatActionHeader(typ, name string) string {
 	return render.Kind.Render("action") + " " +
 		render.Bold.Render(quote(typ)) + " " +
-		render.Bold.Render(quote(name))
+		render.Bold.Render(quoteLabel(name))
 }
 
 // formatComponentHeader renders `component "<type>" "<name>"` —
@@ -321,11 +321,20 @@ func formatActionHeader(typ, name string) string {
 func formatComponentHeader(typ, name string) string {
 	return render.Label.Render("component") + " " +
 		render.Bold.Render(quote(typ)) + " " +
-		render.Bold.Render(quote(name))
+		render.Bold.Render(quoteLabel(name))
 }
 
 func quote(s string) string {
 	return `"` + s + `"`
+}
+
+// quoteLabel quotes a block name, keeping a count / for_each instance
+// suffix outside the quotes: `"payment"[0]`, `"site"["eu"]`.
+func quoteLabel(s string) string {
+	if base, rest, ok := strings.Cut(s, "["); ok {
+		return quote(base) + "[" + rest
+	}
+	return quote(s)
 }
 
 // parseActionID splits an "action.<type>.<name>" NodeID into its

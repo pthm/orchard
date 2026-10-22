@@ -581,7 +581,7 @@ func (e *Engine) buildNodeEvalContext(
 	resolved map[string]map[string]cty.Value,
 ) *hcl.EvalContext {
 	if node.ComponentKey == "" {
-		return buildEvalContext(vars, resolved)
+		return withInstance(buildEvalContext(vars, resolved), node.Instance)
 	}
 
 	scopedVars := compVars[node.ComponentKey]
@@ -690,7 +690,7 @@ func (e *Engine) resolveComponentInputs(
 		type inputsWrapper struct {
 			Inputs map[string]cty.Value `hcl:"inputs,optional"`
 		}
-		scenarioCtx := buildEvalContext(scenarioVars, resolved)
+		scenarioCtx := withInstance(buildEvalContext(scenarioVars, resolved), comp.Instance)
 		var wrapper inputsWrapper
 		diags := gohcl.DecodeBody(comp.Ref.Inputs, scenarioCtx, &wrapper)
 		if diags.HasErrors() {

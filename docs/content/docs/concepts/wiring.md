@@ -61,6 +61,41 @@ action "postgres_query" "seed_tenant_data" {
 `depends_on` takes a list of references to other nodes. It adds graph edges
 without pulling any data into scope.
 
+## Repetition
+
+`count` and `for_each` create several instances of an action or component from
+one block.
+
+```hcl
+action "postgres_query" "payment" {
+  count = 3
+  query = "INSERT INTO payments (status) VALUES ('failed') RETURNING id"
+}
+
+component "merchant" "site" {
+  source   = "./components/merchant.hcl"
+  for_each = { eu = "Europe", us = "America" }
+  inputs   = { name = "${each.key} (${each.value})" }
+}
+```
+
+- `count` exposes `count.index` (0-based). `for_each` takes a map, object, or
+  list/set of strings and exposes `each.key` and `each.value` (for a list,
+  both are the element).
+- Reference one instance by index or key: `action.postgres_query.payment[0].id`,
+  `component.merchant.site["eu"].id`. Use a splat for all of them:
+  `action.postgres_query.payment[*].id`.
+- Anything that references the block waits for **every** instance.
+- `count` and `for_each` must be known before anything runs, so they may only
+  reference `var.*`, literals, and functions — not action or component outputs.
+- An action can't reference its own instances, and `count`/`for_each` can't be
+  set on actions inside a component file. Repeat the component instead.
+- `count = 0` creates nothing. Referencing a block with zero instances is an
+  error.
+
+Instances appear in plans and run records as `payment[0]`, `site["eu"]`.
+Teardown blocks can use `count.index` / `each.*` too.
+
 ## Dependency resolution
 
 Orchard builds a directed acyclic graph of all actions and components in the
@@ -97,6 +132,7 @@ to the provider:
 
 - **`provider = "name"`** — explicitly route the action to a named provider.
 - **`depends_on = [ ... ]`** — add explicit dependency edges.
+- **`count` / `for_each`** — create several instances. See [Repetition](#repetition).
 - **`timeout = "30s"`** — wrap the provider's execute call in a Go-duration
   timeout. Exceeding the timeout fails the action.
 - **`retry { }`** — retry the action on failure with backoff. See

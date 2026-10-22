@@ -53,6 +53,10 @@ type RequiredProviderSpec struct {
 type ParsedComponent struct {
 	Ref *ComponentRef
 	Def *ComponentDefBlock
+	// Instance is set when the ref uses count / for_each; nil for a
+	// plain single component. Its count.* / each.* namespace is in
+	// scope for the ref's inputs.
+	Instance *Instance
 }
 
 // LoadScenario parses a scenario HCL file, picks the scenario block
@@ -140,8 +144,19 @@ func LoadScenario(path, name string, vars map[string]string) (*ParsedScenario, e
 		if err != nil {
 			return nil, fmt.Errorf("loading component %s.%s: %w", ref.Type, ref.Name, err)
 		}
-		key := ref.Type + "." + ref.Name
-		components[key] = &ParsedComponent{Ref: ref, Def: def}
+		instances, inputs, err := ExpandInstances(ref.Inputs, resolved)
+		if err != nil {
+			return nil, fmt.Errorf("component %s.%s: %w", ref.Type, ref.Name, err)
+		}
+		for _, inst := range instances {
+			r := *ref
+			r.Inputs = inputs
+			key := ref.Type + "." + ref.Name
+			if inst != nil {
+				key += inst.Suffix()
+			}
+			components[key] = &ParsedComponent{Ref: &r, Def: def, Instance: inst}
+		}
 	}
 
 	// Validate each component instance's inputs against its declared

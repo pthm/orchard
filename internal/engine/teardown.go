@@ -136,7 +136,7 @@ func (e *Engine) teardownAction(
 		return err
 	}
 
-	evalCtx := buildTeardownEvalContext(vars, selfOutputs, allOutputs)
+	evalCtx := withInstance(buildTeardownEvalContext(vars, selfOutputs, allOutputs), node.Instance)
 
 	attrs, err := evalAttrs(node.Teardown, route.schema, evalCtx)
 	if err != nil {
@@ -193,12 +193,8 @@ func buildTeardownEvalContext(
 		}
 		actionsByType[typ][name] = cty.ObjectVal(outputs)
 	}
-	if len(actionsByType) > 0 {
-		objs := make(map[string]cty.Value, len(actionsByType))
-		for t, byName := range actionsByType {
-			objs[t] = cty.ObjectVal(byName)
-		}
-		variables["action"] = cty.ObjectVal(objs)
+	if v, ok := wrapGrouped(actionsByType); ok {
+		variables["action"] = v
 	}
 
 	return &hcl.EvalContext{

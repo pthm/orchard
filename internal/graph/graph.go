@@ -65,6 +65,11 @@ type Node struct {
 	// errors with `filename:line` so failures point at a specific
 	// scenario line rather than a bare node ID.
 	SourceRange hcl.Range
+
+	// Instance is set when the action was expanded by count /
+	// for_each; its count.* / each.* namespace is in scope for the
+	// action body and teardown. nil for a plain action.
+	Instance *parser.Instance
 }
 
 // Graph holds the dependency graph built from a parsed scenario.
@@ -89,37 +94,67 @@ func Build(ps *parser.ParsedScenario) (*Graph, error) {
 		return nil
 	}
 
-	// Register scenario-level actions.
+	// groups maps the base ID of a count / for_each block
+	// ("action.sql.payment") to its instance IDs ("action.sql.payment[0]", ...).
+	// A reference to the base depends on every instance.
+	groups := make(map[NodeID][]NodeID)
+
+	// Register scenario-level actions, one node per instance.
 	for _, action := range ps.Scenario.Actions {
-		id := NodeID(fmt.Sprintf("action.%s.%s", action.Type, action.Name))
-		reserved, body, err := extractReservedActionAttrs(action.Remain, "")
+		base := NodeID(fmt.Sprintf("action.%s.%s", action.Type, action.Name))
+		instances, remain, err := parser.ExpandInstances(action.Remain, ps.Variables)
 		if err != nil {
-			return nil, fmt.Errorf("action %s: %w", id, err)
+			return nil, fmt.Errorf("action %s: %w", base, err)
 		}
-		if err := addNode(&Node{
-			ID:            id,
-			Kind:          ActionNode,
-			ActionType:    action.Type,
-			Body:          body,
-			ProviderAlias: reserved.ProviderAlias,
-			Dependencies:  reserved.DependsOn,
-			Timeout:       reserved.Timeout,
-			Retry:         reserved.Retry,
-			Teardown:      reserved.Teardown,
-			SourceRange:   actionSourceRange(action.Remain),
-		}); err != nil {
-			return nil, err
+		if len(instances) == 0 {
+			groups[base] = []NodeID{}
+		}
+		for _, inst := range instances {
+			id := base
+			if inst != nil {
+				id += NodeID(inst.Suffix())
+				groups[base] = append(groups[base], id)
+			}
+			reserved, body, err := extractReservedActionAttrs(remain, "")
+			if err != nil {
+				return nil, fmt.Errorf("action %s: %w", id, err)
+			}
+			if err := addNode(&Node{
+				ID:            id,
+				Kind:          ActionNode,
+				ActionType:    action.Type,
+				Body:          body,
+				ProviderAlias: reserved.ProviderAlias,
+				Dependencies:  reserved.DependsOn,
+				Timeout:       reserved.Timeout,
+				Retry:         reserved.Retry,
+				Teardown:      reserved.Teardown,
+				Instance:      inst,
+				SourceRange:   actionSourceRange(action.Remain),
+			}); err != nil {
+				return nil, err
+			}
 		}
 	}
 
 	// Register component nodes and their internal actions.
 	for key, comp := range ps.Components {
 		compID := NodeID("component." + key)
+		if comp.Instance != nil {
+			base := NodeID("component." + comp.Ref.Type + "." + comp.Ref.Name)
+			groups[base] = append(groups[base], compID)
+		}
 
 		// Register internal actions for this component.
 		internalActionIDs := make([]NodeID, 0, len(comp.Def.Actions))
 		for _, action := range comp.Def.Actions {
 			actionID := NodeID(fmt.Sprintf("component.%s.action.%s.%s", key, action.Type, action.Name))
+			// ponytail: internal actions can't repeat because their var.* is the
+			// component's inputs, which may only exist at runtime. Repeat the
+			// component instead; lift this if statically-known inputs become common.
+			if rep, _, _ := action.Remain.PartialContent(parser.RepetitionSchema); rep != nil && len(rep.Attributes) > 0 {
+				return nil, fmt.Errorf("action %s: count and for_each are not supported on actions inside a component; set them on the component block instead", actionID)
+			}
 			reserved, body, err := extractReservedActionAttrs(action.Remain, key)
 			if err != nil {
 				return nil, fmt.Errorf("action %s: %w", actionID, err)
@@ -190,6 +225,15 @@ func Build(ps *parser.ParsedScenario) (*Graph, error) {
 		}
 	}
 
+	// Point references to a count / for_each group at every instance.
+	for _, node := range nodes {
+		deps, err := expandGroupDeps(node, groups)
+		if err != nil {
+			return nil, err
+		}
+		node.Dependencies = deps
+	}
+
 	// Validate scenario-level output expressions. Outputs don't
 	// become graph nodes (they're evaluated after every action
 	// completes), but their references must still point at real
@@ -198,7 +242,9 @@ func Build(ps *parser.ParsedScenario) (*Graph, error) {
 	for _, output := range ps.Scenario.Outputs {
 		deps := extractExprDependencies(output.Value, "")
 		for _, dep := range deps {
-			if _, ok := nodes[dep]; !ok {
+			_, isNode := nodes[dep]
+			_, isGroup := groups[dep]
+			if !isNode && !isGroup {
 				return nil, fmt.Errorf(
 					"output %q references unknown node %q", output.Name, dep)
 			}
@@ -214,6 +260,35 @@ func Build(ps *parser.ParsedScenario) (*Graph, error) {
 	return &Graph{Nodes: nodes, Order: order}, nil
 }
 
+// expandGroupDeps replaces each dependency on a count / for_each
+// base ID with all of its instances, de-duplicating the result. An
+// instance that references its own group is rejected: it would
+// depend on itself.
+func expandGroupDeps(node *Node, groups map[NodeID][]NodeID) ([]NodeID, error) {
+	seen := make(map[NodeID]bool, len(node.Dependencies))
+	out := make([]NodeID, 0, len(node.Dependencies))
+	add := func(id NodeID) {
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	for _, dep := range node.Dependencies {
+		insts, ok := groups[dep]
+		if !ok {
+			add(dep)
+			continue
+		}
+		for _, id := range insts {
+			if id == node.ID {
+				return nil, fmt.Errorf("%s references its own count/for_each instances (%s)", node.ID, dep)
+			}
+			add(id)
+		}
+	}
+	return out, nil
+}
+
 // reservedAttrNames lists the orchard-owned action attributes we
 // never want to treat as sources of graph dependencies. They were
 // already consumed by extractReservedActionAttrs and their values
@@ -225,6 +300,8 @@ var reservedAttrNames = map[string]bool{
 	"provider":   true,
 	"depends_on": true,
 	"timeout":    true,
+	"count":      true,
+	"for_each":   true,
 }
 
 // extractDependencies inspects all expressions in a body for variable references

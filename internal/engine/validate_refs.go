@@ -41,7 +41,7 @@ func (e *Engine) ValidateReferences(ps *parser.ParsedScenario, g *graph.Graph) e
 		if node.Kind != graph.ActionNode || node.ComponentKey != "" {
 			continue
 		}
-		if err := checkActionBody(ctx, node); err != nil {
+		if err := checkActionBody(withInstance(ctx, node.Instance), node); err != nil {
 			return err
 		}
 	}
@@ -68,7 +68,7 @@ func (e *Engine) ValidateReferences(ps *parser.ParsedScenario, g *graph.Graph) e
 			if attr.Name != "inputs" {
 				continue
 			}
-			if err := checkInputsObject(ctx, attr.Expr, key); err != nil {
+			if err := checkInputsObject(withInstance(ctx, comp.Instance), attr.Expr, key); err != nil {
 				return err
 			}
 		}
@@ -130,12 +130,8 @@ func (e *Engine) buildComponentTypedEvalContext(
 		}
 		actionsByType[typ][name] = cty.UnknownVal(outputType)
 	}
-	if len(actionsByType) > 0 {
-		objs := make(map[string]cty.Value, len(actionsByType))
-		for typ, byName := range actionsByType {
-			objs[typ] = cty.ObjectVal(byName)
-		}
-		variables["action"] = cty.ObjectVal(objs)
+	if v, ok := wrapGrouped(actionsByType); ok {
+		variables["action"] = v
 	}
 
 	return &hcl.EvalContext{
@@ -177,12 +173,8 @@ func (e *Engine) buildTypedEvalContext(ps *parser.ParsedScenario, g *graph.Graph
 		}
 		actionsByType[typ][name] = cty.UnknownVal(outputType)
 	}
-	if len(actionsByType) > 0 {
-		objs := make(map[string]cty.Value, len(actionsByType))
-		for typ, byName := range actionsByType {
-			objs[typ] = cty.ObjectVal(byName)
-		}
-		variables["action"] = cty.ObjectVal(objs)
+	if v, ok := wrapGrouped(actionsByType); ok {
+		variables["action"] = v
 	}
 
 	// component.<type>.<name> → typed object whose attributes come
@@ -207,12 +199,8 @@ func (e *Engine) buildTypedEvalContext(ps *parser.ParsedScenario, g *graph.Graph
 		}
 		componentsByType[typ][name] = e.componentOutputsObject(key, comp, g)
 	}
-	if len(componentsByType) > 0 {
-		objs := make(map[string]cty.Value, len(componentsByType))
-		for typ, byName := range componentsByType {
-			objs[typ] = cty.ObjectVal(byName)
-		}
-		variables["component"] = cty.ObjectVal(objs)
+	if v, ok := wrapGrouped(componentsByType); ok {
+		variables["component"] = v
 	}
 
 	return &hcl.EvalContext{
@@ -365,5 +353,7 @@ var reservedAttrNamesEngine = map[string]bool{
 	"provider":   true,
 	"depends_on": true,
 	"timeout":    true,
+	"count":      true,
+	"for_each":   true,
 	"retry":      true, // in case we ever see it as an attribute form
 }

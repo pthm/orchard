@@ -3,6 +3,7 @@ package graph
 import (
 	"fmt"
 	"sort"
+	"strconv"
 )
 
 // topoSort performs a topological sort using Kahn's algorithm.
@@ -78,5 +79,42 @@ func topoSort(nodes map[NodeID]*Node) ([]NodeID, error) {
 }
 
 func sortNodeIDs(ids []NodeID) {
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	sort.Slice(ids, func(i, j int) bool { return lessNodeID(string(ids[i]), string(ids[j])) })
+}
+
+// lessNodeID orders IDs lexically, except that count indexes compare
+// numerically ("x[2]" before "x[10]") so instances run in index order.
+func lessNodeID(a, b string) bool {
+	for a != "" && b != "" {
+		if a[0] == '[' && b[0] == '[' {
+			na, ra := leadingInt(a[1:])
+			nb, rb := leadingInt(b[1:])
+			if na >= 0 && nb >= 0 {
+				if na != nb {
+					return na < nb
+				}
+				a, b = ra, rb
+				continue
+			}
+		}
+		if a[0] != b[0] {
+			return a[0] < b[0]
+		}
+		a, b = a[1:], b[1:]
+	}
+	return len(a) < len(b)
+}
+
+// leadingInt parses the digits at the start of s, returning -1 when
+// there are none.
+func leadingInt(s string) (int, string) {
+	i := 0
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+		i++
+	}
+	n, err := strconv.Atoi(s[:i])
+	if err != nil {
+		return -1, s
+	}
+	return n, s[i:]
 }

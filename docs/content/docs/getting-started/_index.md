@@ -15,7 +15,7 @@ Three short pages that take you from nothing installed to a working scenario.
 **Quick start.** If you just want to see something work:
 
 ```sh
-go install github.com/pthm/orchard@latest
+brew install pthm/tap/orchard   # or: go install github.com/pthm/orchard@latest
 orchard init my-project
 cd my-project
 orchard plan scenarios/hello.hcl --var dsn="postgres://localhost/dev"

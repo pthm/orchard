@@ -78,19 +78,35 @@ orchard run  scenarios/hello.hcl    # executes and prints outputs
 
 ## Install
 
-From source (requires Go 1.22+):
+Homebrew (macOS and Linux):
+
+```sh
+brew install pthm/tap/orchard
+```
+
+Scoop (Windows):
+
+```sh
+scoop bucket add pthm https://github.com/pthm/scoop-bucket
+scoop install pthm/orchard
+```
+
+With Go (requires Go 1.25+):
 
 ```sh
 go install github.com/pthm/orchard@latest
 ```
 
+Prebuilt binaries for Linux, macOS, and Windows (`.tar.gz`/`.zip`), plus
+`.deb` and `.rpm` packages for Linux, are attached to each
+[GitHub release](https://github.com/pthm/orchard/releases) alongside
+`checksums.txt`.
+
 Verify:
 
 ```sh
-orchard --help
+orchard version
 ```
-
-Prebuilt binaries are not yet published.
 
 ## CLI at a glance
 
@@ -100,6 +116,7 @@ Prebuilt binaries are not yet published.
 | `orchard plan <scenario>` | Validate and print the execution plan. Read-only; safe in CI. |
 | `orchard list [dir]` | List every `scenario` block found under a directory. |
 | `orchard docs <source>` | Render provider reference docs from a provider's schema. Works on `builtin/*` and `exec:<path>`. |
+| `orchard version` | Print the version, commit, and build date. |
 
 Global flags:
 
@@ -155,6 +172,22 @@ just docs-provider p   # regenerate one provider's reference page
 The Hugo site pulls generated provider reference pages from
 `docs/content-generated/`, which is gitignored — run `just docs-generate` after
 editing any `pkg/provider/*/schema.hcl`.
+
+### Releasing
+
+Push a `vX.Y.Z` tag (prereleases like `v1.2.3-rc.1` are allowed) and the
+`release` workflow runs GoReleaser to publish archives, packages, the
+Homebrew cask, and the Scoop manifest. It needs these repository secrets:
+
+- `HOMEBREW_TAP_GITHUB_TOKEN` — push access to `pthm/homebrew-tap` (the cask
+  is skipped if unset).
+- `SCOOP_BUCKET_GITHUB_TOKEN` — push access to `pthm/scoop-bucket` (the
+  manifest is skipped if unset).
+- `QUILL_SIGN_P12`, `QUILL_SIGN_PASSWORD`, `QUILL_NOTARY_KEY`,
+  `QUILL_NOTARY_KEY_ID`, `QUILL_NOTARY_ISSUER` — macOS signing and
+  notarization.
+
+Run the workflow manually with `dry_run` to build a snapshot without publishing.
 
 ## Contributing
 

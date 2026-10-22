@@ -27,7 +27,7 @@ rows, calling APIs, running scripts, and wiring outputs between steps automatica
 ## Quick start
 
 ```sh
-go install github.com/pthm/orchard@latest
+brew install pthm/tap/orchard   # or: go install github.com/pthm/orchard@latest
 orchard init my-project && cd my-project
 orchard plan scenarios/hello.hcl --var dsn="postgres://localhost/dev"
 orchard run  scenarios/hello.hcl --var dsn="postgres://localhost/dev"

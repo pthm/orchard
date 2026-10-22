@@ -1,0 +1,138 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+
+version: 2
+
+project_name: orchard
+
+before:
+  hooks:
+    - ./scripts/verify-release.sh {{ .Tag }}
+    - go mod tidy
+
+builds:
+  # Non-darwin builds (no signing needed)
+  - id: orchard-linux-windows
+    main: .
+    binary: orchard
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/pthm/orchard/internal/version.Version={{.Version}}
+      - -X github.com/pthm/orchard/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/pthm/orchard/internal/version.Date={{.Date}}
+
+  # Darwin builds with code signing
+  - id: orchard-darwin
+    main: .
+    binary: orchard
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/pthm/orchard/internal/version.Version={{.Version}}
+      - -X github.com/pthm/orchard/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/pthm/orchard/internal/version.Date={{.Date}}
+    hooks:
+      post:
+        - cmd: ./scripts/sign-macos.sh "{{ .Path }}" --notarize
+          output: true
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+release:
+  github:
+    owner: pthm
+    name: orchard
+  draft: false
+  prerelease: auto
+  mode: replace
+  name_template: "{{.ProjectName}} v{{.Version}}"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^Merge pull request"
+      - "^Merge branch"
+      - "(?i)^docs?[:(]"
+      - "(?i)^ci[:(]"
+
+nfpms:
+  - id: packages
+    package_name: orchard
+    # nfpms only packages linux artifacts, so the windows half of this build
+    # id is ignored and darwin is never selected.
+    ids:
+      - orchard-linux-windows
+    homepage: "https://github.com/pthm/orchard"
+    description: "Define reproducible application state as code"
+    maintainer: "Patt-Tom McDonnell <pthm@users.noreply.github.com>"
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/bin
+    contents:
+      - src: LICENSE
+        dst: /usr/share/doc/orchard/LICENSE
+      - src: README.md
+        dst: /usr/share/doc/orchard/README.md
+
+homebrew_casks:
+  - name: orchard
+    repository:
+      owner: pthm
+      name: homebrew-tap
+      token: '{{ index .Env "HOMEBREW_TAP_GITHUB_TOKEN" }}'
+    # Actions sets a missing secret to "", so test for a value, not presence.
+    # Skips the push until the secret exists instead of failing mid-publish.
+    skip_upload: '{{ if index .Env "HOMEBREW_TAP_GITHUB_TOKEN" }}false{{ else }}true{{ end }}'
+    directory: Casks
+    homepage: "https://github.com/pthm/orchard"
+    description: "Define reproducible application state as code"
+    license: "MIT"
+
+scoops:
+  - name: orchard
+    ids:
+      - default
+    repository:
+      owner: pthm
+      name: scoop-bucket
+      token: '{{ index .Env "SCOOP_BUCKET_GITHUB_TOKEN" }}'
+    skip_upload: '{{ if index .Env "SCOOP_BUCKET_GITHUB_TOKEN" }}false{{ else }}true{{ end }}'
+    homepage: "https://github.com/pthm/orchard"
+    description: "Define reproducible application state as code"
+    license: MIT

@@ -1,0 +1,14 @@
+# mise.toml - Development tool configuration
+# Install tools with: mise install
+[tools]
+go = "1.27"
+
+# Docs site (docs/); keep in step with hugo-version in
+# .github/workflows/pages.yml
+hugo-extended = "0.158.0"
+
+# Release automation
+goreleaser = "latest"
+
+# macOS code signing and notarization
+"ubi:anchore/quill" = "latest"

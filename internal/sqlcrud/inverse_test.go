@@ -6,6 +6,7 @@ import (
 	"github.com/zclconf/go-cty/cty"
 
 	"github.com/pthm/orchard/pkg/dbschema"
+	"github.com/pthm/orchard/pkg/provider"
 )
 
 func TestInverse(t *testing.T) {
@@ -19,13 +20,13 @@ func TestInverse(t *testing.T) {
 	}}
 	table := func(name string) map[string]cty.Value { return map[string]cty.Value{"table": cty.StringVal(name)} }
 
-	inv := a.Inverse("postgres_insert", table("merchants"), map[string]cty.Value{"id": cty.NumberIntVal(7), "name": cty.StringVal("Acme")})
+	inv := a.Inverse("postgres_insert", table("merchants"), map[string]cty.Value{"id": cty.NumberIntVal(7), "name": cty.StringVal("Acme")}, provider.InverseOptions{})
 	if inv == nil || inv.Action != "postgres_delete" || !inv.Attrs["table"].RawEquals(cty.StringVal("public.merchants")) ||
 		!inv.Attrs["where"].RawEquals(cty.ObjectVal(map[string]cty.Value{"id": cty.NumberIntVal(7)})) {
 		t.Fatalf("insert undo: %#v", inv)
 	}
 
-	inv = a.Inverse("postgres_insert", table("tags"), map[string]cty.Value{"product_id": cty.NumberIntVal(1), "tag": cty.StringVal("gift")})
+	inv = a.Inverse("postgres_insert", table("tags"), map[string]cty.Value{"product_id": cty.NumberIntVal(1), "tag": cty.StringVal("gift")}, provider.InverseOptions{})
 	if inv == nil || !inv.Attrs["where"].RawEquals(cty.ObjectVal(map[string]cty.Value{
 		"product_id": cty.NumberIntVal(1), "tag": cty.StringVal("gift"),
 	})) {
@@ -44,12 +45,12 @@ func TestInverse(t *testing.T) {
 		"unknown table":    {"postgres_insert", "nope", map[string]cty.Value{"id": cty.NumberIntVal(1)}},
 		"another provider": {"mysql_insert", "merchants", map[string]cty.Value{"id": cty.NumberIntVal(1)}},
 	} {
-		if inv := a.Inverse(c.action, table(c.table), c.outputs); inv != nil {
+		if inv := a.Inverse(c.action, table(c.table), c.outputs, provider.InverseOptions{}); inv != nil {
 			t.Errorf("%s: expected no undo, got %#v", name, inv)
 		}
 	}
 
-	if inv := (&Actions{Prefix: "postgres"}).Inverse("postgres_insert", table("merchants"), map[string]cty.Value{"id": cty.NumberIntVal(1)}); inv != nil {
+	if inv := (&Actions{Prefix: "postgres"}).Inverse("postgres_insert", table("merchants"), map[string]cty.Value{"id": cty.NumberIntVal(1)}, provider.InverseOptions{}); inv != nil {
 		t.Errorf("no schema loaded: expected no undo, got %#v", inv)
 	}
 }

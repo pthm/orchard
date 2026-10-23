@@ -995,7 +995,7 @@ Make cleanup a first-class operation so that scenarios can be torn down cleanly,
 | Best-effort teardown with joined error reporting | Done |
 | End-to-end integration test over Postgres (FK-bound merchant+product) | Done |
 | Managed cleanup for `<p>_insert` (undo recorded at run time; `managed_teardown = false` opts out) | Done |
-| Managed cleanup for `<p>_update` (restore previous values) | Not started |
+| Managed cleanup for `<p>_update`: restore previous values of rows inserted this run by default; `managed_teardown = true` for other rows | Done |
 | `lifecycle` blocks on scenarios (`on_failure`, `on_success` policies) | Not started |
 | Rollback on partial failure | Not started |
 | `orchard list runs` — list past runs | Not started |

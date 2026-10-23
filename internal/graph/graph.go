@@ -60,10 +60,13 @@ type Node struct {
 	// no Teardown are skipped.
 	Teardown hcl.Body
 
-	// NoManagedTeardown is set by `lifecycle { managed_teardown =
-	// false }`: the action's provider may know how to undo it (a typed
-	// insert deletes its row), but the scenario opted out.
-	NoManagedTeardown bool
+	// ManagedTeardown is `lifecycle { managed_teardown = ... }`: nil
+	// when unset, so the provider decides whether to record an undo (a
+	// typed insert deletes its row; a typed update restores rows it
+	// owns); false to opt out; true to ask for an undo even where the
+	// provider wouldn't record one by default (restoring rows a typed
+	// update changed that Orchard didn't create).
+	ManagedTeardown *bool
 
 	// SourceRange locates the action's definition in its source
 	// file. Non-zero when the body was parsed from HCL text (the
@@ -126,18 +129,18 @@ func Build(ps *parser.ParsedScenario) (*Graph, error) {
 				return nil, fmt.Errorf("action %s: %w", id, err)
 			}
 			if err := addNode(&Node{
-				ID:                id,
-				Kind:              ActionNode,
-				ActionType:        action.Type,
-				Body:              body,
-				ProviderAlias:     reserved.ProviderAlias,
-				Dependencies:      reserved.DependsOn,
-				Timeout:           reserved.Timeout,
-				Retry:             reserved.Retry,
-				Teardown:          reserved.Teardown,
-				NoManagedTeardown: reserved.NoManagedTeardown,
-				Instance:          inst,
-				SourceRange:       actionSourceRange(action.Remain),
+				ID:              id,
+				Kind:            ActionNode,
+				ActionType:      action.Type,
+				Body:            body,
+				ProviderAlias:   reserved.ProviderAlias,
+				Dependencies:    reserved.DependsOn,
+				Timeout:         reserved.Timeout,
+				Retry:           reserved.Retry,
+				Teardown:        reserved.Teardown,
+				ManagedTeardown: reserved.ManagedTeardown,
+				Instance:        inst,
+				SourceRange:     actionSourceRange(action.Remain),
 			}); err != nil {
 				return nil, err
 			}
@@ -167,18 +170,18 @@ func Build(ps *parser.ParsedScenario) (*Graph, error) {
 				return nil, fmt.Errorf("action %s: %w", actionID, err)
 			}
 			if err := addNode(&Node{
-				ID:                actionID,
-				Kind:              ActionNode,
-				ActionType:        action.Type,
-				Body:              body,
-				ComponentKey:      key,
-				ProviderAlias:     reserved.ProviderAlias,
-				Dependencies:      reserved.DependsOn,
-				Timeout:           reserved.Timeout,
-				Retry:             reserved.Retry,
-				Teardown:          reserved.Teardown,
-				NoManagedTeardown: reserved.NoManagedTeardown,
-				SourceRange:       actionSourceRange(action.Remain),
+				ID:              actionID,
+				Kind:            ActionNode,
+				ActionType:      action.Type,
+				Body:            body,
+				ComponentKey:    key,
+				ProviderAlias:   reserved.ProviderAlias,
+				Dependencies:    reserved.DependsOn,
+				Timeout:         reserved.Timeout,
+				Retry:           reserved.Retry,
+				Teardown:        reserved.Teardown,
+				ManagedTeardown: reserved.ManagedTeardown,
+				SourceRange:     actionSourceRange(action.Remain),
 			}); err != nil {
 				return nil, err
 			}
@@ -513,8 +516,8 @@ type reservedActionAttrs struct {
 	// by `orchard teardown`.
 	Teardown hcl.Body
 
-	// NoManagedTeardown records `managed_teardown = false`.
-	NoManagedTeardown bool
+	// ManagedTeardown records `managed_teardown`; nil when unset.
+	ManagedTeardown *bool
 }
 
 // extractReservedActionAttrs pulls orchard-reserved attributes off
@@ -613,7 +616,7 @@ func extractReservedActionAttrs(body hcl.Body, componentKey string) (reservedAct
 			return out, nil, fmt.Errorf("lifecycle: %w", err)
 		}
 		out.Teardown = tdBody
-		out.NoManagedTeardown = !managed
+		out.ManagedTeardown = managed
 	}
 
 	return out, remain, nil
@@ -637,22 +640,23 @@ func actionSourceRange(body hcl.Body) hcl.Range {
 }
 
 // parseLifecycleBlock extracts the teardown block's body from a
-// lifecycle block, and whether managed teardown is on (it is unless
-// `managed_teardown = false`). The body is nil when the lifecycle block
-// has no teardown — that is legal, since managed_teardown and future
-// lifecycle members (pre, post, rollback) live here too.
-func parseLifecycleBlock(block *hcl.Block) (hcl.Body, bool, error) {
+// lifecycle block, and its managed_teardown setting (nil when unset).
+// The body is nil when the lifecycle block has no teardown — that is
+// legal, since managed_teardown and future lifecycle members (pre,
+// post, rollback) live here too.
+func parseLifecycleBlock(block *hcl.Block) (hcl.Body, *bool, error) {
 	content, diags := block.Body.Content(lifecycleBodySchema)
 	if diags.HasErrors() {
-		return nil, false, fmt.Errorf("%s", diags.Error())
+		return nil, nil, fmt.Errorf("%s", diags.Error())
 	}
-	managed := true
+	var managed *bool
 	if attr, ok := content.Attributes["managed_teardown"]; ok {
 		v, diags := attr.Expr.Value(nil)
 		if diags.HasErrors() || v.Type() != cty.Bool || v.IsNull() {
-			return nil, false, fmt.Errorf("managed_teardown must be true or false")
+			return nil, nil, fmt.Errorf("managed_teardown must be true or false")
 		}
-		managed = v.True()
+		b := v.True()
+		managed = &b
 	}
 	var tds []*hcl.Block
 	for _, b := range content.Blocks {
@@ -661,7 +665,7 @@ func parseLifecycleBlock(block *hcl.Block) (hcl.Body, bool, error) {
 		}
 	}
 	if len(tds) > 1 {
-		return nil, false, fmt.Errorf("teardown: at most one teardown block per lifecycle, got %d", len(tds))
+		return nil, nil, fmt.Errorf("teardown: at most one teardown block per lifecycle, got %d", len(tds))
 	}
 	if len(tds) == 0 {
 		return nil, managed, nil

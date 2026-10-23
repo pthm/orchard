@@ -182,8 +182,8 @@ the record, and evaluates each action's `lifecycle { teardown { } }` body in
 5. Walk the dependency graph in reverse; for each action that succeeded in the
    recorded run and still routes to a registered provider, run its
    `lifecycle { teardown { } }` body if it has one, or otherwise the undo step
-   its provider recorded (a typed insert's delete by primary key), unless the
-   action sets `managed_teardown = false`.
+   its provider recorded (a typed insert's delete by primary key, or a typed
+   update's previous values), unless the action sets `managed_teardown = false`.
 6. Skip actions with neither, actions whose original run failed, and component
    nodes.
 

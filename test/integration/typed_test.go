@@ -240,3 +240,56 @@ func TestManagedTeardown(t *testing.T) {
 		}
 	})
 }
+
+// TestUpdateRestore: on teardown, an update of a row this run inserted
+// is restored by default, and an update of a pre-existing row is
+// restored because it sets managed_teardown = true.
+func TestUpdateRestore(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("postgres", func(t *testing.T) {
+		resetDB(t)
+		_, err := testPool.Exec(ctx, "INSERT INTO merchants (name) VALUES ('Legacy')")
+		require.NoError(t, err)
+		scenario := "testdata/scenarios/typed_restore_postgres.hcl"
+		vars := map[string]string{"dsn": testDSN}
+		_, rec := runScenarioWithRecord(t, scenario, vars, t.TempDir())
+		runTeardown(t, scenario, vars, rec)
+
+		var names []string
+		rows, err := testPool.Query(ctx, "SELECT name FROM merchants ORDER BY name")
+		require.NoError(t, err)
+		for rows.Next() {
+			var n string
+			require.NoError(t, rows.Scan(&n))
+			names = append(names, n)
+		}
+		rows.Close()
+		assert.Equal(t, []string{"Legacy"}, names, "Acme deleted; Legacy restored")
+	})
+
+	t.Run("mysql", func(t *testing.T) {
+		host, port := mysqlServer(t)
+		root, err := sql.Open("mysql", fmt.Sprintf("root:orchard@tcp(%s:%s)/?multiStatements=true", host, port))
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = root.Close() })
+		_, err = root.ExecContext(ctx, `
+			DROP DATABASE IF EXISTS restore_test;
+			CREATE DATABASE restore_test;
+			USE restore_test;
+			CREATE TABLE merchants (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(100) NOT NULL) ENGINE=InnoDB;
+			INSERT INTO merchants (name) VALUES ('Legacy');`)
+		require.NoError(t, err)
+
+		scenario := "testdata/scenarios/typed_restore_mysql.hcl"
+		vars := map[string]string{"dsn": fmt.Sprintf("mysql://root:orchard@%s:%s/restore_test", host, port)}
+		_, rec := runScenarioWithRecord(t, scenario, vars, t.TempDir())
+		runTeardown(t, scenario, vars, rec)
+
+		var n int
+		var name string
+		require.NoError(t, root.QueryRowContext(ctx, "SELECT COUNT(*), MIN(name) FROM restore_test.merchants").Scan(&n, &name))
+		assert.Equal(t, 1, n, "Acme deleted")
+		assert.Equal(t, "Legacy", name, "Legacy restored")
+	})
+}

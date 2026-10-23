@@ -71,12 +71,12 @@ Inside the teardown body, three reference namespaces are in scope:
 - `action.*` — any other action's recorded outputs, for teardowns that need
   upstream state.
 
-## Automatic teardown for typed inserts
+## Automatic teardown for typed actions
 
-Typed database inserts (`postgres_insert`, `mysql_insert`, `sqlite_insert`)
-don't need a `lifecycle` block. When one runs, its provider records how to undo
-it, a delete of the new row by its primary key, in the run record, and
-`orchard teardown` runs that:
+Typed database inserts and updates (`postgres_insert`, `mysql_update`, ...) don't
+need a `lifecycle` block. When one runs, its provider records how to undo it in
+the run record, and `orchard teardown` runs that: an insert's new row is deleted
+by its primary key, and an update's overwritten values are written back.
 
 ```hcl
 action "postgres_insert" "merchant" {
@@ -92,7 +92,10 @@ Which teardown runs, for each action:
 2. Otherwise the automatic undo, if its provider recorded one.
 3. Otherwise nothing.
 
-To keep a typed insert's row through teardown, opt out:
+An update restores rows inserted earlier in the same run by default, and other
+rows only with `managed_teardown = true`, since rewriting a row Orchard didn't
+create could undo someone else's change. To keep a typed insert's row through
+teardown, opt out:
 
 ```hcl
 action "postgres_insert" "reference_data" {
@@ -105,9 +108,10 @@ action "postgres_insert" "reference_data" {
 }
 ```
 
-Tables without a primary key get no automatic teardown, since there's no way
-to target just the inserted row. Updates and deletes don't either; give them an
-explicit `teardown` block if they need one.
+`managed_teardown = false` also stops an update from restoring anything. Tables
+without a primary key get no automatic teardown, since there's no way to target
+just the affected rows, and neither do deletes or updates matching more than
+1,000 rows; give them an explicit `teardown` block if they need one.
 
 ## `orchard teardown <record>`
 
@@ -158,9 +162,7 @@ not stop at the first stubborn row.
 
 ## What doesn't (yet) exist
 
-- **Automatic teardown beyond inserts.** Restoring the previous values of a
-  typed update, or re-inserting what a typed delete removed, isn't automatic
-  yet.
+- **Re-inserting what a typed delete removed.** Not automatic yet.
 - **Scenario-level lifecycle policies** (`on_failure = "rollback"`). Planned;
   not yet implemented.
 - **`orchard run --teardown` one-shot.** Also planned.

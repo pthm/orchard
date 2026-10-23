@@ -31,14 +31,14 @@ scenario "s" {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	if g.Nodes["action.pg_insert.default"].NoManagedTeardown {
-		t.Error("managed teardown should be on by default")
+	if g.Nodes["action.pg_insert.default"].ManagedTeardown != nil {
+		t.Error("managed_teardown should be unset by default")
 	}
-	if !g.Nodes["action.pg_insert.kept"].NoManagedTeardown {
+	if m := g.Nodes["action.pg_insert.kept"].ManagedTeardown; m == nil || *m {
 		t.Error("managed_teardown = false should opt out")
 	}
 	n := g.Nodes["action.pg_insert.explicit_on"]
-	if n.NoManagedTeardown || n.Teardown == nil {
+	if n.ManagedTeardown == nil || !*n.ManagedTeardown || n.Teardown == nil {
 		t.Errorf("managed_teardown = true alongside a teardown block: %+v", n)
 	}
 }

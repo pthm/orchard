@@ -502,12 +502,18 @@ func (e *Engine) executeActionOnce(
 		return nil, fmt.Errorf("output validation: %w", err)
 	}
 	// An explicit teardown block wins over the provider's own undo.
-	if inv, ok := p.(provider.Inverter); ok && node.Teardown == nil && !node.NoManagedTeardown {
-		if undo := inv.Inverse(route.actionName, attrs, validated); undo != nil {
+	if inv, ok := p.(provider.Inverter); ok && node.Teardown == nil && !managedTeardownOff(node) {
+		opts := provider.InverseOptions{Requested: node.ManagedTeardown != nil && *node.ManagedTeardown}
+		if undo := inv.Inverse(route.actionName, attrs, validated, opts); undo != nil {
 			e.undos[node.ID] = undo
 		}
 	}
 	return validated, nil
+}
+
+// managedTeardownOff reports `managed_teardown = false`.
+func managedTeardownOff(node *graph.Node) bool {
+	return node.ManagedTeardown != nil && !*node.ManagedTeardown
 }
 
 // validateOutputs enforces an action's declared output contract.

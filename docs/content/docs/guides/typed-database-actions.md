@@ -168,16 +168,31 @@ note: no schema snapshot for provider "postgres", so its typed actions weren't c
 
 ## Automatic teardown
 
-When a typed insert runs, its provider records how to undo it, a delete of the
-new row by its primary key, in the run record. `orchard teardown` runs, for each
-action, in reverse dependency order:
+Typed actions record how to undo themselves in the run record:
+
+- **An insert** is undone by deleting the new row by its primary key.
+- **An update** is undone by writing back the values it overwrote. Before it runs,
+  Orchard reads the current values of the columns in `set`, in the same
+  transaction. By default it only does this for rows inserted earlier in the
+  same run, since rewriting a row Orchard didn't create could undo someone else's
+  change. For other rows, opt in with `managed_teardown = true`.
+
+`orchard teardown` runs, for each action, in reverse dependency order:
 
 1. its explicit `lifecycle { teardown { } }` block, if it has one;
 2. otherwise the recorded undo;
 3. otherwise nothing.
 
-To keep a row through teardown, for reference data that other runs share, say,
-opt out:
+`lifecycle { managed_teardown = ... }` controls the automatic part:
+
+| Setting | Insert | Update |
+|---|---|---|
+| unset | delete the row | restore rows this run inserted |
+| `true` | delete the row | restore any rows it changed |
+| `false` | keep the row | leave the changes |
+
+For example, to keep a row through teardown, for reference data that other runs
+share, say:
 
 ```hcl
 action "postgres_insert" "region" {
@@ -190,9 +205,23 @@ action "postgres_insert" "region" {
 }
 ```
 
-Tables without a primary key, updates and deletes have no automatic undo. Give
-them an explicit `teardown` block if they need one. See
-[lifecycle and teardown](../../concepts/lifecycle/).
+And to restore an update of an existing row:
+
+```hcl
+action "postgres_update" "suspend_existing" {
+  table = "merchants"
+  set   = { status = "suspended" }
+  where = { name = "Globex" }
+
+  lifecycle {
+    managed_teardown = true
+  }
+}
+```
+
+Tables without a primary key, deletes, and updates matching more than 1,000 rows
+have no automatic undo. Give them an explicit `teardown` block if they need one.
+See [lifecycle and teardown](../../concepts/lifecycle/).
 
 ## Values and types
 

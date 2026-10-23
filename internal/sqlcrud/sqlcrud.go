@@ -8,6 +8,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,6 +20,13 @@ import (
 	"github.com/pthm/orchard/internal/sqlrow"
 	"github.com/pthm/orchard/pkg/dbschema"
 )
+
+// querier runs statements: a *sql.Conn, or a *sql.Tx when several
+// must apply together.
+type querier interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
 
 // Dialect is how one database spells the statements.
 type Dialect struct {
@@ -50,7 +58,7 @@ func backtick(s string) string {
 
 // Insert inserts one row into t and returns the full row, every column
 // decoded by kind. values is a known object of column = value.
-func Insert(ctx context.Context, conn *sql.Conn, d Dialect, t *dbschema.Table, values cty.Value) (map[string]cty.Value, error) {
+func Insert(ctx context.Context, q querier, d Dialect, t *dbschema.Table, values cty.Value) (map[string]cty.Value, error) {
 	fields := sortedFields(values)
 	cols := make([]string, len(fields))
 	ph := make([]string, len(fields))
@@ -66,21 +74,21 @@ func Insert(ctx context.Context, conn *sql.Conn, d Dialect, t *dbschema.Table, v
 		cols[i] = d.Quote(f.name)
 		ph[i] = d.Placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", tableRef(d, t), strings.Join(cols, ", "), strings.Join(ph, ", "))
+	stmt := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", tableRef(d, t), strings.Join(cols, ", "), strings.Join(ph, ", "))
 
 	if d.Returning {
-		rows, err := conn.QueryContext(ctx, q+" RETURNING *", args...)
+		rows, err := q.QueryContext(ctx, stmt+" RETURNING *", args...)
 		if err != nil {
 			return nil, err
 		}
 		return readRow(t, rows)
 	}
 
-	res, err := conn.ExecContext(ctx, q, args...)
+	res, err := q.ExecContext(ctx, stmt, args...)
 	if err != nil {
 		return nil, err
 	}
-	return readBack(ctx, conn, d, t, values, res)
+	return readBack(ctx, q, d, t, values, res)
 }
 
 // readBack reads an inserted row by primary key, for dialects without
@@ -88,7 +96,7 @@ func Insert(ctx context.Context, conn *sql.Conn, d Dialect, t *dbschema.Table, v
 // auto-increment id (only possible for a single-column key). A table
 // without a primary key returns the values as given, plus
 // last_insert_id.
-func readBack(ctx context.Context, conn *sql.Conn, d Dialect, t *dbschema.Table, values cty.Value, res sql.Result) (map[string]cty.Value, error) {
+func readBack(ctx context.Context, q querier, d Dialect, t *dbschema.Table, values cty.Value, res sql.Result) (map[string]cty.Value, error) {
 	given := values.AsValueMap()
 	if len(t.PrimaryKey) == 0 {
 		out := make(map[string]cty.Value, len(given)+1)
@@ -124,8 +132,8 @@ func readBack(ctx context.Context, conn *sql.Conn, d Dialect, t *dbschema.Table,
 		}
 		args[i] = id
 	}
-	q := fmt.Sprintf("SELECT * FROM %s WHERE %s", tableRef(d, t), strings.Join(where, " AND "))
-	rows, err := conn.QueryContext(ctx, q, args...)
+	stmt := fmt.Sprintf("SELECT * FROM %s WHERE %s", tableRef(d, t), strings.Join(where, " AND "))
+	rows, err := q.QueryContext(ctx, stmt, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +142,7 @@ func readBack(ctx context.Context, conn *sql.Conn, d Dialect, t *dbschema.Table,
 
 // Update sets columns on the rows of t matching where, and returns
 // rows_affected.
-func Update(ctx context.Context, conn *sql.Conn, d Dialect, t *dbschema.Table, set, where cty.Value) (map[string]cty.Value, error) {
+func Update(ctx context.Context, q querier, d Dialect, t *dbschema.Table, set, where cty.Value) (map[string]cty.Value, error) {
 	var args []any
 	var assigns []string
 	for _, f := range sortedFields(set) {
@@ -153,23 +161,23 @@ func Update(ctx context.Context, conn *sql.Conn, d Dialect, t *dbschema.Table, s
 	if err != nil {
 		return nil, err
 	}
-	q := fmt.Sprintf("UPDATE %s SET %s WHERE %s", tableRef(d, t), strings.Join(assigns, ", "), cond)
-	return exec(ctx, conn, q, args)
+	stmt := fmt.Sprintf("UPDATE %s SET %s WHERE %s", tableRef(d, t), strings.Join(assigns, ", "), cond)
+	return exec(ctx, q, stmt, args)
 }
 
 // Delete deletes the rows of t matching where, and returns
 // rows_affected.
-func Delete(ctx context.Context, conn *sql.Conn, d Dialect, t *dbschema.Table, where cty.Value) (map[string]cty.Value, error) {
+func Delete(ctx context.Context, q querier, d Dialect, t *dbschema.Table, where cty.Value) (map[string]cty.Value, error) {
 	cond, args, err := whereClause(d, t, where, nil)
 	if err != nil {
 		return nil, err
 	}
-	q := fmt.Sprintf("DELETE FROM %s WHERE %s", tableRef(d, t), cond)
-	return exec(ctx, conn, q, args)
+	stmt := fmt.Sprintf("DELETE FROM %s WHERE %s", tableRef(d, t), cond)
+	return exec(ctx, q, stmt, args)
 }
 
-func exec(ctx context.Context, conn *sql.Conn, q string, args []any) (map[string]cty.Value, error) {
-	res, err := conn.ExecContext(ctx, q, args...)
+func exec(ctx context.Context, q querier, stmt string, args []any) (map[string]cty.Value, error) {
+	res, err := q.ExecContext(ctx, stmt, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -376,4 +384,112 @@ func decode(c *dbschema.Column, raw any, dbType string) cty.Value {
 		}
 	}
 	return v
+}
+
+// RowsMatching reads the primary key and cols of the rows of t matching
+// where, up to limit+1 rows, so a caller can tell when there were more
+// than limit. Values are decoded by kind.
+func RowsMatching(ctx context.Context, q querier, d Dialect, t *dbschema.Table, cols []string, where cty.Value, limit int) ([]map[string]cty.Value, error) {
+	want := append(slices.Clone(t.PrimaryKey), cols...)
+	slices.Sort(want)
+	want = slices.Compact(want)
+	quoted := make([]string, len(want))
+	for i, c := range want {
+		quoted[i] = d.Quote(c)
+	}
+	cond, args, err := whereClause(d, t, where, nil)
+	if err != nil {
+		return nil, err
+	}
+	stmt := fmt.Sprintf("SELECT %s FROM %s WHERE %s LIMIT %d", strings.Join(quoted, ", "), tableRef(d, t), cond, limit+1)
+	rows, err := q.QueryContext(ctx, stmt, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	types, err := rows.ColumnTypes()
+	if err != nil {
+		return nil, err
+	}
+	var out []map[string]cty.Value
+	for rows.Next() {
+		raw := make([]any, len(types))
+		ptrs := make([]any, len(types))
+		for i := range raw {
+			ptrs[i] = &raw[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return nil, err
+		}
+		row := make(map[string]cty.Value, len(types))
+		for i, ct := range types {
+			c, _ := t.Column(ct.Name())
+			row[ct.Name()] = decode(c, raw[i], ct.DatabaseTypeName())
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// Restore writes each row's values back to t, matching on the primary
+// key. rows is a list or tuple of objects, as RowsMatching returned
+// them; the key columns locate a row and the rest are set.
+func Restore(ctx context.Context, q querier, d Dialect, t *dbschema.Table, rows cty.Value) (map[string]cty.Value, error) {
+	if len(t.PrimaryKey) == 0 {
+		return nil, fmt.Errorf("table %q has no primary key to restore rows by", t.Key())
+	}
+	var restored int64
+	for it := rows.ElementIterator(); it.Next(); {
+		_, row := it.Element()
+		fields := row.AsValueMap()
+		set := map[string]cty.Value{}
+		where := map[string]cty.Value{}
+		for name, v := range fields {
+			if slices.Contains(t.PrimaryKey, name) {
+				where[name] = v
+			} else {
+				set[name] = v
+			}
+		}
+		if len(set) == 0 || len(where) != len(t.PrimaryKey) {
+			continue
+		}
+		out, err := Update(ctx, q, d, t, cty.ObjectVal(set), cty.ObjectVal(where))
+		if err != nil {
+			return nil, err
+		}
+		n, _ := out["rows_affected"].AsBigFloat().Int64()
+		restored += n
+	}
+	return map[string]cty.Value{"rows_affected": cty.NumberIntVal(restored)}, nil
+}
+
+// RowKey identifies a row by its primary key values, for ownership
+// tracking. ok is false when a key column is missing or null.
+func RowKey(t *dbschema.Table, row map[string]cty.Value) (key string, ok bool) {
+	if len(t.PrimaryKey) == 0 {
+		return "", false
+	}
+	parts := make([]string, len(t.PrimaryKey))
+	for i, col := range t.PrimaryKey {
+		v, present := row[col]
+		if !present || !v.IsKnown() || v.IsNull() {
+			return "", false
+		}
+		parts[i] = keyPart(v)
+	}
+	return t.Key() + "|" + strings.Join(parts, "|"), true
+}
+
+// keyPart renders a key value so the same key reads the same whether it
+// came back from an insert or a select: numbers by value, everything
+// else as a string.
+func keyPart(v cty.Value) string {
+	if v.Type() == cty.Number {
+		return v.AsBigFloat().Text('f', -1)
+	}
+	if s, err := convert.Convert(v, cty.String); err == nil {
+		return strconv.Quote(s.AsString())
+	}
+	return v.GoString()
 }

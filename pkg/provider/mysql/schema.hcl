@@ -152,6 +152,11 @@ provider "mysql" {
     description = <<-MD
       Update the rows matching `where`, with the same checks and bind parameters as
       `mysql_insert`. Generated columns can't be set.
+
+      `orchard teardown` writes back the values the update overwrote, for rows
+      inserted earlier in the same run. Set `lifecycle { managed_teardown = true }`
+      to restore other rows too, or `false` to restore nothing. Updates matching more
+      than 1,000 rows aren't restored.
     MD
 
     attribute "table" {

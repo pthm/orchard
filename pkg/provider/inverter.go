@@ -12,10 +12,20 @@ import "github.com/zclconf/go-cty/cty"
 // attributes and outputs, and stores the returned invocation in the run
 // record. Inverse returns nil when there's no automatic undo. It's
 // called after the action's side effect has happened, so it can't fail
-// the action; it should describe the undo from attrs and outputs alone,
-// without I/O.
+// the action; it should describe the undo from what it already knows,
+// without I/O. (A provider that needs the state before the change, like
+// a typed update's previous values, captures it while executing.)
 type Inverter interface {
-	Inverse(action string, attrs, outputs map[string]cty.Value) *Invocation
+	Inverse(action string, attrs, outputs map[string]cty.Value, opts InverseOptions) *Invocation
+}
+
+// InverseOptions carries the scenario's say in automatic teardown.
+type InverseOptions struct {
+	// Requested is true when the action sets
+	// `lifecycle { managed_teardown = true }`: record an undo even where
+	// the provider wouldn't by default (a typed update of rows Orchard
+	// didn't create).
+	Requested bool
 }
 
 // Invocation is an action call to make later: the action type and its

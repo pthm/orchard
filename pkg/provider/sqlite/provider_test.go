@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/zclconf/go-cty/cty"
+
+	"github.com/pthm/orchard/pkg/provider"
 )
 
 // SQLite needs no server, so unlike the postgres provider these tests
@@ -200,4 +202,33 @@ func exec(t *testing.T, p *Provider, query string) map[string]cty.Value {
 		t.Fatalf("query %q: %v", query, err)
 	}
 	return out
+}
+
+// An update matching more rows than the restore limit records no
+// restore, even when asked, so a broad update doesn't fill the record.
+func TestUpdateRestoreLimit(t *testing.T) {
+	p := open(t, ":memory:")
+	exec(t, p, schemaSQL)
+	exec(t, p, `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 1001)
+		INSERT INTO merchants (name, region) SELECT 'm' || i, 'us' FROM n`)
+
+	update := func(where cty.Value) *provider.Invocation {
+		t.Helper()
+		attrs := map[string]cty.Value{
+			"table": cty.StringVal("merchants"),
+			"set":   cty.ObjectVal(map[string]cty.Value{"region": cty.StringVal("eu")}),
+			"where": where,
+		}
+		if _, err := p.Execute(context.Background(), "sqlite_update", attrs); err != nil {
+			t.Fatal(err)
+		}
+		return p.Inverse("sqlite_update", attrs, nil, provider.InverseOptions{Requested: true})
+	}
+	if inv := update(cty.ObjectVal(map[string]cty.Value{"region": cty.StringVal("us")})); inv != nil {
+		t.Fatalf("1001 rows: expected no restore, got %v", inv.Action)
+	}
+	inv := update(cty.ObjectVal(map[string]cty.Value{"name": cty.StringVal("m1")}))
+	if inv == nil || inv.Action != "sqlite_restore" || inv.Attrs["rows"].LengthInt() != 1 {
+		t.Fatalf("one row: expected a restore of it, got %#v", inv)
+	}
 }

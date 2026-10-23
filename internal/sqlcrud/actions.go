@@ -40,7 +40,30 @@ type Actions struct {
 	// planned records the tables typed inserts were planned into, in
 	// plan order, for foreign-key hints.
 	planned map[string]bool
+	// owned records the rows this run's typed inserts created (RowKey),
+	// so a later update of them is restored on teardown by default.
+	owned map[string]bool
+	// lastUpdate is what the most recent typed update changed, for
+	// Inverse to describe how to restore it. The engine runs actions one
+	// at a time and calls Inverse straight after Execute.
+	// ponytail: a single slot; key it by action if actions ever run in
+	// parallel.
+	lastUpdate *updated
 }
+
+// updated is what a typed update changed: the previous values of the
+// set columns, by primary key, for the rows it matched.
+type updated struct {
+	table     *dbschema.Table
+	rows      []map[string]cty.Value
+	truncated bool // more than restoreLimit rows matched
+	owned     bool // every matched row was inserted earlier in this run
+}
+
+// restoreLimit caps how many rows a typed update records previous
+// values for; an update matching more gets no automatic restore, so a
+// broad update doesn't fill the run record.
+const restoreLimit = 1000
 
 // FromSnapshot builds plan-only Actions from a "database" snapshot,
 // which must be of the given dialect ("postgres", ...).
@@ -83,7 +106,9 @@ func Verb(prefix, action string) (string, bool) {
 		return "", false
 	}
 	switch verb {
-	case "insert", "update", "delete":
+	case "insert", "update", "delete", "restore":
+		// restore is internal: the undo a typed update records. It's not
+		// in the provider's schema, so scenarios can't call it.
 		return verb, true
 	}
 	return "", false
@@ -96,6 +121,9 @@ func Verb(prefix, action string) (string, bool) {
 // checks again); against a snapshot (Strict) it's an error.
 func (a *Actions) Plan(ctx context.Context, action string, attrs map[string]cty.Value) (provider.Plan, error) {
 	verb, _ := a.Verb(action)
+	if verb == "restore" {
+		return provider.Plan{}, nil
+	}
 	table := attrs["table"]
 	if !table.IsKnown() || table.IsNull() {
 		return provider.Plan{}, nil
@@ -198,8 +226,10 @@ func (a *Actions) Execute(ctx context.Context, action string, attrs map[string]c
 	if err != nil {
 		return nil, err
 	}
-	if err := check(verb, t, attrs); err != nil {
-		return nil, err
+	if verb != "restore" {
+		if err := check(verb, t, attrs); err != nil {
+			return nil, err
+		}
 	}
 
 	conn, err := a.Conn(ctx)
@@ -210,21 +240,106 @@ func (a *Actions) Execute(ctx context.Context, action string, attrs map[string]c
 
 	switch verb {
 	case "insert":
-		return Insert(ctx, conn, a.Dialect, t, attrs["values"])
+		row, err := Insert(ctx, conn, a.Dialect, t, attrs["values"])
+		if err == nil {
+			a.own(t, row)
+		}
+		return row, err
 	case "update":
-		return Update(ctx, conn, a.Dialect, t, attrs["set"], attrs["where"])
+		return a.update(ctx, conn, t, attrs["set"], attrs["where"])
+	case "restore":
+		return inTx(ctx, conn, func(tx *sql.Tx) (map[string]cty.Value, error) {
+			return Restore(ctx, tx, a.Dialect, t, attrs["rows"])
+		})
 	default:
 		return Delete(ctx, conn, a.Dialect, t, attrs["where"])
 	}
 }
 
-// Inverse describes how to undo a typed insert: delete the row by its
-// primary key, read from the inserted row. Updates, deletes, tables
-// without a primary key, and rows whose key didn't come back have no
-// automatic undo. It uses the schema cached when the insert ran, so it
-// does no I/O.
-func (a *Actions) Inverse(action string, attrs, outputs map[string]cty.Value) *provider.Invocation {
-	if verb, _ := a.Verb(action); verb != "insert" {
+// update runs a typed update, first reading the previous values of the
+// columns it sets, in the same transaction, so Inverse can describe how
+// to restore them.
+func (a *Actions) update(ctx context.Context, conn *sql.Conn, t *dbschema.Table, set, where cty.Value) (map[string]cty.Value, error) {
+	a.setLastUpdate(nil)
+	if len(t.PrimaryKey) == 0 {
+		return Update(ctx, conn, a.Dialect, t, set, where)
+	}
+	cols := make([]string, 0, len(set.AsValueMap()))
+	for _, f := range sortedFields(set) {
+		cols = append(cols, f.name)
+	}
+	var before []map[string]cty.Value
+	out, err := inTx(ctx, conn, func(tx *sql.Tx) (map[string]cty.Value, error) {
+		var err error
+		if before, err = RowsMatching(ctx, tx, a.Dialect, t, cols, where, restoreLimit); err != nil {
+			return nil, err
+		}
+		return Update(ctx, tx, a.Dialect, t, set, where)
+	})
+	if err != nil {
+		return nil, err
+	}
+	u := &updated{table: t, truncated: len(before) > restoreLimit, owned: true}
+	if !u.truncated {
+		u.rows = before
+	}
+	a.mu.Lock()
+	for _, row := range before {
+		if key, ok := RowKey(t, row); !ok || !a.owned[key] {
+			u.owned = false
+		}
+	}
+	a.mu.Unlock()
+	a.setLastUpdate(u)
+	return out, nil
+}
+
+func (a *Actions) setLastUpdate(u *updated) {
+	a.mu.Lock()
+	a.lastUpdate = u
+	a.mu.Unlock()
+}
+
+// own records a row this run inserted.
+func (a *Actions) own(t *dbschema.Table, row map[string]cty.Value) {
+	key, ok := RowKey(t, row)
+	if !ok {
+		return
+	}
+	a.mu.Lock()
+	if a.owned == nil {
+		a.owned = map[string]bool{}
+	}
+	a.owned[key] = true
+	a.mu.Unlock()
+}
+
+// inTx runs fn in a transaction on conn, committing if it succeeds.
+func inTx(ctx context.Context, conn *sql.Conn, fn func(*sql.Tx) (map[string]cty.Value, error)) (map[string]cty.Value, error) {
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	out, err := fn(tx)
+	if err != nil {
+		_ = tx.Rollback()
+		return nil, err
+	}
+	return out, tx.Commit()
+}
+
+// Inverse describes how to undo a typed action. An insert is undone by
+// deleting the row by its primary key, read from the inserted row; an
+// update by restoring the values it overwrote (see restoreInvocation).
+// Deletes, tables without a primary key, and rows whose key didn't come
+// back have no automatic undo. It uses state captured when the action
+// ran, so it does no I/O.
+func (a *Actions) Inverse(action string, attrs, outputs map[string]cty.Value, opts provider.InverseOptions) *provider.Invocation {
+	verb, _ := a.Verb(action)
+	if verb == "update" {
+		return a.restoreInvocation(opts)
+	}
+	if verb != "insert" {
 		return nil
 	}
 	a.mu.Lock()
@@ -251,6 +366,33 @@ func (a *Actions) Inverse(action string, attrs, outputs map[string]cty.Value) *p
 		Attrs: map[string]cty.Value{
 			"table": cty.StringVal(t.Key()),
 			"where": cty.ObjectVal(where),
+		},
+	}
+}
+
+// restoreInvocation describes how to undo the update that just ran:
+// write back the previous values of the columns it set. Rows this run
+// inserted are restored by default; others only when the scenario asks
+// (managed_teardown = true), since rewriting rows Orchard didn't create
+// could undo someone else's changes. Updates that matched no rows, or
+// more than restoreLimit, record nothing.
+func (a *Actions) restoreInvocation(opts provider.InverseOptions) *provider.Invocation {
+	a.mu.Lock()
+	u := a.lastUpdate
+	a.lastUpdate = nil
+	a.mu.Unlock()
+	if u == nil || u.truncated || len(u.rows) == 0 || (!u.owned && !opts.Requested) {
+		return nil
+	}
+	rows := make([]cty.Value, len(u.rows))
+	for i, r := range u.rows {
+		rows[i] = cty.ObjectVal(r)
+	}
+	return &provider.Invocation{
+		Action: a.Prefix + "_restore",
+		Attrs: map[string]cty.Value{
+			"table": cty.StringVal(u.table.Key()),
+			"rows":  cty.TupleVal(rows),
 		},
 	}
 }

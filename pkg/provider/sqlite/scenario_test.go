@@ -3,6 +3,7 @@ package sqlite_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -335,5 +336,47 @@ func teardown(t *testing.T, scenario string, vars map[string]string, rec *record
 	ps, g, eng := load(t, scenario, vars)
 	if err := eng.Teardown(context.Background(), ps, g, recVars, outputs, undos); err != nil {
 		t.Fatalf("teardown: %v", err)
+	}
+}
+
+func TestUpdateRestore(t *testing.T) {
+	path, db := newShopDB(t)
+	if _, err := db.Exec(`INSERT INTO merchants (name, region) VALUES ('Legacy', 'us'), ('Forced', 'us')`); err != nil {
+		t.Fatal(err)
+	}
+	const scenario = "testdata/typed_restore.hcl"
+	vars := map[string]string{"path": path}
+
+	rec := runRecorded(t, scenario, vars)
+	undos := map[string]string{}
+	for _, n := range rec.Nodes {
+		if n.Undo != nil {
+			undos[n.ID] = n.Undo.Action
+		}
+	}
+	want := map[string]string{
+		"action.sqlite_insert.acme":        "sqlite_delete",
+		"action.sqlite_update.move_acme":   "sqlite_restore",
+		"action.sqlite_update.move_forced": "sqlite_restore",
+	}
+	if fmt.Sprint(undos) != fmt.Sprint(want) {
+		t.Fatalf("recorded undos:\n got %v\nwant %v", undos, want)
+	}
+
+	teardown(t, scenario, vars, rec)
+
+	regions := map[string]string{}
+	rows, err := db.Query("SELECT name, region FROM merchants")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var n, r string
+		_ = rows.Scan(&n, &r)
+		regions[n] = r
+	}
+	_ = rows.Close()
+	if fmt.Sprint(regions) != fmt.Sprint(map[string]string{"Forced": "us", "Legacy": "apac"}) {
+		t.Fatalf("after teardown: %v; want Acme deleted, Legacy left as changed, Forced restored", regions)
 	}
 }

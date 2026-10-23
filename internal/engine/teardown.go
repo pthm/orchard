@@ -92,7 +92,7 @@ func (e *Engine) Teardown(
 				continue
 			}
 			run = func() error { return e.teardownAction(ctx, node, vars, selfOutputs, recordedOutputs) }
-		case hasUndo && !node.NoManagedTeardown:
+		case hasUndo && !managedTeardownOff(node):
 			run = func() error { return e.runUndo(ctx, node, undo) }
 		default:
 			continue

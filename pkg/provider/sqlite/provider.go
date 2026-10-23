@@ -131,13 +131,14 @@ func (p *Provider) PlanAction(ctx context.Context, action string, attrs map[stri
 // Compile-time assertion that typed inserts tear themselves down.
 var _ provider.Inverter = (*Provider)(nil)
 
-// Inverse describes the automatic teardown of a typed insert: deleting
-// the row by its primary key.
-func (p *Provider) Inverse(action string, attrs, outputs map[string]cty.Value) *provider.Invocation {
+// Inverse describes the automatic teardown of a typed action: deleting
+// an inserted row by its primary key, or restoring the previous values
+// of rows an update changed.
+func (p *Provider) Inverse(action string, attrs, outputs map[string]cty.Value, opts provider.InverseOptions) *provider.Invocation {
 	if p.typed == nil {
 		return nil
 	}
-	return p.typed.Inverse(action, attrs, outputs)
+	return p.typed.Inverse(action, attrs, outputs, opts)
 }
 
 // Compile-time assertion that `orchard plan` can check typed actions.

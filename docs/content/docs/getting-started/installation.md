@@ -57,5 +57,6 @@ see the available subcommands.
 - **Go 1.25 or newer** if installing with `go install`.
 - **A target system to drive.** Orchard itself is just an orchestrator — you need
   something for it to talk to. For the built-in providers that means a reachable
-  PostgreSQL database (for `builtin/postgres`), an HTTP endpoint (for `builtin/http`),
-  or a shell environment (for `builtin/exec`).
+  PostgreSQL database (for `builtin/postgres`), a database file (for `builtin/sqlite`,
+  which needs no server), an HTTP endpoint (for `builtin/http`), or a shell environment
+  (for `builtin/exec`).

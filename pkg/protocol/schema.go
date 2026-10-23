@@ -69,6 +69,13 @@ type AttrSchema struct {
 	Required    bool            `json:"required,omitempty"`
 	Default     json.RawMessage `json:"default,omitempty"`
 	Description string          `json:"description,omitempty"`
+	// Path marks a string provider config attribute as a file path. A
+	// relative value is resolved against the scenario file's directory
+	// before Configure, the same as action `file` attributes and exec:
+	// sources, so a scenario works from any working directory. Values
+	// starting with ':' (special names like SQLite's :memory:) pass
+	// through unchanged.
+	Path bool `json:"path,omitempty"`
 }
 
 // CtyType parses the schema's textual cty type expression and returns
@@ -112,8 +119,13 @@ func (s ProviderSchema) Validate() error {
 		return fmt.Errorf("provider %q: at least one action is required", s.Name)
 	}
 	for name, attr := range s.Config {
-		if _, err := attr.CtyType(); err != nil {
+		t, err := attr.CtyType()
+		if err != nil {
 			return fmt.Errorf("provider %q config.%s: %w", s.Name, name, err)
+		}
+		if attr.Path && t != cty.String {
+			return fmt.Errorf("provider %q config.%s: path attributes must be strings, got %s",
+				s.Name, name, t.FriendlyName())
 		}
 	}
 	for actionName, action := range s.Actions {

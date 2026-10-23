@@ -18,6 +18,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -73,6 +74,7 @@ type Registry struct {
 	providers  map[string]Provider
 	order      []string // registration order, used for deterministic Close reverse-walk
 	configured bool
+	baseDir    string // resolves relative `path` config attributes; see SetBaseDir
 }
 
 // NewRegistry returns an empty registry.
@@ -115,6 +117,17 @@ func (r *Registry) Register(name string, p Provider) error {
 	r.providers[name] = p
 	r.order = append(r.order, name)
 	return nil
+}
+
+// SetBaseDir sets the directory relative values of `path` config
+// attributes resolve against: the scenario file's directory, so a
+// scenario behaves the same from any working directory. Without it,
+// relative paths are passed through and resolve against the process's
+// working directory.
+func (r *Registry) SetBaseDir(dir string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.baseDir = dir
 }
 
 // Get returns the registered provider with the given name.
@@ -196,11 +209,12 @@ func (r *Registry) validateAndCoerceConfigs(configs map[string]map[string]cty.Va
 	for name, p := range r.providers {
 		schemas[name] = p.Schema().Config
 	}
+	baseDir := r.baseDir
 	r.mu.Unlock()
 
 	out := make(map[string]map[string]cty.Value, len(order))
 	for _, name := range order {
-		coerced, err := validateProviderConfig(schemas[name], configs[name])
+		coerced, err := validateProviderConfig(schemas[name], configs[name], baseDir)
 		if err != nil {
 			return nil, fmt.Errorf("provider %q config: %w", name, err)
 		}
@@ -217,7 +231,10 @@ func (r *Registry) validateAndCoerceConfigs(configs map[string]map[string]cty.Va
 // An empty schema means the provider accepts no config. Scenarios
 // that still pass attributes trip the "unknown attribute" error
 // here rather than seeing their typo silently discarded.
-func validateProviderConfig(schema map[string]protocol.AttrSchema, raw map[string]cty.Value) (map[string]cty.Value, error) {
+//
+// Relative values of `path` attributes are resolved against baseDir
+// (when set); see protocol.AttrSchema.Path.
+func validateProviderConfig(schema map[string]protocol.AttrSchema, raw map[string]cty.Value, baseDir string) (map[string]cty.Value, error) {
 	if len(schema) == 0 {
 		if len(raw) > 0 {
 			return nil, fmt.Errorf("provider accepts no config attributes, got %s",
@@ -261,9 +278,26 @@ func validateProviderConfig(schema map[string]protocol.AttrSchema, raw map[strin
 			}
 			val = coerced
 		}
+		if attr.Path {
+			val = resolvePath(val, baseDir)
+		}
 		out[name] = val
 	}
 	return out, nil
+}
+
+// resolvePath joins a relative path value onto baseDir. Absolute paths,
+// values starting with ':' (SQLite's :memory:), null and unknown values,
+// and everything when baseDir is empty, pass through unchanged.
+func resolvePath(val cty.Value, baseDir string) cty.Value {
+	if baseDir == "" || val.IsNull() || !val.IsKnown() || val.Type() != cty.String {
+		return val
+	}
+	p := val.AsString()
+	if p == "" || strings.HasPrefix(p, ":") || filepath.IsAbs(p) {
+		return val
+	}
+	return cty.StringVal(filepath.Join(baseDir, p))
 }
 
 func sortedValueKeys(m map[string]cty.Value) string {

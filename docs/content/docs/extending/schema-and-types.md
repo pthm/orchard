@@ -68,6 +68,7 @@ at plan time before a single action runs.
 | `required` | `bool` | Whether the attribute must be provided. |
 | `default` | JSON raw | Optional default value, JSON-encoded cty. Applied when the attribute is omitted. |
 | `description` | `string` | Free-text description. |
+| `path` | `bool` | Provider config only, `string` attributes only. Marks the value as a file path: a relative value is resolved against the scenario file's directory before `configure`, so scenarios work from any directory. Values starting with `:` (such as SQLite's `:memory:`) are passed through unchanged. In `schema.hcl`, write `path = true`. |
 
 ## Type expressions
 

@@ -104,6 +104,7 @@ var attributeBodySchema = &hcl.BodySchema{
 		{Name: "required"},
 		{Name: "default"},
 		{Name: "description"},
+		{Name: "path"},
 	},
 }
 
@@ -270,15 +271,11 @@ func decodeAttribute(body hcl.Body) (AttrSchema, error) {
 	}
 	attr.Type = typeexpr.TypeString(ctyType)
 
-	if a, ok := content.Attributes["required"]; ok {
-		val, diags := a.Expr.Value(nil)
-		if diags.HasErrors() {
-			return AttrSchema{}, fmt.Errorf("required: %s", diags.Error())
-		}
-		if val.Type().FriendlyName() != "bool" {
-			return AttrSchema{}, fmt.Errorf("required: expected bool, got %s", val.Type().FriendlyName())
-		}
-		attr.Required = val.True()
+	if err := decodeBoolAttr(content.Attributes, "required", &attr.Required); err != nil {
+		return AttrSchema{}, err
+	}
+	if err := decodeBoolAttr(content.Attributes, "path", &attr.Path); err != nil {
+		return AttrSchema{}, err
 	}
 
 	if a, ok := content.Attributes["default"]; ok {
@@ -317,6 +314,23 @@ func decodeOutput(body hcl.Body) (AttrSchema, error) {
 		return AttrSchema{}, err
 	}
 	return out, nil
+}
+
+// decodeBoolAttr reads an optional literal bool attribute into dst.
+func decodeBoolAttr(attrs hcl.Attributes, name string, dst *bool) error {
+	a, ok := attrs[name]
+	if !ok {
+		return nil
+	}
+	val, diags := a.Expr.Value(nil)
+	if diags.HasErrors() {
+		return fmt.Errorf("%s: %s", name, diags.Error())
+	}
+	if val.Type().FriendlyName() != "bool" {
+		return fmt.Errorf("%s: expected bool, got %s", name, val.Type().FriendlyName())
+	}
+	*dst = val.True()
+	return nil
 }
 
 func decodeStringAttr(attrs hcl.Attributes, name string, dst *string, required bool) error {

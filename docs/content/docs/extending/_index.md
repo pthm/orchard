@@ -3,7 +3,7 @@ title: Extending Orchard
 weight: 40
 ---
 
-Orchard's built-in providers (`postgres`, `http`, `exec`) cover a lot of common
+Orchard's built-in providers (`postgres`, `sqlite`, `http`, `exec`) cover a lot of common
 ground, but they won't cover everything. When you need to drive a system Orchard
 doesn't know about — a SaaS API, an internal service, a queue, a vault — you
 write a **custom provider**.

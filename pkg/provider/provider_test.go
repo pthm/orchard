@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -27,6 +28,7 @@ type stubProvider struct {
 	closeCalls    int
 	executeCalls  int
 	sawConfigKeys []string
+	sawConfig     map[string]cty.Value
 	lifecycle     *[]string
 }
 
@@ -47,6 +49,7 @@ func (s *stubProvider) Configure(ctx context.Context, config map[string]cty.Valu
 	for k := range config {
 		s.sawConfigKeys = append(s.sawConfigKeys, k)
 	}
+	s.sawConfig = config
 	if s.lifecycle != nil {
 		*s.lifecycle = append(*s.lifecycle, "configure:"+s.name)
 	}
@@ -366,5 +369,52 @@ func TestValidateConfigsAppliesDefaults(t *testing.T) {
 	}
 	if len(p.sawConfigKeys) != 1 || p.sawConfigKeys[0] != "region" {
 		t.Errorf("expected default region to reach provider, got %v", p.sawConfigKeys)
+	}
+}
+
+// TestConfigureResolvesPathAttributes: relative values of `path`
+// config attributes are joined onto the base directory (the scenario
+// file's), while absolute paths, ':' names, nulls and non-path
+// attributes pass through.
+func TestConfigureResolvesPathAttributes(t *testing.T) {
+	base := filepath.Join(t.TempDir(), "scenarios")
+	abs := filepath.Join(t.TempDir(), "elsewhere.db")
+	schema := map[string]protocol.AttrSchema{
+		"file": {Type: "string", Path: true},
+		"name": {Type: "string"},
+	}
+	cases := []struct {
+		name    string
+		baseDir string
+		in      cty.Value
+		want    cty.Value
+	}{
+		{"relative", base, cty.StringVal("./data/dev.db"), cty.StringVal(filepath.Join(base, "data", "dev.db"))},
+		{"parent", base, cty.StringVal("../dev.db"), cty.StringVal(filepath.Join(filepath.Dir(base), "dev.db"))},
+		{"absolute", base, cty.StringVal(abs), cty.StringVal(abs)},
+		{"special name", base, cty.StringVal(":memory:"), cty.StringVal(":memory:")},
+		{"null", base, cty.NullVal(cty.String), cty.NullVal(cty.String)},
+		{"no base dir", "", cty.StringVal("dev.db"), cty.StringVal("dev.db")},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := NewRegistry()
+			r.SetBaseDir(c.baseDir)
+			p := &stubProvider{name: "db", configSchema: schema}
+			if err := r.Register("db", p); err != nil {
+				t.Fatal(err)
+			}
+			if err := r.Configure(context.Background(), map[string]map[string]cty.Value{
+				"db": {"file": c.in, "name": cty.StringVal("dev.db")},
+			}); err != nil {
+				t.Fatalf("Configure: %v", err)
+			}
+			if got := p.sawConfig["file"]; !got.RawEquals(c.want) {
+				t.Fatalf("file: got %#v want %#v", got, c.want)
+			}
+			if got := p.sawConfig["name"]; !got.RawEquals(cty.StringVal("dev.db")) {
+				t.Fatalf("non-path attribute changed: %#v", got)
+			}
+		})
 	}
 }

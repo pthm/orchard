@@ -16,6 +16,7 @@ import (
 	_ "github.com/pthm/orchard/pkg/provider/exec"
 	_ "github.com/pthm/orchard/pkg/provider/http"
 	_ "github.com/pthm/orchard/pkg/provider/postgres"
+	_ "github.com/pthm/orchard/pkg/provider/sqlite"
 )
 
 // Flags scoped to `orchard run`. Kept package-level so cobra's

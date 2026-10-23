@@ -9,6 +9,7 @@ Reference documentation for each built-in provider. Every page documents the
 provider's source string, its configuration schema, and every action it supports.
 
 - [`postgres`](postgres/) — PostgreSQL data operations
+- [`sqlite`](sqlite/) — SQLite data operations
 - [`http`](http/) — HTTP request provider
 - [`exec`](exec/) — Shell command execution
 - [External providers](external/) — using custom providers from separate binaries

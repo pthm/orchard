@@ -413,6 +413,24 @@ action "postgres_copy" "seed_products" {
 
 Outputs: `{rows_copied = number}`.
 
+### sqlite_query (builtin/sqlite)
+
+Execute SQL against a SQLite database file (or `:memory:`). A relative `path` is relative to the scenario file. A statement that returns rows (a `SELECT`, or a write with `RETURNING`) exposes its first row as outputs. A statement that returns no rows exposes `last_insert_id` and `rows_affected` instead, so an `INSERT` without `RETURNING` can still be wired into the next step. Foreign keys are enforced.
+
+```hcl
+provider "sqlite" {
+  path = "./dev.db"
+}
+
+action "sqlite_query" "create_merchant" {
+  query = "INSERT INTO merchants (name, region) VALUES ('${var.name}', 'us')"
+}
+
+action "sqlite_query" "create_product" {
+  query = "INSERT INTO products (merchant_id, name) VALUES (${action.sqlite_query.create_merchant.last_insert_id}, 'Widget')"
+}
+```
+
 ### http_request (builtin/http)
 
 Make HTTP requests to APIs or services. The provider supports a `base_url` config for relative paths, `default_headers` merged across every request, and a request-level timeout. Responses expose `status`, `body`, and `headers` (first value per key) as outputs.
@@ -1020,7 +1038,7 @@ Harden the tool for real-world use and improve the authoring experience.
 | Embedded scripting (Starlark or Lua) for custom generators | Not started |
 | Isolation strategies (per-run schema, namespace tagging) | Not started |
 | Clock freezing / deterministic timestamp control | Not started |
-| SQLite support | Not started |
+| SQLite support (`builtin/sqlite`, `sqlite_query`) | Done |
 | MySQL support | Not started |
 
 ---
@@ -1145,6 +1163,10 @@ pkg/ (public SDK surface)
       schema.hcl                Embedded via //go:embed; carries description, notes,
                                 examples consumed by the docs renderer
       provider.go, sql.go, copy.go, cty.go, register.go
+    sqlite/                     builtin/sqlite — sqlite_query over modernc.org/sqlite
+                                (pure Go, CGO-free); one connection, foreign keys on
+      schema.hcl                Embedded via //go:embed (with description/notes/examples)
+      provider.go, query.go, register.go
     http/                       builtin/http — net/http-backed request action
       schema.hcl                Embedded via //go:embed (with description/notes/examples)
       provider.go, register.go

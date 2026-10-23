@@ -28,8 +28,8 @@ and wiring outputs between steps automatically.
 
 Instead of writing ad-hoc seed scripts, you write **scenarios** in HCL. Orchard
 plans them, shows the execution graph, and (when you're ready) runs them through
-a pluggable provider system. Built-in providers cover PostgreSQL, HTTP, and
-shell execution; custom providers are any binary that speaks Orchard's
+a pluggable provider system. Built-in providers cover PostgreSQL, SQLite,
+HTTP, and shell execution; custom providers are any binary that speaks Orchard's
 JSON-over-stdio protocol.
 
 ### Why
@@ -130,6 +130,7 @@ Full reference at [orchard.pthm.dev/reference/cli/](https://orchard.pthm.dev/ref
 | Source | Actions | What it does |
 |--------|---------|--------------|
 | `builtin/postgres` | `postgres_query`, `postgres_copy` | Execute SQL or bulk-load CSV via COPY; capture outputs. |
+| `builtin/sqlite` | `sqlite_query` | Execute SQL against a database file; capture the returned row or the insert id. |
 | `builtin/http` | `http_request` | Issue HTTP requests; capture status, body, and headers. |
 | `builtin/exec` | `exec_run` | Run a shell command; capture stdout, stderr, and exit code. |
 

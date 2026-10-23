@@ -55,6 +55,7 @@ func registerProviders(ps *parser.ParsedScenario, mode providerMode) (*provider.
 	sort.Strings(names)
 
 	reg := provider.NewRegistry()
+	reg.SetBaseDir(ps.ScenarioDir)
 	for _, name := range names {
 		spec := ps.RequiredProviders[name]
 		p, err := instantiateProvider(spec.Source, mode)

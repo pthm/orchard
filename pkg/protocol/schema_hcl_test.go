@@ -188,3 +188,53 @@ provider "x" {
 		})
 	}
 }
+
+func TestParseHCLSchemaPathAttribute(t *testing.T) {
+	s, err := ParseHCLSchema([]byte(`
+provider "x" {
+  version  = "1"
+  protocol = "1"
+  config {
+    attribute "file" {
+      type = string
+      path = true
+    }
+    attribute "name" {
+      type = string
+    }
+  }
+  action "a" {
+    attribute "q" {
+      type = string
+    }
+  }
+}`), "x.hcl")
+	if err != nil {
+		t.Fatalf("ParseHCLSchema: %v", err)
+	}
+	if !s.Config["file"].Path || s.Config["name"].Path {
+		t.Fatalf("path flags: file=%v name=%v", s.Config["file"].Path, s.Config["name"].Path)
+	}
+}
+
+func TestParseHCLSchemaPathMustBeString(t *testing.T) {
+	_, err := ParseHCLSchema([]byte(`
+provider "x" {
+  version  = "1"
+  protocol = "1"
+  config {
+    attribute "port" {
+      type = number
+      path = true
+    }
+  }
+  action "a" {
+    attribute "q" {
+      type = string
+    }
+  }
+}`), "x.hcl")
+	if err == nil || !strings.Contains(err.Error(), "path attributes must be strings") {
+		t.Fatalf("expected a path-type error, got %v", err)
+	}
+}

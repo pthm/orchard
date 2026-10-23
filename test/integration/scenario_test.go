@@ -64,6 +64,7 @@ func runScenario(t *testing.T, path string, vars map[string]string) map[string]c
 // as a library) and keeps the integration harness independent.
 func buildRegistry(ps *parser.ParsedScenario) (*provider.Registry, error) {
 	reg := provider.NewRegistry()
+	reg.SetBaseDir(ps.ScenarioDir)
 	for name, spec := range ps.RequiredProviders {
 		p, err := instantiateProvider(spec.Source)
 		if err != nil {

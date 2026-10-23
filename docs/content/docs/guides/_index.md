@@ -17,6 +17,8 @@ choices.
   suites.
 - [Composing components](composing-components/) — patterns for breaking scenarios
   down into reusable parts.
+- [Typed database actions](typed-database-actions/) — schema-checked inserts,
+  updates and deletes, snapshots for plan, and automatic teardown.
 
 These assume you've read the [Getting started](../getting-started/) section and
 understand [concepts](../concepts/).

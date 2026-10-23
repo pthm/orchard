@@ -956,11 +956,11 @@ Fill in the remaining action-layer features that were in the original Milestone 
 
 **Open — dotted action types.** The design doc's earlier `action "db.insert" "merchant"` example implies a dotted action-type label with a corresponding `action.db.insert.merchant.id` traversal. HCL attribute traversals don't naturally parse that — `action.db.insert.merchant.id` is five attribute accesses, not "action type db.insert / name merchant / field id". The options are (a) pivot to three-label actions `action "<provider>" "<action>" "<name>"` with a scenario migration, or (b) add a special parse path for dotted action-type labels. Deferred until the need is concrete; today's alias-based routing covers the plugin-ecosystem use cases that motivated the concern.
 
-### Milestone 4: Schema-Aware Database Provider
+### Milestone 4: Schema-Aware Database Provider — CORE COMPLETE
 
-Introspect PostgreSQL schemas and provide a typed database layer that validates operations before execution.
+Introspect PostgreSQL, MySQL and SQLite schemas and provide a typed database layer that validates operations before execution.
 
-The typed actions cover all three SQL providers and supersede the `db.insert` naming below.
+User guide: [Typed database actions](docs/content/docs/guides/typed-database-actions.md). It covers all three SQL providers and supersedes the `db.insert` naming below.
 
 | Feature | Status |
 |---------|--------|
@@ -1006,7 +1006,7 @@ Make cleanup a first-class operation so that scenarios can be torn down cleanly,
 
 **Done summary.** The core records + teardown loop is functional: every `orchard run` writes a JSON record with per-node outputs and resolved variables; `orchard teardown <record-file>` replays the scenario in reverse topological order and evaluates each action's `lifecycle { teardown { } }` body against a `var.* / self.* / action.*` eval context. Teardown uses the provider's existing `Execute` — no new provider surface — so any action type automatically supports teardown once its author writes a lifecycle block.
 
-**Next up.** The obvious gap is "the scenario author has to write every teardown expression by hand". Milestone 4's schema-aware DB provider closes that for vanilla CRUD: `db.insert` knows its table + primary key, so its teardown is auto-generable (`DELETE FROM t WHERE pk = ${self.pk}`). After that, scenario-level `lifecycle { on_failure / on_success }` policies and `orchard list runs` / `orchard inspect` get the record file format far enough for workflows beyond a single invocation.
+**Next up.** Milestone 4 closed the "every teardown is hand-written" gap for typed inserts, which record their own undo. What's left here: restoring previous values on typed-update teardown, scenario-level `lifecycle { on_failure / on_success }` policies, and `orchard list runs` / `orchard inspect` to take the record format beyond a single invocation.
 
 ### Milestone 6: Robustness and Ergonomics
 

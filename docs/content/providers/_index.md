@@ -13,6 +13,7 @@ provider's source string, its configuration schema, and every action it supports
 - [`sqlite`](sqlite/) — SQLite data operations
 - [`redis`](redis/) — Redis and Valkey keys, hashes and commands
 - [`s3`](s3/) — S3, S3-compatible stores and Google Cloud Storage
+- [`grpc`](grpc/) — unary gRPC calls, with no generated code
 - [`http`](http/) — HTTP request provider
 - [`exec`](exec/) — Shell command execution
 - [External providers](external/) — using custom providers from separate binaries

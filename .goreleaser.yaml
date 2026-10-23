@@ -16,6 +16,10 @@ builds:
     binary: orchard
     env:
       - CGO_ENABLED=0
+    # grpcnotrace drops grpc's golang.org/x/net/trace import, whose
+    # html/template use defeats dead-code elimination: about 13 MB.
+    flags:
+      - -tags=grpcnotrace
     goos:
       - linux
       - windows
@@ -34,6 +38,10 @@ builds:
     binary: orchard
     env:
       - CGO_ENABLED=0
+    # grpcnotrace drops grpc's golang.org/x/net/trace import, whose
+    # html/template use defeats dead-code elimination: about 13 MB.
+    flags:
+      - -tags=grpcnotrace
     goos:
       - darwin
     goarch:

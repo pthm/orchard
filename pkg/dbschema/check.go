@@ -8,6 +8,8 @@ import (
 
 	"github.com/zclconf/go-cty/cty"
 	"github.com/zclconf/go-cty/cty/convert"
+
+	"github.com/pthm/orchard/internal/suggest"
 )
 
 // ErrNoTable is wrapped by Lookup's error for a table that doesn't
@@ -34,7 +36,7 @@ func (s *Schema) Lookup(name string) (*Table, error) {
 			candidates[i] = strings.TrimPrefix(c, s.DefaultSchema+".")
 		}
 	}
-	return nil, fmt.Errorf("%w %q%s", ErrNoTable, name, suggest(name, candidates))
+	return nil, fmt.Errorf("%w %q%s", ErrNoTable, name, suggest.Hint(name, candidates))
 }
 
 // Column returns the named column.
@@ -127,7 +129,7 @@ func checkColumnValues(t *Table, attr string, obj cty.Value, writing bool, errs 
 		present[name] = true
 		c, ok := t.Column(name)
 		if !ok {
-			*errs = append(*errs, fmt.Errorf("%s: no column %q%s", attr, name, suggest(name, columnNames(t))))
+			*errs = append(*errs, fmt.Errorf("%s: no column %q%s", attr, name, suggest.Hint(name, columnNames(t))))
 			continue
 		}
 		if writing && c.Generated != "" {
@@ -267,43 +269,6 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
-}
-
-// suggest returns ` (did you mean "x"?)` for the closest candidate
-// within a small edit distance, or "".
-func suggest(name string, candidates []string) string {
-	best, bestDist := "", 0
-	for _, c := range candidates {
-		d := editDistance(strings.ToLower(name), strings.ToLower(c))
-		if best == "" || d < bestDist {
-			best, bestDist = c, d
-		}
-	}
-	if best == "" || bestDist > max(2, len(name)/3) {
-		return ""
-	}
-	return fmt.Sprintf(" (did you mean %q?)", best)
-}
-
-// editDistance is the Levenshtein distance between a and b.
-func editDistance(a, b string) int {
-	prev := make([]int, len(b)+1)
-	cur := make([]int, len(b)+1)
-	for j := range prev {
-		prev[j] = j
-	}
-	for i := 1; i <= len(a); i++ {
-		cur[0] = i
-		for j := 1; j <= len(b); j++ {
-			cost := 1
-			if a[i-1] == b[j-1] {
-				cost = 0
-			}
-			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
-		}
-		prev, cur = cur, prev
-	}
-	return prev[len(b)]
 }
 
 // Conflict modes for an insert's on_conflict.

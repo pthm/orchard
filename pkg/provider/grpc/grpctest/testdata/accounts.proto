@@ -1,0 +1,107 @@
+// The test service for builtin/grpc. Regenerate accounts.binpb with
+// `just grpc-testdata` after editing.
+syntax = "proto3";
+
+package accounts.v1;
+
+import "google/protobuf/any.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+service Accounts {
+  // Creates an org with a generated id.
+  rpc CreateOrg(CreateOrgRequest) returns (CreateOrgResponse);
+  rpc GetOrg(GetOrgRequest) returns (Org);
+  // Returns its request, for type round trips.
+  rpc Echo(AllTypes) returns (AllTypes);
+  // Fails with INVALID_ARGUMENT and a BadRequest detail.
+  rpc Fail(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc WatchOrgs(google.protobuf.Empty) returns (stream Org);
+}
+
+enum Plan {
+  PLAN_UNSPECIFIED = 0;
+  PLAN_FREE = 1;
+  PLAN_TEAM = 2;
+}
+
+message Owner {
+  string email = 1;
+  int32 age = 2;
+}
+
+message Org {
+  string id = 1;
+  string name = 2;
+  Plan plan = 3;
+  Owner owner = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+message CreateOrgRequest {
+  string name = 1;
+  Plan plan = 2;
+  Owner owner = 3;
+  oneof contact {
+    string email = 4;
+    string phone = 5;
+  }
+}
+
+message CreateOrgResponse {
+  Org org = 1;
+}
+
+message GetOrgRequest {
+  string org_id = 1;
+}
+
+message Node {
+  string name = 1;
+  repeated Node children = 2;
+}
+
+message AllTypes {
+  int32 i32 = 1;
+  sint32 s32 = 2;
+  sfixed32 sf32 = 3;
+  uint32 u32 = 4;
+  fixed32 f32 = 5;
+  float fl = 6;
+  double db = 7;
+  int64 i64 = 8;
+  sint64 s64 = 9;
+  sfixed64 sf64 = 10;
+  uint64 u64 = 11;
+  fixed64 f64 = 12;
+  bool b = 13;
+  string s = 14;
+  bytes by = 15;
+  Plan plan = 16;
+  Owner owner = 17;
+  repeated string tags = 18;
+  repeated Owner owners = 19;
+  map<string, int64> counts = 20;
+  map<int32, Owner> by_id = 21;
+  oneof choice {
+    string text = 22;
+    int64 number = 23;
+  }
+  optional string maybe = 24;
+  google.protobuf.Timestamp ts = 25;
+  google.protobuf.Duration dur = 26;
+  google.protobuf.Struct st = 27;
+  google.protobuf.Value val = 28;
+  google.protobuf.ListValue lv = 29;
+  google.protobuf.Any any = 30;
+  google.protobuf.StringValue sw = 31;
+  google.protobuf.Int64Value iw = 32;
+  google.protobuf.BoolValue bw = 33;
+  google.protobuf.Empty empty = 34;
+  google.protobuf.FieldMask mask = 35;
+  Node node = 36;
+}

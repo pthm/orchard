@@ -1067,6 +1067,7 @@ Harden the tool for real-world use and improve the authoring experience.
 | MySQL support (`builtin/mysql`, `mysql_query`) | Done |
 | Redis support (`builtin/redis`, `redis_command`, `redis_set`, `redis_hset`) | Done |
 | S3 and GCS support (`builtin/s3`) | Done (GCS checked by hand) |
+| gRPC support (`builtin/grpc`, `grpc_call`), checked at plan from protobuf snapshots | Done |
 
 ---
 
@@ -1233,6 +1234,11 @@ pkg/ (public SDK surface)
                                 GCS through its XML API with ADC bearer tokens
       schema.hcl                Embedded via //go:embed (with description/notes/examples)
       provider.go, actions.go, gcs.go, register.go
+    grpc/                       builtin/grpc — grpc_call over dynamicpb; descriptors
+                                from server reflection, a descriptor set or a snapshot
+      schema.hcl                Embedded via //go:embed (with description/notes/examples)
+      provider.go, descriptors.go, convert.go, reflect_v1alpha.go, register.go
+      grpctest/                 Test Accounts service (dynamicpb, no generated code)
     http/                       builtin/http — net/http-backed request action
       schema.hcl                Embedded via //go:embed (with description/notes/examples)
       provider.go, register.go

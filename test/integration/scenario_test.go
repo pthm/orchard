@@ -20,6 +20,7 @@ import (
 	// Register builtins. Side-effect imports mirror what cmd/run.go
 	// does, so the integration runner sees the same provider set
 	// as the real binary.
+	_ "github.com/pthm/orchard/pkg/provider/grpc"
 	_ "github.com/pthm/orchard/pkg/provider/http"
 	_ "github.com/pthm/orchard/pkg/provider/mysql"
 	_ "github.com/pthm/orchard/pkg/provider/postgres"

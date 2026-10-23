@@ -305,7 +305,7 @@ $ orchard teardown orchard_checkout_run_20261023T103045Z_a3f29e5b.json
 <a class="orchard-feature" href="providers/">
   <span class="orchard-feature-icon">{{< icon name="puzzle" attributes="height=20" >}}</span>
   <h3>Pluggable providers</h3>
-  <p>Postgres, MySQL, SQLite, Redis, S3, HTTP, and exec built in. Any binary that speaks the JSON-over-stdio protocol can be a provider.</p>
+  <p>Postgres, MySQL, SQLite, Redis, S3, gRPC, HTTP, and exec built in. Any binary that speaks the JSON-over-stdio protocol can be a provider.</p>
 </a>
 </section>
 

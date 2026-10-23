@@ -13,6 +13,7 @@ docs-generate:
     go run . docs builtin/mysql    > docs/content-generated/providers/mysql.md
     go run . docs builtin/redis    > docs/content-generated/providers/redis.md
     go run . docs builtin/s3       > docs/content-generated/providers/s3.md
+    go run . docs builtin/grpc     > docs/content-generated/providers/grpc.md
     go run . docs builtin/http     > docs/content-generated/providers/http.md
     go run . docs builtin/exec     > docs/content-generated/providers/exec.md
     go run . functions --hugo      > docs/content-generated/reference/functions.md
@@ -50,3 +51,8 @@ test-all:
 
 # Run all checks (fmt, lint, test).
 check: fmt lint test
+
+# Regenerate the gRPC provider's test descriptor set after editing
+# accounts.proto.
+grpc-testdata:
+    cd pkg/provider/grpc/grpctest/testdata && protoc --include_imports --include_source_info --descriptor_set_out=accounts.binpb accounts.proto

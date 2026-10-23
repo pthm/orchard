@@ -12,6 +12,7 @@ provider's source string, its configuration schema, and every action it supports
 - [`mysql`](mysql/) — MySQL and MariaDB data operations
 - [`sqlite`](sqlite/) — SQLite data operations
 - [`redis`](redis/) — Redis and Valkey keys, hashes and commands
+- [`s3`](s3/) — S3, S3-compatible stores and Google Cloud Storage
 - [`http`](http/) — HTTP request provider
 - [`exec`](exec/) — Shell command execution
 - [External providers](external/) — using custom providers from separate binaries

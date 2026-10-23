@@ -4,7 +4,7 @@ weight: 30
 ---
 
 A **provider** is the runtime that turns a declarative HCL action into a real side
-effect. `builtin/postgres`, `builtin/mysql`, and `builtin/sqlite` run SQL. `builtin/redis` writes keys and hashes. `builtin/http` makes
+effect. `builtin/postgres`, `builtin/mysql`, and `builtin/sqlite` run SQL. `builtin/redis` writes keys and hashes. `builtin/s3` uploads objects. `builtin/http` makes
 HTTP requests. `builtin/exec` spawns child processes. Custom providers can do
 anything you can write a binary for.
 
@@ -17,6 +17,7 @@ available and need no installation. Today that's:
 - `builtin/mysql`
 - `builtin/sqlite`
 - `builtin/redis`
+- `builtin/s3`
 - `builtin/http`
 - `builtin/exec`
 

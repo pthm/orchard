@@ -78,6 +78,31 @@ admin_email = admin@local.dev
 login_url   = http://localhost:3000/login
 ```
 
+## Pattern: object storage
+
+A local S3 (SeaweedFS, LocalStack, or MinIO) starts empty, so the app's
+buckets need creating before anything can upload. `s3_create_bucket` is a
+no-op when the bucket is already there, so the dev scenario can always run it:
+
+```hcl
+provider "s3" {
+  endpoint          = "http://localhost:8333"
+  path_style        = true
+  access_key_id     = "dev"
+  secret_access_key = "dev"
+}
+
+action "s3_create_bucket" "uploads" {
+  bucket = "app-uploads"
+}
+
+action "s3_put_object" "avatar" {
+  bucket = action.s3_create_bucket.uploads.bucket
+  key    = "avatars/${component.admin.seed_admin.id}.png"
+  file   = "./fixtures/avatar.png"
+}
+```
+
 ## Pattern: idempotent vs destructive
 
 Local dev scenarios are typically **destructive** — they assume a fresh

@@ -120,6 +120,11 @@ expiry) when an earlier action in the run created it, or with
 and an existing hash loses only the fields the action added. Keys larger than
 1 MB aren't restored.
 
+`s3_create_bucket` and `s3_put_object` work the same way: created buckets and
+objects are deleted, and before overwriting an object `s3_put_object` copies it to
+`.orchard-backup/<run>/<key>` in the same bucket. Teardown copies it back under the
+same rules as above, and removes the backup either way.
+
 ## `orchard teardown <record>`
 
 Hand the record file to `orchard teardown` and Orchard walks the scenario in

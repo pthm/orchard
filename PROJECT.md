@@ -1066,6 +1066,7 @@ Harden the tool for real-world use and improve the authoring experience.
 | SQLite support (`builtin/sqlite`, `sqlite_query`) | Done |
 | MySQL support (`builtin/mysql`, `mysql_query`) | Done |
 | Redis support (`builtin/redis`, `redis_command`, `redis_set`, `redis_hset`) | Done |
+| S3 and GCS support (`builtin/s3`) | Done (GCS checked by hand) |
 
 ---
 
@@ -1228,6 +1229,10 @@ pkg/ (public SDK surface)
                                 over go-redis
       schema.hcl                Embedded via //go:embed (with description/notes/examples)
       provider.go, actions.go, encode.go, register.go
+    s3/                         builtin/s3 — buckets and objects over aws-sdk-go-v2;
+                                GCS through its XML API with ADC bearer tokens
+      schema.hcl                Embedded via //go:embed (with description/notes/examples)
+      provider.go, actions.go, gcs.go, register.go
     http/                       builtin/http — net/http-backed request action
       schema.hcl                Embedded via //go:embed (with description/notes/examples)
       provider.go, register.go

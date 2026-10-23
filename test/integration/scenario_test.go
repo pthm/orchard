@@ -24,6 +24,7 @@ import (
 	_ "github.com/pthm/orchard/pkg/provider/mysql"
 	_ "github.com/pthm/orchard/pkg/provider/postgres"
 	_ "github.com/pthm/orchard/pkg/provider/redis"
+	_ "github.com/pthm/orchard/pkg/provider/s3"
 )
 
 // runScenario loads, validates, and executes an HCL scenario through

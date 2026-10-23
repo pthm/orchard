@@ -15,6 +15,7 @@ import (
 	// a new builtin provider is a one-line change here.
 	_ "github.com/pthm/orchard/pkg/provider/exec"
 	_ "github.com/pthm/orchard/pkg/provider/http"
+	_ "github.com/pthm/orchard/pkg/provider/mysql"
 	_ "github.com/pthm/orchard/pkg/provider/postgres"
 	_ "github.com/pthm/orchard/pkg/provider/sqlite"
 )

@@ -53,7 +53,7 @@ func TestTeardown_EndToEnd(t *testing.T) {
 	assertProductExists(t, productID, true)
 
 	// --- Run teardown against the recorded state ---
-	runTeardown(t, scenarioPath, rec)
+	runTeardown(t, scenarioPath, map[string]string{"dsn": testDSN}, rec)
 
 	// --- DB should reflect the torn-down state ---
 	assertMerchantExists(t, merchantID, false)
@@ -128,10 +128,10 @@ func runScenarioWithRecord(
 // test already produced. Mirrors what `orchard teardown` does but
 // calls the engine directly so the integration harness doesn't have
 // to shell out to the binary.
-func runTeardown(t *testing.T, scenarioPath string, rec *record.Record) {
+func runTeardown(t *testing.T, scenarioPath string, vars map[string]string, rec *record.Record) {
 	t.Helper()
 
-	ps, err := parser.LoadScenario(scenarioPath, "", map[string]string{"dsn": testDSN})
+	ps, err := parser.LoadScenario(scenarioPath, "", vars)
 	require.NoError(t, err)
 
 	g, err := graph.Build(ps)
@@ -144,12 +144,12 @@ func runTeardown(t *testing.T, scenarioPath string, rec *record.Record) {
 	eng, err := engine.New(reg)
 	require.NoError(t, err)
 
-	vars, err := record.DecodeCty(rec.Variables)
+	recVars, err := record.DecodeCty(rec.Variables)
 	require.NoError(t, err)
 	outputs, err := record.IndexOutputs(rec)
 	require.NoError(t, err)
 
-	require.NoError(t, eng.Teardown(context.Background(), ps, g, vars, outputs),
+	require.NoError(t, eng.Teardown(context.Background(), ps, g, recVars, outputs),
 		"teardown reported errors")
 }
 

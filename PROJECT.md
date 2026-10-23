@@ -413,6 +413,24 @@ action "postgres_copy" "seed_products" {
 
 Outputs: `{rows_copied = number}`.
 
+### mysql_query (builtin/mysql)
+
+Execute SQL against MySQL or MariaDB. A statement that returns rows exposes its first row as outputs. MySQL has no `RETURNING`, so a statement that returns no rows exposes `last_insert_id` (`LAST_INSERT_ID()`) and `rows_affected` (`ROW_COUNT()`) instead. One query can hold several statements, e.g. a `START TRANSACTION; ... COMMIT;` block.
+
+```hcl
+provider "mysql" {
+  dsn = var.dsn # mysql://user:pass@host:3306/db, or user:pass@tcp(host:3306)/db
+}
+
+action "mysql_query" "create_merchant" {
+  query = "INSERT INTO merchants (name, region) VALUES ('${var.name}', 'us')"
+}
+
+action "mysql_query" "create_product" {
+  query = "INSERT INTO products (merchant_id, name) VALUES (${action.mysql_query.create_merchant.last_insert_id}, 'Widget')"
+}
+```
+
 ### sqlite_query (builtin/sqlite)
 
 Execute SQL against a SQLite database file (or `:memory:`). A relative `path` is relative to the scenario file. A statement that returns rows (a `SELECT`, or a write with `RETURNING`) exposes its first row as outputs. A statement that returns no rows exposes `last_insert_id` and `rows_affected` instead, so an `INSERT` without `RETURNING` can still be wired into the next step. Foreign keys are enforced.
@@ -1039,7 +1057,7 @@ Harden the tool for real-world use and improve the authoring experience.
 | Isolation strategies (per-run schema, namespace tagging) | Not started |
 | Clock freezing / deterministic timestamp control | Not started |
 | SQLite support (`builtin/sqlite`, `sqlite_query`) | Done |
-| MySQL support | Not started |
+| MySQL support (`builtin/mysql`, `mysql_query`) | Done |
 
 ---
 
@@ -1169,6 +1187,10 @@ pkg/ (public SDK surface)
       schema.hcl                Embedded via //go:embed; carries description, notes,
                                 examples consumed by the docs renderer
       provider.go, sql.go, copy.go, register.go
+    mysql/                      builtin/mysql — mysql_query over go-sql-driver/mysql;
+                                dsn accepts mysql:// URLs or the driver format
+      schema.hcl                Embedded via //go:embed (with description/notes/examples)
+      provider.go, query.go, register.go
     sqlite/                     builtin/sqlite — sqlite_query over modernc.org/sqlite
                                 (pure Go, CGO-free); one connection, foreign keys on
       schema.hcl                Embedded via //go:embed (with description/notes/examples)

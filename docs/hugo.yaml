@@ -13,7 +13,7 @@ module:
     extended: true
     min: "0.158.0"
   # Mount content-generated/ on top of content/ so generator output
-  # for providers (postgres, sqlite, http, exec) lands at the same URLs as
+  # for providers (postgres, mysql, sqlite, http, exec) lands at the same URLs as
   # hand-written pages. The generated tree is gitignored; run
   # `just docs-generate` before `hugo build`.
   mounts:

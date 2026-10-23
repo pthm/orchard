@@ -21,6 +21,7 @@ import (
 	// does, so the integration runner sees the same provider set
 	// as the real binary.
 	_ "github.com/pthm/orchard/pkg/provider/http"
+	_ "github.com/pthm/orchard/pkg/provider/mysql"
 	_ "github.com/pthm/orchard/pkg/provider/postgres"
 )
 

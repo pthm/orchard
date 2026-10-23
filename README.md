@@ -12,7 +12,7 @@
   &nbsp;·&nbsp;
   <a href="https://orchard.pthm.dev/docs/getting-started/">Getting started</a>
   &nbsp;·&nbsp;
-  <a href="https://orchard.pthm.dev/docs/providers/">Providers</a>
+  <a href="https://orchard.pthm.dev/providers/">Providers</a>
   &nbsp;·&nbsp;
   <a href="https://orchard.pthm.dev/docs/extending/">Extending</a>
 </p>

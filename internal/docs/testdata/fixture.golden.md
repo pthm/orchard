@@ -1,5 +1,6 @@
 ---
 title: demo
+weight: 10
 ---
 
 **Source:** `builtin/demo`

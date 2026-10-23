@@ -4,12 +4,12 @@ weight: 40
 ---
 
 External providers are binaries that live outside the `orchard` tree and speak
-Orchard's [provider protocol](../../extending/provider-protocol/) over stdio.
+Orchard's [provider protocol](/docs/extending/provider-protocol/) over stdio.
 Scenarios use them exactly like built-in providers — the only difference is the
 source string.
 
 If you want to **build** a custom provider, see
-[Extending Orchard](../../extending/). This page covers how to **use** an
+[Extending Orchard](/docs/extending/). This page covers how to **use** an
 existing external provider from a scenario.
 
 ## Declaring an external provider
@@ -64,7 +64,7 @@ This split is what makes `plan` safe to run against scenarios that point at
 production systems — the provider binary is never handed credentials or asked
 to do anything stateful.
 
-See [plan vs run](../../concepts/plan-vs-run/) for the full picture.
+See [plan vs run](/docs/concepts/plan-vs-run/) for the full picture.
 
 ## Troubleshooting
 

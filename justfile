@@ -6,17 +6,17 @@ default:
 
 # Regenerate docs pages from schemas and the function registry.
 docs-generate:
-    mkdir -p docs/content-generated/docs/providers
+    mkdir -p docs/content-generated/providers
     mkdir -p docs/content-generated/docs/reference
-    go run . docs builtin/postgres > docs/content-generated/docs/providers/postgres.md
-    go run . docs builtin/http     > docs/content-generated/docs/providers/http.md
-    go run . docs builtin/exec     > docs/content-generated/docs/providers/exec.md
+    go run . docs builtin/postgres > docs/content-generated/providers/postgres.md
+    go run . docs builtin/http     > docs/content-generated/providers/http.md
+    go run . docs builtin/exec     > docs/content-generated/providers/exec.md
     go run . functions --hugo      > docs/content-generated/docs/reference/functions.md
 
 # Generate one provider page. Useful while iterating.
 docs-provider name:
-    mkdir -p docs/content-generated/docs/providers
-    go run . docs builtin/{{name}} > docs/content-generated/docs/providers/{{name}}.md
+    mkdir -p docs/content-generated/providers
+    go run . docs builtin/{{name}} > docs/content-generated/providers/{{name}}.md
 
 # Build the docs site. Generates provider pages first.
 docs: docs-generate

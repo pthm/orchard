@@ -35,7 +35,9 @@ func Render(schema protocol.ProviderSchema, source string) string {
 }
 
 func writeFrontMatter(b *strings.Builder, schema protocol.ProviderSchema) {
-	fmt.Fprintf(b, "---\ntitle: %s\n---\n\n", schema.Name)
+	// weight 10 sorts built-in provider pages above hand-written ones like
+	// "External providers" in the sidebar.
+	fmt.Fprintf(b, "---\ntitle: %s\nweight: 10\n---\n\n", schema.Name)
 }
 
 func writeHeader(b *strings.Builder, schema protocol.ProviderSchema, source string) {

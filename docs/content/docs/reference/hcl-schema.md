@@ -87,7 +87,7 @@ provider "postgres" {
 ```
 
 The label selects which provider in `required_providers` is being configured.
-The body is provider-specific — see the [providers reference](../../providers/).
+The body is provider-specific — see the [providers reference](/providers/).
 
 Provider configuration is evaluated with variables in scope; it cannot
 reference action or component outputs.

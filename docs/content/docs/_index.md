@@ -14,3 +14,4 @@ components and providers.
 - [Getting started](getting-started) — install, configure, run your first scenario
 - [Concepts](concepts) — scenarios, components, providers, wiring
 - [Reference](reference) — HCL schema and CLI reference
+- [Providers](/providers/) — reference for the built-in providers, in their own section

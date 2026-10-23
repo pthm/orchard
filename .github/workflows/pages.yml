@@ -35,11 +35,11 @@ jobs:
 
       - name: Generate provider and reference pages
         run: |
-          mkdir -p docs/content-generated/docs/providers
+          mkdir -p docs/content-generated/providers
           mkdir -p docs/content-generated/docs/reference
-          go run . docs builtin/postgres > docs/content-generated/docs/providers/postgres.md
-          go run . docs builtin/http     > docs/content-generated/docs/providers/http.md
-          go run . docs builtin/exec     > docs/content-generated/docs/providers/exec.md
+          go run . docs builtin/postgres > docs/content-generated/providers/postgres.md
+          go run . docs builtin/http     > docs/content-generated/providers/http.md
+          go run . docs builtin/exec     > docs/content-generated/providers/exec.md
           go run . functions --hugo      > docs/content-generated/docs/reference/functions.md
 
       - name: Build site

@@ -5,6 +5,9 @@
 {{ with site.GetPage "/docs" }}
 {{- template "llms-full-page" . }}
 {{- end }}
+{{ with site.GetPage "/providers" }}
+{{- template "llms-full-page" . }}
+{{- end }}
 
 {{- define "llms-full-page" }}
 {{ "\n---\n" }}

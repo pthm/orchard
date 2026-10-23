@@ -112,7 +112,7 @@ orchard run scenarios/hello.hcl --var merchant_name="Globex"
 
 - Read [Concepts](../../concepts/) to understand scenarios, components, providers,
   and wiring.
-- Browse the [provider reference](../../providers/) to see what each built-in
+- Browse the [provider reference](/providers/) to see what each built-in
   provider can do.
 - Check out [guides](../../guides/) for worked examples: demo data, local dev,
   integration testing.

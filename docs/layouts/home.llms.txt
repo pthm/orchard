@@ -13,6 +13,12 @@ Every link below is a markdown page. The whole documentation as one file: {{ "ll
 {{ with site.GetPage "/docs" }}
 {{- template "llms-tree" (dict "page" . "level" 2) }}
 {{- end }}
+{{ with site.GetPage "/providers" }}
+## {{ .Title }}
+{{ range .RegularPages }}
+- [{{ .Title }}]({{ (.OutputFormats.Get "markdown").Permalink }}): {{ .Description | default (.Summary | plainify | htmlUnescape | replaceRE `\s+` " " | truncate 160) }}
+{{- end }}
+{{- end }}
 
 {{- define "llms-tree" }}
 {{- $level := .level }}

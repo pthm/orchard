@@ -96,6 +96,6 @@ The schema covers:
 - **Attributes per action** — what fields each action accepts.
 - **Outputs per action** — what values the action produces for downstream wiring.
 
-See the [provider reference](../../providers/) for the schema of each built-in
+See the [provider reference](/providers/) for the schema of each built-in
 provider, and [writing a provider](../../extending/writing-a-provider/) to build
 your own.

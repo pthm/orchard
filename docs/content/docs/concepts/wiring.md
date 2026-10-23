@@ -120,7 +120,7 @@ action "postgres_query" "next" {
 }
 ```
 
-See the [provider reference](../../providers/) for each provider's exact output
+See the [provider reference](/providers/) for each provider's exact output
 shape.
 
 ## Advanced action attributes

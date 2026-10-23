@@ -69,7 +69,7 @@ orchard run  scenarios/hello.hcl
   >}}
   {{< hextra/feature-card
     title="Pluggable Providers"
-    link="docs/providers/"
+    link="providers/"
     subtitle="Built-in providers for Postgres, HTTP, and exec, plus a protocol for writing your own."
     icon="puzzle"
   >}}

@@ -13,4 +13,4 @@ function library.
   and examples. Auto-generated from the function registry.
 
 For per-provider reference (config attributes, action types, outputs), see the
-[providers section](../providers/).
+[providers section](/providers/).

@@ -1,0 +1,26 @@
+{{- /*
+  /llms.txt (https://llmstxt.org): an index of the docs for LLM agents.
+  Overrides Hextra's version to use each page's description and link to the
+  raw-markdown twins.
+*/ -}}
+# {{ site.Title }}
+
+> {{ site.Params.description }}
+
+Orchard is a CLI that defines, composes, and executes scenarios: declarative HCL descriptions of application state. Scenarios compose components and call providers (built-in postgres, http, and exec, or external plugins) to insert rows, call APIs, and run scripts, wiring outputs between steps.
+
+Every link below is a markdown page. The whole documentation as one file: {{ "llms-full.txt" | absURL }}
+{{ with site.GetPage "/docs" }}
+{{- template "llms-tree" (dict "page" . "level" 2) }}
+{{- end }}
+
+{{- define "llms-tree" }}
+{{- $level := .level }}
+{{- range .page.Sections }}
+{{ printf "\n%s %s\n" (strings.Repeat $level "#") .Title }}
+{{- range .RegularPages }}
+- [{{ .Title }}]({{ (.OutputFormats.Get "markdown").Permalink }}): {{ .Description | default (.Summary | plainify | htmlUnescape | replaceRE `\s+` " " | truncate 160) }}
+{{- end }}
+{{- template "llms-tree" (dict "page" . "level" (add $level 1)) }}
+{{- end }}
+{{- end }}

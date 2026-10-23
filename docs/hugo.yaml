@@ -22,6 +22,20 @@ module:
     - source: content-generated
       target: content
 
+# Machine-readable outputs: /llms.txt indexes the docs for LLM agents,
+# /llms-full.txt is every docs page in one file, and every page gets a
+# markdown twin at <page>.md (layouts/_partials/llms/markdown-body.html).
+outputFormats:
+  llmsfull:
+    baseName: llms-full
+    mediaType: text/plain
+    isPlainText: true
+
+outputs:
+  home: [HTML, RSS, llms, llmsfull]
+  page: [HTML, markdown]
+  section: [HTML, RSS, markdown]
+
 markup:
   goldmark:
     renderer:
@@ -62,6 +76,17 @@ params:
 
   page:
     width: wide
+    # "Copy page" menu on docs pages: copy or view the page's Markdown twin,
+    # or hand it to an assistant. Placeholders are URL-encoded by Hextra.
+    contextMenu:
+      enable: true
+      links:
+        - name: Open in Claude
+          icon: simple:claude
+          url: "https://claude.ai/new?q=Read%20{markdown_url}%20so%20I%20can%20ask%20questions%20about%20it."
+        - name: Open in ChatGPT
+          icon: lucide:message-circle
+          url: "https://chatgpt.com/?q=Read%20{markdown_url}%20so%20I%20can%20ask%20questions%20about%20it."
 
   footer:
     displayCopyright: false

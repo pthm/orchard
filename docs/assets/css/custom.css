@@ -89,6 +89,8 @@ h1, h2, h3, h4 {
 
 code, pre, kbd {
   font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+  /* JetBrains Mono ligatures turn <<- into an arrow; show code as typed */
+  font-variant-ligatures: none;
 }
 
 /* Light mode: warm beige code surfaces to sit on the cream page, as on the
@@ -195,80 +197,314 @@ html:not(.dark) .content :where(code):not(:where(.hextra-code-block code, [class
   opacity: 0.6;
 }
 
-/* Homepage section spacing */
-.homepage-section-gap {
-  margin-top: 5rem;
+/* Even line breaks in the all-caps hero headline */
+.homepage-hero h1 {
+  text-wrap: balance;
 }
 
-@media (min-width: 768px) {
-  .homepage-section-gap {
-    margin-top: 7rem;
-  }
-}
-
-/* Homepage get started panel: text and buttons beside the install commands */
-.homepage-cta {
-  border-radius: var(--hx-radius-3xl);
+/* Homepage sections: shared eyebrow, lead and spacing */
+.orchard-uses,
+.orchard-flow,
+.orchard-features,
+.orchard-install {
   width: 100%;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 2.5rem;
-  align-items: center;
-  padding: 2.5rem 1.5rem;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  background: hsl(var(--primary-hue) var(--primary-saturation) var(--primary-lightness) / 0.04);
+  margin-top: 6rem;
 }
 
-.dark .homepage-cta {
-  border-color: rgba(255, 255, 255, 0.08);
-  background: hsl(var(--primary-hue) var(--primary-saturation) var(--primary-lightness) / 0.06);
+.orchard-eyebrow {
+  margin-bottom: 0.75rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: hsl(var(--primary-hue) var(--primary-saturation) var(--primary-lightness));
 }
 
-@media (min-width: 1024px) {
-  .homepage-cta {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 4rem;
-    padding: 3.5rem;
-  }
+.orchard-eyebrow code {
+  padding: 0;
+  border: 0;
+  background: none !important;
+  font-size: inherit;
+  color: inherit;
+  text-transform: none;
 }
 
-.homepage-cta-lead {
-  margin: 1.25rem 0 2rem;
+.orchard-lead {
+  margin: 1.25rem 0 1.5rem;
   max-width: 32rem;
   font-size: 1.125rem;
   line-height: 1.7;
   opacity: 0.8;
 }
 
-/* Feature cards: icon in the brand colour, and a visible hover since every
-   card links to its docs */
-.hextra-feature-card {
-  background: rgba(0, 0, 0, 0.015);
-  transition: border-color 0.15s ease, background-color 0.15s ease, transform 0.15s ease;
+/* Use cases: a beige band with four text columns divided by rules */
+.orchard-uses {
+  margin-top: 2rem;
+  padding: 2.5rem 1.5rem;
+  border-radius: var(--hx-radius-3xl);
+  background: rgba(220, 204, 172, 0.28);
 }
 
-.dark .hextra-feature-card {
-  background: rgba(255, 255, 255, 0.02);
+.dark .orchard-uses {
+  background: rgba(220, 204, 172, 0.06);
 }
 
-.hextra-feature-card:hover {
-  border-color: hsl(var(--primary-hue) var(--primary-saturation) var(--primary-lightness) / 0.6) !important;
-  background: hsl(var(--primary-hue) var(--primary-saturation) var(--primary-lightness) / 0.04);
-  transform: translateY(-2px);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .hextra-feature-card:hover {
-    transform: none;
+@media (min-width: 1024px) {
+  .orchard-uses {
+    padding: 3rem;
   }
 }
 
-.hextra-feature-card h3 {
-  font-size: 1.375rem;
+.orchard-uses-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2rem;
+  margin-top: 1rem;
 }
 
-.hextra-feature-card h3 svg {
+@media (min-width: 768px) {
+  .orchard-uses-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .orchard-uses-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0;
+  }
+
+  .orchard-use {
+    padding: 0 1.75rem;
+    border-left: 1px solid rgba(84, 107, 65, 0.25);
+  }
+
+  .orchard-use:first-child {
+    padding-left: 0;
+    border-left: 0;
+  }
+}
+
+.orchard-use {
+  display: flex;
+  flex-direction: column;
+  color: inherit;
+}
+
+.orchard-use h3 {
+  font-size: 1.75rem;
+  line-height: 1.1;
+}
+
+.orchard-use p {
+  flex: 1;
+  margin-top: 0.75rem;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  opacity: 0.8;
+}
+
+.orchard-use-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
   color: hsl(var(--primary-hue) var(--primary-saturation) var(--primary-lightness));
+}
+
+.orchard-use-link svg {
+  transition: transform 0.15s ease;
+}
+
+.orchard-use:hover .orchard-use-link svg {
+  transform: translateX(3px);
+}
+
+/* How it fits together: each item hangs off a vertical sage branch, with a
+   node at the eyebrow. Text beside code on wide screens. */
+.orchard-flow-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.5rem;
+  /* padding, not margin, so the branch line runs unbroken between items */
+  padding-top: 3rem;
+  padding-left: 1.75rem;
+  border-left: 2px solid rgba(153, 173, 122, 0.45);
+}
+
+.orchard-flow-item::before {
+  content: "";
+  position: absolute;
+  top: 3.2rem;
+  left: -7px;
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background: hsl(var(--primary-hue) var(--primary-saturation) var(--primary-lightness));
+  box-shadow: 0 0 0 4px var(--hx-color-white);
+}
+
+.dark .orchard-flow-item::before {
+  box-shadow: 0 0 0 4px var(--hx-color-dark);
+}
+
+@media (min-width: 1024px) {
+  .orchard-flow-item {
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr);
+    gap: 4rem;
+    padding-left: 2.5rem;
+  }
+}
+
+.orchard-flow-item h3 {
+  font-size: 2rem;
+  line-height: 1.1;
+  margin-bottom: 1rem;
+}
+
+.orchard-flow-item .hextra-code-block {
+  margin-top: 0;
+}
+
+/* Features: plain grid, icon tiles, no card boxes */
+.orchard-features {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2.5rem 3rem;
+}
+
+@media (min-width: 768px) {
+  .orchard-features {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .orchard-features {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.orchard-feature {
+  display: grid;
+  grid-template-columns: 2.5rem minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  column-gap: 1rem;
+  color: inherit;
+}
+
+.orchard-feature-icon {
+  grid-row: span 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--hx-radius-lg);
+  color: hsl(var(--primary-hue) var(--primary-saturation) var(--primary-lightness));
+  background: hsl(var(--primary-hue) var(--primary-saturation) var(--primary-lightness) / 0.12);
+}
+
+.orchard-feature h3 {
+  font-size: 1.375rem;
+  line-height: 1.2;
+}
+
+.orchard-feature p {
+  margin-top: 0.375rem;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  opacity: 0.8;
+}
+
+.orchard-feature:hover h3 {
+  color: hsl(var(--primary-hue) var(--primary-saturation) var(--primary-lightness));
+}
+
+/* Install: a solid forest panel, the page's closing note, with room below
+   before the footer. */
+.orchard-install {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2rem;
+  align-items: center;
+  margin-bottom: 6rem;
+  padding: 2.5rem 1.5rem;
+  border-radius: var(--hx-radius-3xl);
+  background: #3F5130;
+  color: #FFF8EC;
+}
+
+.dark .orchard-install {
+  background: #2C3923;
+}
+
+@media (min-width: 1024px) {
+  .orchard-install {
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr);
+    gap: 4rem;
+    padding: 3.5rem;
+  }
+}
+
+/* Hextra's section heading is gradient-clipped grey; make it solid cream */
+.orchard-install h2 {
+  background: none;
+  color: #FFF8EC;
+  -webkit-text-fill-color: currentColor;
+}
+
+.orchard-install .orchard-lead {
+  opacity: 0.85;
+}
+
+.orchard-install-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-weight: 600;
+  color: #DCCCAC;
+}
+
+.orchard-install-link:hover {
+  color: #FFF8EC;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Tabs and code on the green panel */
+.orchard-install .hextra-tabs-toggle {
+  color: rgba(255, 248, 236, 0.7) !important;
+}
+
+.orchard-install .hextra-tabs-toggle:hover,
+.orchard-install .hextra-tabs-toggle[data-state="selected"] {
+  color: #FFF8EC !important;
+  border-color: #DCCCAC !important;
+}
+
+.orchard-install [role="tablist"] {
+  border-color: rgba(255, 248, 236, 0.2) !important;
+}
+
+/* `html` outranks the light-mode beige code background rule */
+html .orchard-install .hextra-code-block pre {
+  background: rgba(0, 0, 0, 0.25) !important;
+  border-color: transparent !important;
+}
+
+.orchard-install .hextra-code-block pre,
+.orchard-install .hextra-code-block code,
+.orchard-install .chroma span {
+  color: #FFF8EC !important;
+}
+
+.orchard-install .content a {
+  color: #DCCCAC;
 }
 
 /* Mermaid diagram styling */
@@ -342,8 +578,8 @@ html:not(.dark) .content :where(code):not(:where(.hextra-code-block code, [class
   height: 1.25em;
 }
 
-/* Secondary hero buttons (GitHub, View on GitHub) are set black inline: give
-   them a hover state, and an outline in dark mode where black disappears. */
+/* The secondary hero button (GitHub) is set black inline: give
+   it a hover state, and an outline in dark mode where black disappears. */
 a[style*="background: #000"]:hover {
   background: #262626 !important;
 }

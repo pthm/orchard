@@ -68,7 +68,7 @@ menu:
         icon: github
 
 params:
-  description: Define reproducible application state as code. Compose scenarios in HCL and Orchard builds them — database rows, API calls, scripts — wiring outputs between steps.
+  description: Seed more than your database. Orchard builds application state from reusable HCL components using the tools you already have (databases, APIs, and scripts) for demos, tests, and local development.
 
   navbar:
     displayTitle: false

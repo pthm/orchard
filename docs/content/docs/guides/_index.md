@@ -1,10 +1,7 @@
 ---
 title: Guides
 weight: 30
-bookCollapseSection: true
 ---
-
-# Guides
 
 Task-oriented walkthroughs for common Orchard setups. Each guide presents a
 real-world scenario, shows the HCL that expresses it, and explains the design

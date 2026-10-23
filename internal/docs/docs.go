@@ -39,7 +39,6 @@ func writeFrontMatter(b *strings.Builder, schema protocol.ProviderSchema) {
 }
 
 func writeHeader(b *strings.Builder, schema protocol.ProviderSchema, source string) {
-	fmt.Fprintf(b, "# %s\n\n", schema.Name)
 	fmt.Fprintf(b, "**Source:** `%s`\n\n", source)
 	if schema.Description != "" {
 		b.WriteString(strings.TrimSpace(schema.Description))

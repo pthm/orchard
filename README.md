@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/static/orchard_logo.png" alt="Orchard" width="420">
+  <img src="docs/static/images/orchard-dark.png" alt="Orchard" width="420">
 </p>
 
 <p align="center">

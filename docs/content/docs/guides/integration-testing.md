@@ -3,8 +3,6 @@ title: Integration testing
 weight: 40
 ---
 
-# Integration testing
-
 **Goal.** Shared, versioned setup for your integration test suite. Each test
 needs a predictable slice of the database; Orchard produces that slice from a
 scenario.

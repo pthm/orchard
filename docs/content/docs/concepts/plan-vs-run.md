@@ -3,8 +3,6 @@ title: Plan vs run
 weight: 50
 ---
 
-# Plan vs run
-
 Orchard has two execution modes. They share parsing, validation, and graph
 construction but diverge on how they deal with providers and side effects.
 

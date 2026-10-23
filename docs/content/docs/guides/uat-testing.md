@@ -3,8 +3,6 @@ title: Manual UAT testing
 weight: 20
 ---
 
-# Manual UAT testing
-
 **Goal.** Reproducible test cases for QA and stakeholders. "A subscription with
 three failed payments" should be one command, not a fifteen-minute click-through.
 

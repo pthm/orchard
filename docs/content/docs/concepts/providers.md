@@ -3,8 +3,6 @@ title: Providers
 weight: 30
 ---
 
-# Providers
-
 A **provider** is the runtime that turns a declarative HCL action into a real side
 effect. `builtin/postgres` opens a connection and runs SQL. `builtin/http` makes
 HTTP requests. `builtin/exec` spawns child processes. Custom providers can do

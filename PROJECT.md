@@ -1157,22 +1157,21 @@ pkg/ (public SDK surface)
       schema_probe.go           LoadSchema — short-lived `<binary> schema` probe for plan
 
 docs/                           Hugo site sources (https://orchard.pthm.dev)
-  hugo.yaml                     hugo-book theme; module mount layers content-generated/
+  hugo.yaml                     Hextra theme; module mount layers content-generated/
                                 over content/ so generated provider pages live at the
-                                same URLs as hand-written sections
+                                same URLs as hand-written sections. Also declares the
+                                llms.txt / llms-full.txt / per-page markdown outputs
   content/                      Tracked sections: getting-started, concepts, providers/_index,
                                 providers/external, guides, extending, reference
   content-generated/            (gitignored) Output of `just docs-generate`:
                                 provider pages from schema.hcl + functions reference
                                 from the language registry
-  static/                       Brand assets (orchard_logo.png, favicon),
-                                vendored flexsearch.bundle.min.js
-  assets/                       SCSS overrides (_custom.scss, _variables.scss),
-                                search.js (FlexSearch with heading-level indexing,
-                                breadcrumbs, keyboard nav), search-data.json template
-  layouts/                      Theme overrides: html-head (FlexSearch instead of Fuse),
-                                search (emptied — moved to content-before inject),
-                                content-before (search bar at top of content area)
+  static/                       Brand assets (images/orchard-{dark,light}.png navbar
+                                logos, favicons)
+  assets/css/custom.css         Theme overrides: Orchard palette, warm greys, fonts,
+                                syntax colours, homepage layout
+  layouts/                      Font + footer partials, favicons, and the llms.txt /
+                                markdown-twin templates
 
 test/
   integration/                  Separate go module with testcontainers-go Postgres

@@ -2,8 +2,6 @@
 title: demo
 ---
 
-# demo
-
 **Source:** `builtin/demo`
 
 Demo provider used exclusively by the docs renderer golden test.

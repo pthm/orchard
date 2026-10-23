@@ -1,10 +1,7 @@
 ---
 title: Getting started
 weight: 10
-bookCollapseSection: true
 ---
-
-# Getting started
 
 Three short pages that take you from nothing installed to a working scenario.
 

@@ -1,10 +1,7 @@
 ---
 title: Providers
 weight: 25
-bookCollapseSection: true
 ---
-
-# Providers
 
 Reference documentation for each built-in provider. Every page documents the
 provider's source string, its configuration schema, and every action it supports.

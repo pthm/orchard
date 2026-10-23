@@ -1,9 +1,8 @@
 ---
-title: First scenario
+title: Your first scenario
+linkTitle: First scenario
 weight: 30
 ---
-
-# Your first scenario
 
 This page walks through writing and running a small scenario that inserts a merchant
 row and a product row into Postgres, wiring the merchant's generated ID into the

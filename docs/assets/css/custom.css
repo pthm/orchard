@@ -1,0 +1,358 @@
+/* Orchard brand: forest #546B41 (light), sage #99AD7A (dark).
+   Palette: https://colorhunt.co/palette/546b4199ad7adcccacfff8ec */
+:root {
+  /* Hextra paints the page, navbar and sidebar with this; the original
+     Orchard site's off-white instead of pure white. */
+  --hx-color-white: #FFFEFA;
+  /* ...and this in dark mode: a warm near-black instead of #111. */
+  --hx-color-dark: #1A1915;
+  --primary-hue: 93deg;
+  --primary-saturation: 25%;
+  --primary-lightness: 34%;
+}
+
+.dark {
+  --primary-hue: 84deg;
+  --primary-saturation: 24%;
+  --primary-lightness: 58%;
+}
+
+/* Warm greys: Hextra's gray (blue-tinted), neutral and slate scales remapped
+   to one taupe scale in the hue of the palette's beige #DCCCAC. Borders,
+   muted text, table headers and hover states all draw from these. */
+:root {
+  --hx-color-gray-50: oklch(98.5% 0.003 75);
+  --hx-color-gray-100: oklch(96.8% 0.004 75);
+  --hx-color-gray-200: oklch(92.5% 0.006 75);
+  --hx-color-gray-300: oklch(87% 0.009 75);
+  --hx-color-gray-400: oklch(70.8% 0.014 75);
+  --hx-color-gray-500: oklch(55.3% 0.016 75);
+  --hx-color-gray-600: oklch(44.5% 0.015 75);
+  --hx-color-gray-700: oklch(37.3% 0.014 75);
+  --hx-color-gray-800: oklch(27% 0.011 75);
+  --hx-color-gray-900: oklch(21% 0.009 75);
+  --hx-color-neutral-50: oklch(98.5% 0.003 75);
+  --hx-color-neutral-100: oklch(96.8% 0.004 75);
+  --hx-color-neutral-200: oklch(92.5% 0.006 75);
+  --hx-color-neutral-300: oklch(87% 0.009 75);
+  --hx-color-neutral-400: oklch(70.8% 0.014 75);
+  --hx-color-neutral-500: oklch(55.3% 0.016 75);
+  --hx-color-neutral-600: oklch(44.5% 0.015 75);
+  --hx-color-neutral-700: oklch(37.3% 0.014 75);
+  --hx-color-neutral-800: oklch(27% 0.011 75);
+  --hx-color-neutral-900: oklch(21% 0.009 75);
+  --hx-color-slate-50: oklch(98.5% 0.003 75);
+  --hx-color-slate-100: oklch(96.8% 0.004 75);
+  --hx-color-slate-200: oklch(92.5% 0.006 75);
+  --hx-color-slate-300: oklch(87% 0.009 75);
+  --hx-color-slate-400: oklch(70.8% 0.014 75);
+  --hx-color-slate-500: oklch(55.3% 0.016 75);
+  --hx-color-slate-600: oklch(44.5% 0.015 75);
+  --hx-color-slate-700: oklch(37.3% 0.014 75);
+  --hx-color-slate-800: oklch(27% 0.011 75);
+  --hx-color-slate-900: oklch(21% 0.009 75);
+}
+
+/* Earthy syntax highlighting in place of Hextra's GitHub blues and teals.
+   `html` outranks the theme's own .highlight/.dark .highlight rules. */
+html .highlight .chroma :is(.k, .kc, .kd, .kn, .kp, .kr) { color: #3F5130; font-weight: 700; }
+html .highlight .chroma :is(.kt, .nb, .bp, .nc, .nf, .fm) { color: #8A5A2B; }
+html .highlight .chroma :is(.na, .nv, .vc, .vg, .vi, .no, .nt, .nd) { color: #5E7A45; }
+html .highlight .chroma :is(.s, .s1, .s2, .sa, .sb, .sc, .sd, .se, .sh, .si, .sx, .sr, .ss, .dl) { color: #A74B3D; }
+html .highlight .chroma :is(.m, .mb, .mf, .mh, .mi, .il, .mo) { color: #9A7428; }
+html .highlight .chroma :is(.c, .c1, .ch, .cm, .cp, .cpf, .cs) { color: #8C8676; font-style: italic; }
+html .highlight .chroma .o { color: inherit; font-weight: inherit; }
+/* Chroma's HCL lexer flags heredocs (<<-SQL) as errors; show them as plain text. */
+html .highlight .chroma .err,
+html.dark .highlight .chroma .err { color: inherit; background: none; }
+
+html.dark .highlight .chroma :is(.k, .kc, .kd, .kn, .kp, .kr) { color: #A9BE88; font-weight: 700; }
+html.dark .highlight .chroma :is(.kt, .nb, .bp, .nc, .nf, .fm) { color: #D9A86C; }
+html.dark .highlight .chroma :is(.na, .nv, .vc, .vg, .vi, .no, .nt, .nd) { color: #DCCCAC; }
+html.dark .highlight .chroma :is(.s, .s1, .s2, .sa, .sb, .sc, .sd, .se, .sh, .si, .sx, .sr, .ss, .dl) { color: #E39B84; }
+html.dark .highlight .chroma :is(.m, .mb, .mf, .mh, .mi, .il, .mo) { color: #E3BF6E; }
+html.dark .highlight .chroma :is(.c, .c1, .ch, .cm, .cp, .cpf, .cs) { color: #9A9383; font-style: italic; }
+html.dark .highlight .chroma .o { color: inherit; font-weight: inherit; }
+
+/* Typography: Staatliches for headings, DM Sans for body, JetBrains Mono for code */
+body {
+  font-family: 'DM Sans', -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+}
+
+/* Staatliches ships a single weight and is uppercase by design: keep it at
+   400 so the browser doesn't fake a bold, and open up the tracking. */
+h1, h2, h3, h4 {
+  font-family: 'Staatliches', 'DM Sans', Impact, sans-serif;
+  font-weight: 400 !important;
+  letter-spacing: 0.02em;
+}
+
+code, pre, kbd {
+  font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+}
+
+/* Light mode: warm beige code surfaces to sit on the cream page, as on the
+   original Orchard site, instead of Hextra's cool grey. */
+html:not(.dark) .hextra-code-block pre,
+html:not(.dark) .content :where(code):not(:where(.hextra-code-block code, [class~=not-prose], [class~=not-prose] *)) {
+  background-color: rgba(220, 204, 172, 0.3) !important;
+}
+
+/* The sidebar and TOC footers fade content out with a shadow hardcoded to
+   #111; match it to the warm dark background. */
+.dark .hx\:sticky.hx\:dark\:bg-dark {
+  box-shadow: 0 -12px 16px var(--hx-color-dark) !important;
+}
+
+/* Slightly rounded corners: tighten Hextra's radius scale so cards, code
+   blocks and inputs share a small, consistent radius. rounded-full (dots,
+   toggles) is left alone. */
+:root {
+  --hx-radius-xs: 2px;
+  --hx-radius-sm: 3px;
+  --hx-radius-md: 4px;
+  --hx-radius-lg: 6px;
+  --hx-radius-xl: 6px;
+  --hx-radius-3xl: 8px;
+}
+
+/* Hero buttons are pills in Hextra; square them off to match */
+.homepage-hero-buttons a {
+  border-radius: var(--hx-radius-lg) !important;
+}
+
+/* Dark mode: white on sage is ~3.3:1, so use ink text on the primary button */
+.dark .homepage-hero-buttons a:not([style]) {
+  color: #1C1C1A;
+}
+
+/* Sidebar: always expanded, no collapsing */
+.hextra-sidebar-container li > .hextra-sidebar-children {
+  height: auto !important;
+  padding-top: 0.25rem !important;
+  overflow: visible !important;
+}
+
+.hextra-sidebar-collapsible-button {
+  display: none !important;
+}
+
+/* Homepage hero: text, and on wide screens a scenario example */
+.homepage-hero {
+  width: 100%;
+  padding-top: 3rem;
+  padding-bottom: 3.5rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3rem;
+  align-items: center;
+}
+
+@media (min-width: 1024px) {
+  .homepage-hero {
+    padding-top: 3.5rem;
+    padding-bottom: 4.5rem;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    gap: 4rem;
+  }
+}
+
+.homepage-hero-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.homepage-hero-demo {
+  border-radius: var(--hx-radius-3xl);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: var(--hx-color-white);
+  padding: 0.25rem 1.25rem 1.25rem;
+  box-shadow: 0 18px 40px -24px rgba(0, 0, 0, 0.35);
+}
+
+.dark .homepage-hero-demo {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: var(--hx-color-dark);
+  box-shadow: none;
+}
+
+.homepage-hero-demo .hextra-code-block {
+  margin-top: 0;
+}
+
+.homepage-hero-demo pre {
+  margin: 0 !important;
+  font-size: 0.8125rem;
+}
+
+.homepage-demo-label {
+  margin: 1rem 0 0.5rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+
+/* Homepage section spacing */
+.homepage-section-gap {
+  margin-top: 5rem;
+}
+
+@media (min-width: 768px) {
+  .homepage-section-gap {
+    margin-top: 7rem;
+  }
+}
+
+/* Homepage get started panel: text and buttons beside the install commands */
+.homepage-cta {
+  border-radius: var(--hx-radius-3xl);
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2.5rem;
+  align-items: center;
+  padding: 2.5rem 1.5rem;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: hsl(var(--primary-hue) var(--primary-saturation) var(--primary-lightness) / 0.04);
+}
+
+.dark .homepage-cta {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: hsl(var(--primary-hue) var(--primary-saturation) var(--primary-lightness) / 0.06);
+}
+
+@media (min-width: 1024px) {
+  .homepage-cta {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 4rem;
+    padding: 3.5rem;
+  }
+}
+
+.homepage-cta-lead {
+  margin: 1.25rem 0 2rem;
+  max-width: 32rem;
+  font-size: 1.125rem;
+  line-height: 1.7;
+  opacity: 0.8;
+}
+
+/* Feature cards: icon in the brand colour, and a visible hover since every
+   card links to its docs */
+.hextra-feature-card {
+  background: rgba(0, 0, 0, 0.015);
+  transition: border-color 0.15s ease, background-color 0.15s ease, transform 0.15s ease;
+}
+
+.dark .hextra-feature-card {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.hextra-feature-card:hover {
+  border-color: hsl(var(--primary-hue) var(--primary-saturation) var(--primary-lightness) / 0.6) !important;
+  background: hsl(var(--primary-hue) var(--primary-saturation) var(--primary-lightness) / 0.04);
+  transform: translateY(-2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hextra-feature-card:hover {
+    transform: none;
+  }
+}
+
+.hextra-feature-card h3 {
+  font-size: 1.375rem;
+}
+
+.hextra-feature-card h3 svg {
+  color: hsl(var(--primary-hue) var(--primary-saturation) var(--primary-lightness));
+}
+
+/* Mermaid diagram styling */
+.mermaid .node rect,
+.mermaid .node polygon,
+.mermaid .node circle {
+  fill: #eef1e6 !important;
+  stroke: #546B41 !important;
+  stroke-width: 1.5px !important;
+}
+
+.mermaid .node .label,
+.mermaid .nodeLabel {
+  color: #1a1a1a !important;
+}
+
+.mermaid .edgePath .path {
+  stroke: #546B41 !important;
+  stroke-width: 1.5px !important;
+}
+
+.mermaid .arrowheadPath,
+.mermaid marker path {
+  fill: #546B41 !important;
+  stroke: #546B41 !important;
+}
+
+.dark .mermaid .node rect,
+.dark .mermaid .node polygon,
+.dark .mermaid .node circle {
+  fill: rgba(153, 173, 122, 0.15) !important;
+  stroke: #99AD7A !important;
+}
+
+.dark .mermaid .node .label,
+.dark .mermaid .nodeLabel {
+  color: #e5e5e5 !important;
+}
+
+.dark .mermaid .edgePath .path {
+  stroke: #99AD7A !important;
+}
+
+.dark .mermaid .arrowheadPath,
+.dark .mermaid marker path {
+  fill: #99AD7A !important;
+  stroke: #99AD7A !important;
+}
+
+/* Align custom footer section with the rest of the layout */
+.hextra-custom-footer {
+  margin-left: auto;
+  margin-right: auto;
+  padding-top: 1.5rem;
+  padding-bottom: 0.75rem;
+}
+
+/* Reduce spacing on the powered-by section below */
+.hextra-custom-footer + div {
+  padding-top: 0;
+  padding-bottom: 1.5rem;
+}
+
+.orchard-footer-bridge {
+  display: inline-flex;
+  color: hsl(var(--primary-hue) var(--primary-saturation) var(--primary-lightness));
+}
+
+.orchard-footer-bridge svg {
+  width: 1.25em;
+  height: 1.25em;
+}
+
+/* Secondary hero buttons (GitHub, View on GitHub) are set black inline: give
+   them a hover state, and an outline in dark mode where black disappears. */
+a[style*="background: #000"]:hover {
+  background: #262626 !important;
+}
+
+.dark a[style*="background: #000"] {
+  background: transparent !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+
+.dark a[style*="background: #000"]:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+}

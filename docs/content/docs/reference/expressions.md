@@ -1,9 +1,8 @@
 ---
-title: Expressions
+title: Expression reference
+linkTitle: Expressions
 weight: 30
 ---
-
-# Expression reference
 
 Orchard uses HCL expressions with a cty type system. This page covers the
 reference namespaces, type expressions, and available functions.

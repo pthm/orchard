@@ -3,8 +3,6 @@ title: External providers
 weight: 40
 ---
 
-# External providers
-
 External providers are binaries that live outside the `orchard` tree and speak
 Orchard's [provider protocol](../../extending/provider-protocol/) over stdio.
 Scenarios use them exactly like built-in providers — the only difference is the

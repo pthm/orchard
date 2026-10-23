@@ -1,10 +1,7 @@
 ---
 title: Reference
 weight: 50
-bookCollapseSection: true
 ---
-
-# Reference
 
 Exhaustive reference for Orchard's CLI, HCL schema, expression language, and
 function library.

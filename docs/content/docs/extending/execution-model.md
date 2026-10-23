@@ -3,8 +3,6 @@ title: Execution model
 weight: 20
 ---
 
-# Execution model
-
 A provider is a process. Orchard starts it, talks to it, and stops it. This page
 documents that lifecycle in detail so you know exactly what your provider code
 has to handle.

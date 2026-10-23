@@ -1,11 +1,9 @@
 ---
 title: Documentation
 weight: 1
-bookFlatSection: false
-bookToc: false
+cascade:
+  type: docs
 ---
-
-# Documentation
 
 Orchard is a state orchestration tool for dev, test, and demo environments. These docs
 walk through installing the CLI, authoring scenarios, and extending Orchard with custom

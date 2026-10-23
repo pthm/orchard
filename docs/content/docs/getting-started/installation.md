@@ -3,8 +3,6 @@ title: Installation
 weight: 10
 ---
 
-# Installation
-
 Orchard ships as a single Go binary. There is no daemon, no server, and no database
 of its own — it reads HCL files and talks to the systems you configure.
 

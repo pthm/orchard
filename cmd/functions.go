@@ -54,8 +54,6 @@ func printFunctionsMarkdown(cmd *cobra.Command, hugo bool) error {
 		fmt.Fprintln(out, "weight: 30")
 		fmt.Fprintln(out, "---")
 		fmt.Fprintln(out)
-		fmt.Fprintln(out, "# Functions")
-		fmt.Fprintln(out)
 		fmt.Fprintf(out, "Orchard exposes %d functions in every expression — variable defaults,\n", len(language.All()))
 		fmt.Fprintln(out, "provider configs, component inputs, action attributes, scenario outputs,")
 		fmt.Fprintln(out, "component outputs, and teardown bodies. All names use lowercase compound")

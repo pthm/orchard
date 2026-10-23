@@ -1,6 +1,5 @@
 baseURL: https://orchard.pthm.dev/
 title: Orchard
-languageCode: en-us
 defaultContentLanguage: en
 
 enableGitInfo: true
@@ -9,7 +8,7 @@ disablePathToLower: true
 
 module:
   imports:
-    - path: github.com/alex-shpak/hugo-book
+    - path: github.com/imfing/hextra
   hugoVersion:
     extended: true
     min: "0.158.0"
@@ -31,26 +30,47 @@ markup:
     startLevel: 2
     endLevel: 3
   highlight:
-    style: github
-    noClasses: true
-    lineNos: false
-    tabWidth: 2
-
-params:
-  BookTheme: light
-  BookToC: true
-  BookSection: docs
-  BookLogo: orchard_logo.png
-  BookFavicon: favicon.svg
-  BookRepo: https://github.com/pthm/orchard
-  BookEditLink: "{{ .Site.Params.BookRepo }}/edit/main/docs/content/{{ .Path }}"
-  BookEditLinkText: Edit this page
-  BookSearch: true
-  BookComments: false
-  BookDateFormat: "January 2, 2006"
+    noClasses: false
 
 menu:
-  after:
+  main:
+    - name: Documentation
+      pageRef: /docs
+      weight: 1
+    - name: Search
+      weight: 2
+      params:
+        type: search
     - name: GitHub
-      url: https://github.com/pthm/orchard
-      weight: 10
+      weight: 3
+      url: "https://github.com/pthm/orchard"
+      params:
+        icon: github
+
+params:
+  description: Define reproducible application state as code. Compose scenarios in HCL and Orchard builds them — database rows, API calls, scripts — wiring outputs between steps.
+
+  navbar:
+    displayTitle: false
+    displayLogo: true
+    logo:
+      path: images/orchard-dark.png
+      dark: images/orchard-light.png
+      width: 124
+      height: 24
+    width: wide
+
+  page:
+    width: wide
+
+  footer:
+    displayCopyright: false
+    displayPoweredBy: true
+    width: wide
+
+  editURL:
+    enable: true
+    base: "https://github.com/pthm/orchard/edit/main/docs/content"
+
+  comments:
+    enable: false

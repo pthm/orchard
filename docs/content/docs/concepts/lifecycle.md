@@ -3,8 +3,6 @@ title: Lifecycle and teardown
 weight: 60
 ---
 
-# Lifecycle and teardown
-
 Orchard creates state. Good tools also clean it up. Every `orchard run` writes
 a **run record** describing what happened; `orchard teardown` uses that record
 to reverse it.

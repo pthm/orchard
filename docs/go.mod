@@ -2,4 +2,6 @@ module github.com/pthm/orchard/docs
 
 go 1.25.0
 
-require github.com/alex-shpak/hugo-book v0.0.0-20260408113943-97d7ee40edf1 // indirect
+require (
+	github.com/imfing/hextra v0.13.0 // indirect
+)

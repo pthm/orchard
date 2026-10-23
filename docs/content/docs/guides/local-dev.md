@@ -3,8 +3,6 @@ title: Local development environments
 weight: 30
 ---
 
-# Local development environments
-
 **Goal.** New engineers clone the repo, run one command, and have a working local
 database with enough data to develop against. No "ask Slack for a SQL dump."
 

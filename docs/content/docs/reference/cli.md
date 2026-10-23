@@ -1,9 +1,8 @@
 ---
-title: CLI
+title: CLI reference
+linkTitle: CLI
 weight: 10
 ---
-
-# CLI reference
 
 ```
 orchard <command> [arguments] [flags]

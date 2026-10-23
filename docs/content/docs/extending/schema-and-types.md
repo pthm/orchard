@@ -3,8 +3,6 @@ title: Schema and types
 weight: 30
 ---
 
-# Schema and types
-
 A provider's schema is its contract with Orchard. It describes what configuration
 the provider accepts, what action types it handles, and what each action's
 attributes and outputs look like. Orchard uses the schema to type-check scenarios

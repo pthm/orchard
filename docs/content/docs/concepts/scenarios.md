@@ -3,8 +3,6 @@ title: Scenarios
 weight: 10
 ---
 
-# Scenarios
-
 A **scenario** is the top-level entrypoint in Orchard. It is the thing a user runs.
 A scenario declares the providers it needs, accepts parameters via variables,
 composes components and actions, and exposes outputs.

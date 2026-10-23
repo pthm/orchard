@@ -3,8 +3,6 @@ title: Composing components
 weight: 50
 ---
 
-# Composing components
-
 **Goal.** Break a large scenario down into reusable components. Think of
 components like functions: small, well-named, tested in isolation, reused across
 scenarios.

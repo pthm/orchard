@@ -1,9 +1,0 @@
-/*
- * Override hugo-book SCSS variables here. Imported after _defaults.scss,
- * so these win over the theme's !default values.
- */
-
-// Wider container so body content has room to breathe when the right-hand
-// TOC is visible. 16rem menu + body + 16rem toc + padding fits comfortably
-// inside 96rem on typical desktop displays.
-$container-max-width: 96rem;

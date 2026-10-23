@@ -3,8 +3,6 @@ title: Components
 weight: 20
 ---
 
-# Components
-
 A **component** is a reusable unit of state. It's the Orchard equivalent of a
 function: it takes inputs, performs some work, and returns outputs. Scenarios
 compose components to describe complex state without repeating themselves.

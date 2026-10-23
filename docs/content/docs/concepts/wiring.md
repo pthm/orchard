@@ -3,8 +3,6 @@ title: Wiring
 weight: 40
 ---
 
-# Wiring
-
 **Wiring** is how outputs from one step flow into the inputs of the next, and how
 Orchard decides the order to execute steps in. You never write a graph by hand —
 you write references in expressions, and Orchard derives the graph from them.

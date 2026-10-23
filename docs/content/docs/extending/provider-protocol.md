@@ -3,8 +3,6 @@ title: Provider protocol
 weight: 10
 ---
 
-# Provider protocol
-
 Orchard and its providers communicate using a line-oriented JSON protocol over
 stdio. This page defines the wire format. If you're writing a provider, these are
 the exact bytes you need to read and write.

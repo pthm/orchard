@@ -1,9 +1,8 @@
 ---
-title: HCL schema
+title: HCL schema reference
+linkTitle: HCL schema
 weight: 20
 ---
-
-# HCL schema reference
 
 Every block and attribute Orchard's parser accepts. The two authoring contexts
 are **scenario files** and **component files**.

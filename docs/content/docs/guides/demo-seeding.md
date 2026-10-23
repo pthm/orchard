@@ -3,8 +3,6 @@ title: Seeding a demo environment
 weight: 10
 ---
 
-# Seeding a demo environment
-
 **Goal.** Produce a database that tells a compelling story when someone opens the
 product. Not just rows — a believable narrative: customers with histories, orders
 with realistic timing, payments with a mix of outcomes.

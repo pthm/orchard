@@ -1,9 +1,8 @@
 ---
-title: Publishing
+title: Publishing a provider
+linkTitle: Publishing
 weight: 50
 ---
-
-# Publishing a provider
 
 Once your provider works, users need a way to install and use it. Today that
 means: give them a binary and have them reference it by path. A registry is

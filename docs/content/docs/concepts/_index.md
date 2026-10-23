@@ -1,10 +1,7 @@
 ---
 title: Concepts
 weight: 20
-bookCollapseSection: true
 ---
-
-# Concepts
 
 Orchard has a small vocabulary. Learn these terms and the rest of the system
 follows naturally.

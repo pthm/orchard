@@ -1,10 +1,7 @@
 ---
 title: Extending Orchard
 weight: 40
-bookCollapseSection: true
 ---
-
-# Extending Orchard
 
 Orchard's built-in providers (`postgres`, `http`, `exec`) cover a lot of common
 ground, but they won't cover everything. When you need to drive a system Orchard

@@ -3,8 +3,6 @@ title: Setup
 weight: 20
 ---
 
-# Setup
-
 Orchard is configuration-free: there is no global config file, no workspace init, and
 no state directory. A project is just a directory of `.hcl` files.
 

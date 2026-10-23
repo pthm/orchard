@@ -1,9 +1,8 @@
 ---
-title: Writing a provider
+title: Writing a provider in Go
+linkTitle: Writing a provider
 weight: 40
 ---
-
-# Writing a provider in Go
 
 This page walks through building a small custom provider end-to-end. The
 provider, `echo`, has two actions:

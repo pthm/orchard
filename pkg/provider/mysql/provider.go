@@ -161,7 +161,7 @@ var _ provider.ActionPlanner = (*Provider)(nil)
 
 // PlanAction checks a typed action before the run: against the live
 // schema after Configure, or the snapshot during `orchard plan`.
-func (p *Provider) PlanAction(ctx context.Context, action string, attrs map[string]cty.Value) (cty.Type, error) {
+func (p *Provider) PlanAction(ctx context.Context, action string, attrs map[string]cty.Value) (provider.Plan, error) {
 	return sqlcrud.PlanAction(ctx, p.typed, "mysql", action, attrs)
 }
 

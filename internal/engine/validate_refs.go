@@ -49,6 +49,7 @@ import (
 func (e *Engine) ValidateReferences(runCtx context.Context, ps *parser.ParsedScenario, g *graph.Graph) error {
 	e.planTypes = map[graph.NodeID]cty.Type{}
 	e.unchecked = map[string]bool{}
+	e.hints = nil
 
 	// Typed contexts are rebuilt only when a planner adds a type.
 	var ctx *hcl.EvalContext
@@ -161,13 +162,24 @@ func (e *Engine) planAction(runCtx context.Context, evalCtx *hcl.EvalContext, no
 	if err != nil {
 		return cty.DynamicPseudoType, err
 	}
-	t, err := planner.PlanAction(runCtx, route.actionName, attrs)
+	plan, err := planner.PlanAction(runCtx, route.actionName, attrs)
 	if errors.Is(err, provider.ErrNoSchema) {
 		e.unchecked[route.providerAlias] = true
 		return cty.DynamicPseudoType, nil
 	}
-	return t, err
+	if err != nil {
+		return cty.DynamicPseudoType, err
+	}
+	loc := string(node.ID) + formatSourceLoc(node.SourceRange)
+	for _, h := range plan.Hints {
+		e.hints = append(e.hints, loc+": "+h)
+	}
+	return plan.Outputs, nil
 }
+
+// Hints returns the non-fatal hints planners reported during the last
+// ValidateReferences, each prefixed with its action and location.
+func (e *Engine) Hints() []string { return e.hints }
 
 // UncheckedProviders lists, in order, the providers whose actions the
 // last ValidateReferences couldn't check for want of a schema (no

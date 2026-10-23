@@ -976,7 +976,7 @@ User guide: [Typed database actions](docs/content/docs/guides/typed-database-act
 | Validation against the live schema before `orchard run` executes anything | Done |
 | Plan-time validation and typed outputs from snapshots, including inside components | Done |
 | Snapshot drift: `run` warns when a snapshot is out of date; `schema pull --check` for CI | Done |
-| Foreign key reference hints | Not started |
+| Foreign key reference hints (`orchard plan` hints on fixed foreign keys) | Done |
 
 ### Milestone 5: Lifecycle and Teardown
 

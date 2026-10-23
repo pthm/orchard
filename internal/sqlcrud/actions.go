@@ -37,6 +37,9 @@ type Actions struct {
 
 	mu     sync.Mutex
 	schema *dbschema.Schema
+	// planned records the tables typed inserts were planned into, in
+	// plan order, for foreign-key hints.
+	planned map[string]bool
 }
 
 // FromSnapshot builds plan-only Actions from a "database" snapshot,
@@ -58,12 +61,12 @@ func FromSnapshot(prefix string, d Dialect, dialect string, snap *snapshot.Snaps
 // PlanAction implements provider.ActionPlanner for a provider whose
 // typed actions are a (nil before Configure or a snapshot). Actions
 // that aren't typed have nothing to check.
-func PlanAction(ctx context.Context, a *Actions, prefix, action string, attrs map[string]cty.Value) (cty.Type, error) {
+func PlanAction(ctx context.Context, a *Actions, prefix, action string, attrs map[string]cty.Value) (provider.Plan, error) {
 	if _, ok := Verb(prefix, action); !ok {
-		return cty.DynamicPseudoType, nil
+		return provider.Plan{}, nil
 	}
 	if a == nil {
-		return cty.DynamicPseudoType, provider.ErrNoSchema
+		return provider.Plan{}, provider.ErrNoSchema
 	}
 	return a.Plan(ctx, action, attrs)
 }
@@ -87,37 +90,90 @@ func Verb(prefix, action string) (string, bool) {
 }
 
 // Plan checks a typed action before the run and returns its output
-// type: for an insert, an object of the table's columns. Against the
-// live database a table that doesn't exist yet is skipped, because an
-// earlier action in the scenario may create it (Execute checks again);
-// against a snapshot (Strict) it's an error.
-func (a *Actions) Plan(ctx context.Context, action string, attrs map[string]cty.Value) (cty.Type, error) {
+// type (for an insert, an object of the table's columns) and any hints.
+// Against the live database a table that doesn't exist yet is skipped,
+// because an earlier action in the scenario may create it (Execute
+// checks again); against a snapshot (Strict) it's an error.
+func (a *Actions) Plan(ctx context.Context, action string, attrs map[string]cty.Value) (provider.Plan, error) {
 	verb, _ := a.Verb(action)
 	table := attrs["table"]
 	if !table.IsKnown() || table.IsNull() {
-		return cty.DynamicPseudoType, nil
+		return provider.Plan{}, nil
 	}
 	s, err := a.load(ctx, false)
 	if err != nil {
-		return cty.DynamicPseudoType, err
+		return provider.Plan{}, err
 	}
 	t, err := s.Lookup(table.AsString())
 	if errors.Is(err, dbschema.ErrNoTable) && !a.Strict {
-		return cty.DynamicPseudoType, nil
+		return provider.Plan{}, nil
 	}
 	if err != nil {
 		if a.Strict {
-			return cty.DynamicPseudoType, fmt.Errorf("%w in the schema snapshot; if an earlier action creates it, run the scenario once and re-run \"orchard schema pull\"", err)
+			return provider.Plan{}, fmt.Errorf("%w in the schema snapshot; if an earlier action creates it, run the scenario once and re-run \"orchard schema pull\"", err)
 		}
-		return cty.DynamicPseudoType, err
+		return provider.Plan{}, err
 	}
 	if err := check(verb, t, attrs); err != nil {
-		return cty.DynamicPseudoType, err
+		return provider.Plan{}, err
 	}
-	if verb != "insert" {
-		return cty.DynamicPseudoType, nil // the action schema declares update/delete outputs
+
+	var plan provider.Plan
+	switch verb {
+	case "insert":
+		plan.Hints = a.foreignKeyHints(t, attrs["values"])
+		plan.Outputs = a.rowType(t)
+		a.mu.Lock()
+		if a.planned == nil {
+			a.planned = map[string]bool{}
+		}
+		a.planned[t.Key()] = true
+		a.mu.Unlock()
+	case "update":
+		plan.Hints = a.foreignKeyHints(t, attrs["set"])
 	}
-	return a.rowType(t), nil
+	return plan, nil
+}
+
+// foreignKeyHints flags single-column foreign keys set to a fixed
+// value when the referenced table is inserted into earlier in the
+// scenario: the author most likely meant to reference that insert's
+// output, and a fixed id would point at whatever row happens to have it.
+// ponytail: single-column keys only; composite foreign keys are rare in
+// seed data.
+func (a *Actions) foreignKeyHints(t *dbschema.Table, values cty.Value) []string {
+	ty := values.Type()
+	if !values.IsKnown() || values.IsNull() || (!ty.IsObjectType() && !ty.IsMapType()) {
+		return nil
+	}
+	fields := values.AsValueMap()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var hints []string
+	for _, fk := range t.ForeignKeys {
+		if len(fk.Columns) != 1 || len(fk.ReferencedColumns) != 1 || !a.planned[fk.References] {
+			continue
+		}
+		v, ok := fields[fk.Columns[0]]
+		if !ok || !v.IsWhollyKnown() || v.IsNull() {
+			continue
+		}
+		hints = append(hints, fmt.Sprintf(
+			"%s is set to a fixed value (%s), but it references %s.%s, which this scenario inserts into earlier; did you mean that insert's output, e.g. action.%s_insert.<name>.%s?",
+			fk.Columns[0], displayValue(v), fk.References, fk.ReferencedColumns[0], a.Prefix, fk.ReferencedColumns[0]))
+	}
+	return hints
+}
+
+func displayValue(v cty.Value) string {
+	switch v.Type() {
+	case cty.String:
+		return fmt.Sprintf("%q", v.AsString())
+	case cty.Number:
+		return v.AsBigFloat().Text('f', -1)
+	default:
+		return v.Type().FriendlyName()
+	}
 }
 
 // rowType is the output type of an insert into t: an object of its

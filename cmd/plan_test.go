@@ -120,3 +120,43 @@ func TestPlanChecksTypedActionsFromSnapshot(t *testing.T) {
 		}
 	})
 }
+
+func TestPlanForeignKeyHint(t *testing.T) {
+	project := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(project, ".orchard"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	createDB(t, filepath.Join(project, "shop.db"), `
+		CREATE TABLE merchants (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+		CREATE TABLE products (id INTEGER PRIMARY KEY, merchant_id INTEGER NOT NULL REFERENCES merchants(id), name TEXT NOT NULL);`)
+	path := filepath.Join(project, "shop.hcl")
+	writeFile(t, path, `scenario "shop" {
+  required_providers {
+    db = { source = "builtin/sqlite" }
+  }
+  provider "db" {
+    path = "./shop.db"
+  }
+  action "sqlite_insert" "merchant" {
+    table  = "merchants"
+    values = { name = "Acme" }
+  }
+  action "sqlite_insert" "product" {
+    depends_on = [action.sqlite_insert.merchant]
+    table      = "products"
+    values     = { merchant_id = 1, name = "Widget" }
+  }
+}
+`)
+	if out, err := runCLI(t, "schema", "pull", path); err != nil {
+		t.Fatalf("pull: %v\n%s", err, out)
+	}
+	out, err := runCLI(t, "plan", path, "--no-color")
+	if err != nil {
+		t.Fatalf("a hint mustn't fail the plan: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "hint: action.sqlite_insert.product (") || !strings.Contains(out, "shop.hcl:12)") ||
+		!strings.Contains(out, "merchant_id is set to a fixed value (1), but it references merchants.id") {
+		t.Fatalf("expected a foreign-key hint:\n%s", out)
+	}
+}

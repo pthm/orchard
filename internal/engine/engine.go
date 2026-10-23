@@ -60,6 +60,7 @@ type Engine struct {
 	// had no schema to check against.
 	planTypes map[graph.NodeID]cty.Type
 	unchecked map[string]bool
+	hints     []string
 
 	// undos holds, during Execute, the undo invocation each succeeded
 	// action's provider described (see provider.Inverter).

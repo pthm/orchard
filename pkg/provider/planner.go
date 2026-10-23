@@ -17,15 +17,25 @@ import (
 //
 // attrs are the action's evaluated attributes. Values that depend on
 // other actions' outputs aren't known yet and are cty unknowns, of a
-// known type where one can be inferred. PlanAction returns the type of
-// the action's outputs, or cty.DynamicPseudoType when it can't say; a
-// concrete type lets references to the outputs be type-checked.
+// known type where one can be inferred. PlanAction returns what it
+// learned in a Plan; an error means the action is invalid.
 //
 // A provider with nothing to check an action against (no snapshot at
 // plan time) returns an error wrapping ErrNoSchema; the engine treats
 // that as "unchecked", not as a failure.
 type ActionPlanner interface {
-	PlanAction(ctx context.Context, action string, attrs map[string]cty.Value) (cty.Type, error)
+	PlanAction(ctx context.Context, action string, attrs map[string]cty.Value) (Plan, error)
+}
+
+// Plan is what an ActionPlanner learned about one action.
+type Plan struct {
+	// Outputs is the type of the action's outputs, or
+	// cty.DynamicPseudoType (or the zero Type) when it can't say. A
+	// concrete type lets references to the outputs be type-checked.
+	Outputs cty.Type
+	// Hints are non-fatal observations worth showing the author, such
+	// as a foreign key set to a fixed value. `orchard plan` prints them.
+	Hints []string
 }
 
 // ErrNoSchema is returned (wrapped) by PlanAction when a provider has

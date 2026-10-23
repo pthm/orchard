@@ -24,6 +24,8 @@ type planningProvider struct {
 	fail    error
 	// rowType is returned as every action's output type.
 	rowType cty.Type
+	// hints are returned for every action.
+	hints []string
 }
 
 func (p *planningProvider) Schema() protocol.ProviderSchema {
@@ -43,15 +45,15 @@ func (p *planningProvider) Execute(context.Context, string, map[string]cty.Value
 }
 func (p *planningProvider) Close() error { return nil }
 
-func (p *planningProvider) PlanAction(_ context.Context, action string, attrs map[string]cty.Value) (cty.Type, error) {
+func (p *planningProvider) PlanAction(_ context.Context, action string, attrs map[string]cty.Value) (provider.Plan, error) {
 	if p.planned == nil {
 		p.planned = map[string]map[string]cty.Value{}
 	}
 	p.planned[attrs["table"].AsString()] = attrs
 	if p.fail != nil {
-		return cty.DynamicPseudoType, p.fail
+		return provider.Plan{}, p.fail
 	}
-	return p.rowType, nil
+	return provider.Plan{Outputs: p.rowType, Hints: p.hints}, nil
 }
 
 var _ provider.ActionPlanner = (*planningProvider)(nil)

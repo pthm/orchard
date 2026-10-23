@@ -86,6 +86,9 @@ func newPlanCmd() *cobra.Command {
 			out := cmd.OutOrStdout()
 			planview.Render(out, ps, g, providerOf)
 			planview.RenderSuccess(out)
+			for _, h := range eng.Hints() {
+				fmt.Fprintf(cmd.ErrOrStderr(), "hint: %s\n", h)
+			}
 			for _, alias := range eng.UncheckedProviders() {
 				fmt.Fprintf(cmd.ErrOrStderr(),
 					"note: no schema snapshot for provider %q, so its typed actions weren't checked against the database; run \"orchard schema pull %s\" to check them here\n",

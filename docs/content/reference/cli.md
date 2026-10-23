@@ -142,6 +142,10 @@ Plan never calls `configure` or `execute` on any provider, and never connects
 to a database; snapshots are read from disk. It is safe to run against a
 scenario that points at a production system.
 
+Plan also prints hints, which never fail it: for instance when a typed action
+sets a foreign key to a fixed value although the scenario inserts into the
+referenced table earlier.
+
 If a provider has typed actions but no snapshot, plan skips those checks and
 prints a note saying so. `orchard run` always checks typed actions against the
 live database before executing anything.

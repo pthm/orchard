@@ -149,6 +149,17 @@ nearest `.orchard/` directory above the scenario. Then:
   scenario first ran, so plan reports it missing. Run the scenario once and
   re-pull.
 
+Plan also points out a likely mistake that isn't an error: a foreign key set to
+a fixed value when the scenario inserts into the referenced table earlier. A
+fixed id points at whichever row happens to have it, not the one you just made:
+
+```
+hint: action.postgres_insert.product (scenario.hcl:12): merchant_id is set to a fixed value (1), but it references merchants.id, which this scenario inserts into earlier; did you mean that insert's output, e.g. action.postgres_insert.<name>.id?
+```
+
+Hints never fail the plan; a fixed id is fine when it's meant to point at
+existing reference data.
+
 Without a snapshot, plan still passes and says what it skipped:
 
 ```

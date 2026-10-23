@@ -1,0 +1,224 @@
+{
+  "dialect": "postgres",
+  "database": "orchard_test",
+  "default_schema": "public",
+  "tables": {
+    "introspect.events": {
+      "schema": "introspect",
+      "name": "events",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "kind": "integer",
+          "nullable": false
+        },
+        {
+          "name": "at",
+          "type": "timestamp with time zone",
+          "kind": "timestamp",
+          "nullable": false
+        }
+      ]
+    },
+    "introspect.merchants": {
+      "schema": "introspect",
+      "name": "merchants",
+      "comment": "Sellers on the platform",
+      "columns": [
+        {
+          "name": "id",
+          "type": "integer",
+          "kind": "integer",
+          "nullable": false,
+          "has_default": true,
+          "generated": "identity"
+        },
+        {
+          "name": "legacy_id",
+          "type": "bigint",
+          "kind": "integer",
+          "nullable": false,
+          "has_default": true
+        },
+        {
+          "name": "name",
+          "type": "character varying(100)",
+          "kind": "text",
+          "nullable": false
+        },
+        {
+          "name": "slug",
+          "type": "text",
+          "kind": "text",
+          "nullable": true,
+          "has_default": true,
+          "generated": "stored"
+        },
+        {
+          "name": "region",
+          "type": "introspect.region",
+          "kind": "enum",
+          "nullable": false,
+          "has_default": true,
+          "enum": [
+            "us",
+            "eu",
+            "apac"
+          ],
+          "comment": "Billing region"
+        },
+        {
+          "name": "contact",
+          "type": "introspect.email",
+          "kind": "text",
+          "nullable": true
+        },
+        {
+          "name": "balance",
+          "type": "numeric(10,2)",
+          "kind": "decimal",
+          "nullable": false,
+          "has_default": true
+        },
+        {
+          "name": "rating",
+          "type": "double precision",
+          "kind": "float",
+          "nullable": true
+        },
+        {
+          "name": "active",
+          "type": "boolean",
+          "kind": "boolean",
+          "nullable": false,
+          "has_default": true
+        },
+        {
+          "name": "settings",
+          "type": "jsonb",
+          "kind": "json",
+          "nullable": true
+        },
+        {
+          "name": "tags",
+          "type": "text[]",
+          "kind": "other",
+          "nullable": true
+        },
+        {
+          "name": "external_id",
+          "type": "uuid",
+          "kind": "uuid",
+          "nullable": true
+        },
+        {
+          "name": "logo",
+          "type": "bytea",
+          "kind": "binary",
+          "nullable": true
+        },
+        {
+          "name": "opened_on",
+          "type": "date",
+          "kind": "date",
+          "nullable": true
+        },
+        {
+          "name": "opens_at",
+          "type": "time without time zone",
+          "kind": "time",
+          "nullable": true
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "kind": "timestamp",
+          "nullable": false,
+          "has_default": true
+        },
+        {
+          "name": "open_for",
+          "type": "interval",
+          "kind": "other",
+          "nullable": true
+        }
+      ],
+      "primary_key": [
+        "id"
+      ]
+    },
+    "introspect.product_tags": {
+      "schema": "introspect",
+      "name": "product_tags",
+      "columns": [
+        {
+          "name": "product_id",
+          "type": "integer",
+          "kind": "integer",
+          "nullable": false
+        },
+        {
+          "name": "tag",
+          "type": "text",
+          "kind": "text",
+          "nullable": false
+        }
+      ],
+      "primary_key": [
+        "product_id",
+        "tag"
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "product_id"
+          ],
+          "references": "introspect.products",
+          "referenced_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "introspect.products": {
+      "schema": "introspect",
+      "name": "products",
+      "columns": [
+        {
+          "name": "id",
+          "type": "integer",
+          "kind": "integer",
+          "nullable": false,
+          "has_default": true
+        },
+        {
+          "name": "merchant_id",
+          "type": "integer",
+          "kind": "integer",
+          "nullable": false
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "kind": "text",
+          "nullable": false
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "merchant_id"
+          ],
+          "references": "introspect.merchants",
+          "referenced_columns": [
+            "id"
+          ]
+        }
+      ]
+    }
+  }
+}

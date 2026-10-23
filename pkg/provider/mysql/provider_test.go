@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/zclconf/go-cty/cty"
+
+	"github.com/pthm/orchard/pkg/dbschema"
 )
 
 // These tests cover what needs no server: schema, config and DSN
@@ -145,5 +147,45 @@ func TestCloseIdempotent(t *testing.T) {
 	}
 	if err := p.Close(); err != nil {
 		t.Fatalf("second Close: %v", err)
+	}
+}
+
+func TestEnumValues(t *testing.T) {
+	cases := map[string][]string{
+		"enum('us','eu','apac')": {"us", "eu", "apac"},
+		"enum('it''s','a,b')":    {"it's", "a,b"},
+		"enum('')":               {""},
+		"varchar(10)":            nil,
+	}
+	for in, want := range cases {
+		got := enumValues(in)
+		if strings.Join(got, "|") != strings.Join(want, "|") || len(got) != len(want) {
+			t.Errorf("enumValues(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestKindOf(t *testing.T) {
+	cases := []struct {
+		dataType, columnType string
+		want                 dbschema.Kind
+	}{
+		{"tinyint", "tinyint(1)", dbschema.KindBoolean},
+		{"tinyint", "tinyint unsigned", dbschema.KindInteger},
+		{"int", "int unsigned", dbschema.KindInteger},
+		{"bigint", "bigint", dbschema.KindInteger},
+		{"decimal", "decimal(10,2)", dbschema.KindDecimal},
+		{"double", "double", dbschema.KindFloat},
+		{"varchar", "varchar(100)", dbschema.KindText},
+		{"enum", "enum('a')", dbschema.KindEnum},
+		{"datetime", "datetime", dbschema.KindTimestamp},
+		{"json", "json", dbschema.KindJSON},
+		{"blob", "blob", dbschema.KindBinary},
+		{"set", "set('a','b')", dbschema.KindOther},
+	}
+	for _, c := range cases {
+		if got := kindOf(c.dataType, c.columnType); got != c.want {
+			t.Errorf("kindOf(%q, %q) = %q, want %q", c.dataType, c.columnType, got, c.want)
+		}
 	}
 }

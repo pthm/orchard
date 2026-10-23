@@ -1,0 +1,174 @@
+{
+  "dialect": "sqlite",
+  "database": "shop.db",
+  "tables": {
+    "merchants": {
+      "name": "merchants",
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "kind": "integer",
+          "nullable": false,
+          "has_default": true
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "kind": "text",
+          "nullable": false
+        },
+        {
+          "name": "region",
+          "type": "VARCHAR(10)",
+          "kind": "text",
+          "nullable": false,
+          "has_default": true
+        },
+        {
+          "name": "active",
+          "type": "BOOLEAN",
+          "kind": "boolean",
+          "nullable": false,
+          "has_default": true
+        },
+        {
+          "name": "balance",
+          "type": "DECIMAL(10,2)",
+          "kind": "decimal",
+          "nullable": true
+        },
+        {
+          "name": "rating",
+          "type": "REAL",
+          "kind": "float",
+          "nullable": true
+        },
+        {
+          "name": "settings",
+          "type": "JSON",
+          "kind": "json",
+          "nullable": true
+        },
+        {
+          "name": "logo",
+          "type": "BLOB",
+          "kind": "binary",
+          "nullable": true
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "kind": "timestamp",
+          "nullable": true,
+          "has_default": true
+        },
+        {
+          "name": "opened_on",
+          "type": "DATE",
+          "kind": "date",
+          "nullable": true
+        },
+        {
+          "name": "external",
+          "type": "UUID",
+          "kind": "uuid",
+          "nullable": true
+        },
+        {
+          "name": "misc",
+          "type": "",
+          "kind": "other",
+          "nullable": true
+        },
+        {
+          "name": "slug",
+          "type": "TEXT",
+          "kind": "text",
+          "nullable": true,
+          "generated": "stored"
+        },
+        {
+          "name": "label",
+          "type": "TEXT",
+          "kind": "text",
+          "nullable": true,
+          "generated": "virtual"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ]
+    },
+    "product_tags": {
+      "name": "product_tags",
+      "columns": [
+        {
+          "name": "product_id",
+          "type": "INTEGER",
+          "kind": "integer",
+          "nullable": false
+        },
+        {
+          "name": "tag",
+          "type": "TEXT",
+          "kind": "text",
+          "nullable": false
+        }
+      ],
+      "primary_key": [
+        "product_id",
+        "tag"
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "product_id"
+          ],
+          "references": "products",
+          "referenced_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "products": {
+      "name": "products",
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "kind": "integer",
+          "nullable": false,
+          "has_default": true
+        },
+        {
+          "name": "merchant_id",
+          "type": "INTEGER",
+          "kind": "integer",
+          "nullable": false
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "kind": "text",
+          "nullable": false
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "merchant_id"
+          ],
+          "references": "merchants",
+          "referenced_columns": [
+            "id"
+          ]
+        }
+      ]
+    }
+  }
+}

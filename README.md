@@ -115,6 +115,7 @@ orchard version
 | `orchard run <scenario>` | Execute a scenario end-to-end. |
 | `orchard plan <scenario>` | Validate and print the execution plan. Read-only; safe in CI. |
 | `orchard list [dir]` | List every `scenario` block found under a directory. |
+| `orchard schema pull <scenario>` | Snapshot each database's schema to `.orchard/schema/` for plan-time checks. |
 | `orchard docs <source>` | Render provider reference docs from a provider's schema. Works on `builtin/*` and `exec:<path>`. |
 | `orchard version` | Print the version, commit, and build date. |
 

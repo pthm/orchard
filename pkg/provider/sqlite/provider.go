@@ -32,6 +32,7 @@ var schemaHCL []byte
 type Provider struct {
 	schema protocol.ProviderSchema
 	db     *sql.DB
+	path   string // as configured; its base name names the database in snapshots
 }
 
 // New returns an unconfigured SQLite provider. Schema is parsed once
@@ -76,6 +77,7 @@ func (p *Provider) Configure(ctx context.Context, config map[string]cty.Value) e
 	}
 	db.SetMaxOpenConns(1)
 	p.db = db
+	p.path = path.AsString()
 	return nil
 }
 

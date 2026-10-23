@@ -38,6 +38,7 @@ Scaffold a new Orchard project with a starter scenario and component.
 | File | Purpose |
 |------|---------|
 | `scenarios/hello.hcl` | A single-component scenario that inserts a merchant row with a lifecycle teardown block. |
+| `.orchard/schema/.gitkeep` | Marks the project root. `orchard schema pull` writes database snapshots here. |
 | `components/merchant.hcl` | A reusable merchant component with typed inputs, outputs, and teardown. |
 
 **Behavior**
@@ -179,6 +180,51 @@ The joined set of errors is returned at the end.
   loaded.
 
 See [lifecycle](/docs/concepts/lifecycle/) for authoring guidance.
+
+## `orchard schema pull`
+
+```
+orchard schema pull <scenario> [--schemas a,b] [--force]
+```
+
+Snapshot the schema of each database the scenario uses. Orchard connects to
+each provider the same way `orchard run` does, from the scenario's `provider`
+blocks and `--var` values, and reads the database's catalog: tables (not views),
+columns with their types, nullability, defaults and generated status, primary
+and foreign keys, enum values, and comments. No data is read, and no connection
+details are stored.
+
+| Argument / flag | Description |
+|-----------------|-------------|
+| `<scenario>` | Scenario whose providers to snapshot. Required. |
+| `--scenario <name>` | Pick a scenario by name when the file defines multiple. |
+| `--schemas a,b` | Postgres only: capture just these schemas. Useful when extensions add schemas full of internal tables. |
+| `--force` | Replace a snapshot even if it's of a different database. |
+
+**Behavior**
+
+1. Load the scenario and configure its providers, as `orchard run` does.
+2. For each database provider (`postgres`, `mysql`, `sqlite`), read its catalog.
+3. Write the snapshot to `.orchard/schema/<alias>.json`, where `<alias>` is the
+   provider's name in `required_providers`. `.orchard/` is the nearest one
+   above the scenario file; if there isn't one, it's created in the current
+   directory.
+4. Print each snapshot's path and what it captured (`postgres/app_dev`).
+   `unchanged` means the schema matched the existing snapshot, which is left
+   untouched so re-pulling doesn't create a diff.
+
+If a snapshot already exists for the alias but was taken from a different
+database (two scenarios using one alias for different databases), `pull`
+refuses to replace it. Rename the alias in one scenario, or pass `--force`.
+
+Commit snapshots so `orchard plan` can check scenarios against them without a
+database, and re-run `pull` after migrations.
+
+**Exit codes**
+
+- `0` — every snapshot was written or unchanged.
+- `1` — a provider failed to connect or read its catalog, the scenario has no
+  database provider, or the overwrite check failed.
 
 ## `orchard list`
 

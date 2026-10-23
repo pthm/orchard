@@ -24,6 +24,10 @@ import (
 var migrationsFS embed.FS
 
 var (
+	// afterAll holds cleanups for resources tests start lazily (the
+	// MySQL container); TestMain runs them once every test has run.
+	afterAll []func()
+
 	testDSN        string
 	testPool       *pgxpool.Pool
 	echoBinaryPath string
@@ -74,6 +78,9 @@ func TestMain(m *testing.M) {
 
 	code := m.Run()
 
+	for _, f := range afterAll {
+		f()
+	}
 	pool.Close()
 	if err := testcontainers.TerminateContainer(container); err != nil {
 		log.Printf("terminating container: %v", err)

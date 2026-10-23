@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,28 +22,17 @@ import (
 // multi-statement transaction, then teardown from the run record. The
 // product's foreign key means teardown only succeeds in reverse order.
 //
-// The container is started here rather than in TestMain so the
-// postgres tests don't pay for it.
+// The MySQL container is shared by the MySQL tests and started on
+// first use, so the postgres tests don't pay for it.
 func TestMySQL_RunAndTeardown(t *testing.T) {
 	ctx := context.Background()
-	ctr, err := tcmysql.Run(ctx, "mysql:8.4",
-		tcmysql.WithDatabase("orchard_test"),
-		tcmysql.WithUsername("orchard"),
-		tcmysql.WithPassword("orchard"),
-	)
-	require.NoError(t, err, "starting mysql container")
-	t.Cleanup(func() { _ = testcontainers.TerminateContainer(ctr) })
-
-	host, err := ctr.Host(ctx)
-	require.NoError(t, err)
-	port, err := ctr.MappedPort(ctx, "3306/tcp")
-	require.NoError(t, err)
+	host, port := mysqlServer(t)
 
 	// The scenario gets a mysql:// URL, so the provider's URL
 	// conversion is exercised too; the test's own handle uses the
 	// driver format.
-	scenarioDSN := fmt.Sprintf("mysql://orchard:orchard@%s:%s/orchard_test", host, port.Port())
-	db, err := sql.Open("mysql", fmt.Sprintf("orchard:orchard@tcp(%s:%s)/orchard_test?multiStatements=true", host, port.Port()))
+	scenarioDSN := fmt.Sprintf("mysql://orchard:orchard@%s:%s/orchard_test", host, port)
+	db, err := sql.Open("mysql", fmt.Sprintf("orchard:orchard@tcp(%s:%s)/orchard_test?multiStatements=true", host, port))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	_, err = db.ExecContext(ctx, `
@@ -87,4 +77,42 @@ func TestMySQL_RunAndTeardown(t *testing.T) {
 		require.NoError(t, db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&n))
 		assert.Zero(t, n, "%s should be empty after teardown", table)
 	}
+}
+
+var (
+	mysqlOnce            sync.Once
+	mysqlHost, mysqlPort string
+	mysqlErr             error
+)
+
+// mysqlServer starts a MySQL 8.4 container on first use and returns
+// its host and port. The user orchard (password orchard) owns the
+// orchard_test database; root's password is also orchard. The
+// container is terminated after every test has run.
+func mysqlServer(t *testing.T) (host, port string) {
+	t.Helper()
+	mysqlOnce.Do(func() {
+		ctx := context.Background()
+		ctr, err := tcmysql.Run(ctx, "mysql:8.4",
+			tcmysql.WithDatabase("orchard_test"),
+			tcmysql.WithUsername("orchard"),
+			tcmysql.WithPassword("orchard"),
+		)
+		if err != nil {
+			mysqlErr = fmt.Errorf("starting mysql container: %w", err)
+			return
+		}
+		afterAll = append(afterAll, func() { _ = testcontainers.TerminateContainer(ctr) })
+		if mysqlHost, mysqlErr = ctr.Host(ctx); mysqlErr != nil {
+			return
+		}
+		mapped, err := ctr.MappedPort(ctx, "3306/tcp")
+		if err != nil {
+			mysqlErr = err
+			return
+		}
+		mysqlPort = mapped.Port()
+	})
+	require.NoError(t, mysqlErr)
+	return mysqlHost, mysqlPort
 }

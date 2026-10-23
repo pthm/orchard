@@ -65,6 +65,13 @@ type scaffoldFile struct {
 
 var scaffoldFiles = []scaffoldFile{
 	{
+		// Marks the project root: "orchard schema pull" writes database
+		// snapshots to .orchard/schema/, found by walking up from a
+		// scenario. Keep it (and commit the snapshots).
+		path:    ".orchard/schema/.gitkeep",
+		content: "",
+	},
+	{
 		path: "scenarios/hello.hcl",
 		content: `# A starter scenario that inserts a merchant row and captures its ID.
 # Edit the DSN variable default or pass it via --var:

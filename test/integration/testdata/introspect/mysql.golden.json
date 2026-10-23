@@ -1,0 +1,188 @@
+{
+  "dialect": "mysql",
+  "database": "introspect",
+  "tables": {
+    "merchants": {
+      "name": "merchants",
+      "comment": "Sellers on the platform",
+      "columns": [
+        {
+          "name": "id",
+          "type": "int",
+          "kind": "integer",
+          "nullable": false,
+          "has_default": true
+        },
+        {
+          "name": "name",
+          "type": "varchar(100)",
+          "kind": "text",
+          "nullable": false
+        },
+        {
+          "name": "slug",
+          "type": "varchar(100)",
+          "kind": "text",
+          "nullable": true,
+          "generated": "stored"
+        },
+        {
+          "name": "label",
+          "type": "varchar(120)",
+          "kind": "text",
+          "nullable": true,
+          "generated": "virtual"
+        },
+        {
+          "name": "region",
+          "type": "enum('us','eu','it''s')",
+          "kind": "enum",
+          "nullable": false,
+          "has_default": true,
+          "enum": [
+            "us",
+            "eu",
+            "it's"
+          ],
+          "comment": "Billing region"
+        },
+        {
+          "name": "balance",
+          "type": "decimal(10,2)",
+          "kind": "decimal",
+          "nullable": false,
+          "has_default": true
+        },
+        {
+          "name": "rating",
+          "type": "double",
+          "kind": "float",
+          "nullable": true
+        },
+        {
+          "name": "active",
+          "type": "tinyint(1)",
+          "kind": "boolean",
+          "nullable": false,
+          "has_default": true
+        },
+        {
+          "name": "flags",
+          "type": "set('a','b')",
+          "kind": "other",
+          "nullable": true
+        },
+        {
+          "name": "settings",
+          "type": "json",
+          "kind": "json",
+          "nullable": true
+        },
+        {
+          "name": "logo",
+          "type": "blob",
+          "kind": "binary",
+          "nullable": true
+        },
+        {
+          "name": "opened_on",
+          "type": "date",
+          "kind": "date",
+          "nullable": true
+        },
+        {
+          "name": "opens_at",
+          "type": "time",
+          "kind": "time",
+          "nullable": true
+        },
+        {
+          "name": "created_at",
+          "type": "datetime",
+          "kind": "timestamp",
+          "nullable": false,
+          "has_default": true
+        },
+        {
+          "name": "seen_at",
+          "type": "timestamp",
+          "kind": "timestamp",
+          "nullable": true
+        }
+      ],
+      "primary_key": [
+        "id"
+      ]
+    },
+    "product_tags": {
+      "name": "product_tags",
+      "columns": [
+        {
+          "name": "product_id",
+          "type": "bigint unsigned",
+          "kind": "integer",
+          "nullable": false
+        },
+        {
+          "name": "tag",
+          "type": "varchar(50)",
+          "kind": "text",
+          "nullable": false
+        }
+      ],
+      "primary_key": [
+        "product_id",
+        "tag"
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "product_id"
+          ],
+          "references": "products",
+          "referenced_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "products": {
+      "name": "products",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint unsigned",
+          "kind": "integer",
+          "nullable": false,
+          "has_default": true
+        },
+        {
+          "name": "merchant_id",
+          "type": "int",
+          "kind": "integer",
+          "nullable": false
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "kind": "text",
+          "nullable": false
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "merchant_id"
+          ],
+          "references": "merchants",
+          "referenced_columns": [
+            "id"
+          ]
+        }
+      ]
+    }
+  }
+}

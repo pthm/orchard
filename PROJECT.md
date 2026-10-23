@@ -680,10 +680,10 @@ Orchard can introspect the user's database schema to provide a **typed database 
 **Snapshot (preferred for CI and tooling):**
 
 ```bash
-orchard schema pull
+orchard schema pull scenarios/dev.hcl --var dsn=$DATABASE_URL
 ```
 
-Generates `.orchard/schema.json` containing tables, columns, types, nullability, defaults, primary keys, foreign keys, and enums. This snapshot is used for validation, autocomplete, and editor tooling.
+Connects with the scenario's own provider config and writes `.orchard/schema/<alias>.json` per database: tables, columns (native type, portable kind, nullability, defaults, generated status, enum values, comments), primary keys and foreign keys. The snapshot is used for validation, autocomplete, and editor tooling.
 
 ### Validation
 
@@ -749,8 +749,8 @@ orchard teardown orchard_dev_run_20260415T000000Z_abc.json
 orchard run scenarios/dev.hcl --record-dir .orchard/runs
 orchard run scenarios/ci.hcl  --no-record
 
-# Pull database schema for validation (future — Milestone 4)
-orchard schema pull
+# Snapshot each database's schema to .orchard/schema/ for plan-time checks
+orchard schema pull scenarios/dev.hcl --var dsn=$DATABASE_URL
 
 # Inspect a run (future — Milestone 5)
 orchard inspect <run-id>
@@ -799,7 +799,8 @@ project/
     orchard-stripe
     orchard-intercom
   .orchard/
-    schema.json             # Pulled database schema (future milestone)
+    schema/
+      db.json               # Database snapshot from `orchard schema pull` (commit it)
 ```
 
 ---
@@ -960,10 +961,12 @@ Fill in the remaining action-layer features that were in the original Milestone 
 
 Introspect PostgreSQL schemas and provide a typed database layer that validates operations before execution.
 
+The typed actions cover all three SQL providers and supersede the `db.insert` naming below.
+
 | Feature | Status |
 |---------|--------|
-| `orchard schema pull` — introspect Postgres and generate schema snapshot | Not started |
-| `.orchard/schema.json` schema model (tables, columns, types, keys, constraints) | Not started |
+| `orchard schema pull` — introspect Postgres, MySQL and SQLite into snapshots | Done |
+| `.orchard/schema/<alias>.json` snapshots (`pkg/snapshot` envelope, `pkg/dbschema` model) | Done |
 | `action "db.insert"` — schema-validated inserts | Not started |
 | `action "db.update"` — schema-validated updates | Not started |
 | `action "db.delete"` — schema-validated deletes | Not started |
@@ -1081,6 +1084,8 @@ cmd/
   functions.go                  orchard functions — render function registry as markdown
                                 or JSON (--json for tooling, --hugo for docs generation)
   teardown.go                   orchard teardown — load record, reload scenario, invoke engine.Teardown
+  schema.go                     orchard schema pull — configure providers, capture each SchemaSource,
+                                write .orchard/schema/<alias>.json (overwrite safeguard, unchanged = no-op)
   registry.go                   registerProviders + buildRegistry helpers (shared by run/plan/docs/teardown)
 
 internal/
@@ -1179,9 +1184,18 @@ pkg/ (public SDK surface)
                                 blocks plus description/notes strings and `example { }` blocks
     ctyjson.go                  cty.Value ↔ json.RawMessage helpers using go-cty/cty/json
 
+  snapshot/
+    snapshot.go                 Schema snapshot envelope (format, kind, target, provider,
+                                captured_at, body), .orchard/ project discovery, atomic write
+
+  dbschema/
+    dbschema.go                 Portable database model (tables, columns, kinds, keys, enums):
+                                the body of a "database" snapshot
+
   provider/
     provider.go                 Provider interface (Schema/Configure/Execute/Close) + Registry
     builtins.go                 Source-string → factory-function registry for "builtin/*"
+    schema_source.go            Optional SchemaSource interface (PullSchema) for `orchard schema pull`
     postgres/                   builtin/postgres — postgres_query (raw SQL) +
                                 postgres_copy (COPY FROM STDIN bulk load)
       schema.hcl                Embedded via //go:embed; carries description, notes,

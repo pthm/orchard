@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/zclconf/go-cty/cty"
+
+	"github.com/pthm/orchard/internal/sqlrow"
 )
 
 // executeSQL runs a raw query and captures the first returned row as
@@ -34,7 +36,7 @@ func (p *Provider) executeSQL(ctx context.Context, attrs map[string]cty.Value) (
 			return nil, fmt.Errorf("postgres.sql: read row: %w", err)
 		}
 		for i, desc := range descs {
-			outputs[desc.Name] = toCtyValue(values[i])
+			outputs[desc.Name] = sqlrow.ToCty(values[i])
 		}
 	}
 	if err := rows.Err(); err != nil {

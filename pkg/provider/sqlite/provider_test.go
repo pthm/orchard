@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/zclconf/go-cty/cty"
 )
@@ -167,31 +166,6 @@ func TestQueryErrorsAreWrapped(t *testing.T) {
 	})
 	if err == nil || !strings.HasPrefix(err.Error(), "sqlite_query: execute:") {
 		t.Fatalf("expected wrapped execute error, got %v", err)
-	}
-}
-
-func TestToCtyValue(t *testing.T) {
-	ts := time.Date(2026, 10, 23, 10, 30, 0, 0, time.UTC)
-	cases := []struct {
-		name string
-		in   any
-		want cty.Value
-	}{
-		{"nil", nil, cty.NullVal(cty.DynamicPseudoType)},
-		{"string", "hello", cty.StringVal("hello")},
-		{"[]byte", []byte("raw"), cty.StringVal("raw")},
-		{"int64", int64(42), cty.NumberIntVal(42)},
-		{"float64", 3.5, cty.NumberFloatVal(3.5)},
-		{"bool", true, cty.BoolVal(true)},
-		{"time", ts, cty.StringVal("2026-10-23T10:30:00Z")},
-		{"fallback", struct{ X int }{5}, cty.StringVal("{5}")},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := toCtyValue(c.in); !got.RawEquals(c.want) {
-				t.Fatalf("got %#v want %#v", got, c.want)
-			}
-		})
 	}
 }
 

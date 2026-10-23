@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"math/big"
 	"strings"
 	"testing"
 
@@ -13,8 +12,8 @@ import (
 // live database and live as integration tests (to be added in a
 // follow-up change). The tests here exercise the wiring that does
 // not need a connection: schema loading, compile-time interface
-// conformance, Configure validation, dispatch, and the pgx→cty
-// value converter.
+// conformance, Configure validation, and dispatch. The value
+// converter is shared and tested in internal/sqlrow.
 
 func TestSchemaLoadsFromEmbeddedHCL(t *testing.T) {
 	p := New()
@@ -95,38 +94,5 @@ func TestCloseIdempotent(t *testing.T) {
 	}
 	if err := p.Close(); err != nil {
 		t.Fatalf("second Close: %v", err)
-	}
-}
-
-func TestToCtyValue(t *testing.T) {
-	cases := []struct {
-		name string
-		in   any
-		want cty.Value
-	}{
-		{"nil", nil, cty.NullVal(cty.DynamicPseudoType)},
-		{"string", "hello", cty.StringVal("hello")},
-		{"bool", true, cty.BoolVal(true)},
-		{"int32", int32(7), cty.NumberIntVal(7)},
-		{"int64", int64(42), cty.NumberIntVal(42)},
-		{"float64", float64(3.14), cty.NumberFloatVal(3.14)},
-		{"big.Float", big.NewFloat(2.5), cty.NumberFloatVal(2.5)},
-		{"[]byte", []byte("raw"), cty.StringVal("raw")},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got := toCtyValue(c.in)
-			if !got.RawEquals(c.want) {
-				t.Fatalf("got %#v want %#v", got, c.want)
-			}
-		})
-	}
-}
-
-func TestToCtyValueFallback(t *testing.T) {
-	type unknown struct{ X int }
-	got := toCtyValue(unknown{X: 5})
-	if got.Type() != cty.String {
-		t.Fatalf("fallback should produce string, got %s", got.Type().FriendlyName())
 	}
 }

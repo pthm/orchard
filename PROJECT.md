@@ -1136,6 +1136,12 @@ internal/
                                 a Record from engine events; writes via Writer
                                 on RunCompleted.
 
+  sqlrow/
+    sqlrow.go                   Shared by the SQL providers: Query (first row, or
+                                last_insert_id + rows_affected for statements that
+                                return none; decodes MySQL's text-protocol numbers by
+                                column type) and ToCty (driver value → cty.Value).
+
   cli/                          CLI-only helpers, kept out of engine/
     render/                     Lipgloss semantic styles (Success/Error/Muted/Label/
                                 Kind/Ref), color palette in one place
@@ -1162,7 +1168,7 @@ pkg/ (public SDK surface)
                                 postgres_copy (COPY FROM STDIN bulk load)
       schema.hcl                Embedded via //go:embed; carries description, notes,
                                 examples consumed by the docs renderer
-      provider.go, sql.go, copy.go, cty.go, register.go
+      provider.go, sql.go, copy.go, register.go
     sqlite/                     builtin/sqlite — sqlite_query over modernc.org/sqlite
                                 (pure Go, CGO-free); one connection, foreign keys on
       schema.hcl                Embedded via //go:embed (with description/notes/examples)

@@ -133,6 +133,7 @@ Full reference at [orchard.pthm.dev/reference/cli/](https://orchard.pthm.dev/ref
 | `builtin/postgres` | `postgres_query`, `postgres_copy`, `postgres_insert`, `postgres_update`, `postgres_delete` | Execute SQL, bulk-load CSV via COPY, or run schema-checked inserts, updates and deletes. |
 | `builtin/mysql` | `mysql_query`, `mysql_insert`, `mysql_update`, `mysql_delete` | Execute SQL against MySQL or MariaDB, or run schema-checked inserts, updates and deletes. |
 | `builtin/sqlite` | `sqlite_query`, `sqlite_insert`, `sqlite_update`, `sqlite_delete` | Execute SQL against a database file, or run schema-checked inserts, updates and deletes. |
+| `builtin/redis` | `redis_command`, `redis_set`, `redis_hset` | Run commands against Redis or Valkey, or set keys and hashes with exact created / new-field outputs. |
 | `builtin/http` | `http_request` | Issue HTTP requests; capture status, body, and headers. |
 | `builtin/exec` | `exec_run` | Run a shell command; capture stdout, stderr, and exit code. |
 

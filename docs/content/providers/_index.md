@@ -11,6 +11,7 @@ provider's source string, its configuration schema, and every action it supports
 - [`postgres`](postgres/) — PostgreSQL data operations
 - [`mysql`](mysql/) — MySQL and MariaDB data operations
 - [`sqlite`](sqlite/) — SQLite data operations
+- [`redis`](redis/) — Redis and Valkey keys, hashes and commands
 - [`http`](http/) — HTTP request provider
 - [`exec`](exec/) — Shell command execution
 - [External providers](external/) — using custom providers from separate binaries

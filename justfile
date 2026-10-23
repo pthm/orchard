@@ -11,6 +11,7 @@ docs-generate:
     go run . docs builtin/postgres > docs/content-generated/providers/postgres.md
     go run . docs builtin/sqlite   > docs/content-generated/providers/sqlite.md
     go run . docs builtin/mysql    > docs/content-generated/providers/mysql.md
+    go run . docs builtin/redis    > docs/content-generated/providers/redis.md
     go run . docs builtin/http     > docs/content-generated/providers/http.md
     go run . docs builtin/exec     > docs/content-generated/providers/exec.md
     go run . functions --hugo      > docs/content-generated/reference/functions.md

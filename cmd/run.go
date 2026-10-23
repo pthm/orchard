@@ -17,6 +17,7 @@ import (
 	_ "github.com/pthm/orchard/pkg/provider/http"
 	_ "github.com/pthm/orchard/pkg/provider/mysql"
 	_ "github.com/pthm/orchard/pkg/provider/postgres"
+	_ "github.com/pthm/orchard/pkg/provider/redis"
 	_ "github.com/pthm/orchard/pkg/provider/sqlite"
 )
 

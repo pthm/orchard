@@ -1065,6 +1065,7 @@ Harden the tool for real-world use and improve the authoring experience.
 | Clock freezing / deterministic timestamp control | Not started |
 | SQLite support (`builtin/sqlite`, `sqlite_query`) | Done |
 | MySQL support (`builtin/mysql`, `mysql_query`) | Done |
+| Redis support (`builtin/redis`, `redis_command`, `redis_set`, `redis_hset`) | In progress (teardown next) |
 
 ---
 
@@ -1223,6 +1224,10 @@ pkg/ (public SDK surface)
                                 (pure Go, CGO-free); one connection, foreign keys on
       schema.hcl                Embedded via //go:embed (with description/notes/examples)
       provider.go, query.go, register.go
+    redis/                      builtin/redis — redis_command, redis_set, redis_hset
+                                over go-redis
+      schema.hcl                Embedded via //go:embed (with description/notes/examples)
+      provider.go, actions.go, encode.go, register.go
     http/                       builtin/http — net/http-backed request action
       schema.hcl                Embedded via //go:embed (with description/notes/examples)
       provider.go, register.go

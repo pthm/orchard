@@ -113,6 +113,13 @@ without a primary key get no automatic teardown, since there's no way to target
 just the affected rows, and neither do deletes or updates matching more than
 1,000 rows; give them an explicit `teardown` block if they need one.
 
+`redis_set` and `redis_hset` follow the same rules for keys: a key the action
+created is deleted, and an overwritten key is put back as it was (value and
+expiry) when an earlier action in the run created it, or with
+`managed_teardown = true`. Otherwise an overwritten string is left as written,
+and an existing hash loses only the fields the action added. Keys larger than
+1 MB aren't restored.
+
 ## `orchard teardown <record>`
 
 Hand the record file to `orchard teardown` and Orchard walks the scenario in

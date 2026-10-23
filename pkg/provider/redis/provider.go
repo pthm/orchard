@@ -31,6 +31,15 @@ var schemaHCL []byte
 type Provider struct {
 	schema protocol.ProviderSchema
 	client *goredis.Client
+	// owned records the keys typed actions created this run, so a later
+	// overwrite of them is restored on teardown by default.
+	owned map[string]bool
+	// last is what the most recent typed action wrote, for Inverse. The
+	// engine runs actions one at a time and calls Inverse straight after
+	// Execute.
+	// ponytail: a single slot, like sqlcrud; key it by action if actions
+	// ever run in parallel.
+	last *written
 }
 
 // New returns an unconfigured Redis provider.
@@ -41,6 +50,7 @@ func New() *Provider {
 var (
 	_ provider.Provider      = (*Provider)(nil)
 	_ provider.ActionPlanner = (*Provider)(nil)
+	_ provider.Inverter      = (*Provider)(nil)
 )
 
 // Schema returns the embedded provider schema.
@@ -94,6 +104,10 @@ func (p *Provider) Execute(ctx context.Context, action string, attrs map[string]
 		out, err = p.set(ctx, attrs)
 	case "redis_hset":
 		out, err = p.hset(ctx, attrs)
+	case "redis_restore":
+		// Internal: the undo Inverse records for an overwrite. It isn't in
+		// the schema, so scenarios can't call it.
+		out, err = p.restore(ctx, attrs)
 	default:
 		return nil, fmt.Errorf("redis: unknown action %q", action)
 	}

@@ -86,18 +86,19 @@ func TestSet(t *testing.T) {
 	}
 }
 
+// Updating an existing hash is tested against real Redis in
+// test/integration: miniredis can't DUMP a hash.
 func TestHSet(t *testing.T) {
 	p, srv := configured(t)
-	srv.HSet("flags:1", "a", "old")
 	out := exec(t, p, "redis_hset", map[string]cty.Value{
 		"key":    cty.StringVal("flags:1"),
 		"fields": cty.ObjectVal(map[string]cty.Value{"a": cty.True, "b": cty.False}),
 		"ttl":    cty.StringVal("30s"),
 	})
-	if out["created"].True() {
-		t.Error("created: want false")
+	if !out["created"].True() {
+		t.Error("created: want true")
 	}
-	if !out["new_fields"].RawEquals(cty.ListVal([]cty.Value{cty.StringVal("b")})) {
+	if !out["new_fields"].RawEquals(cty.ListVal([]cty.Value{cty.StringVal("a"), cty.StringVal("b")})) {
 		t.Errorf("new_fields: %#v", out["new_fields"])
 	}
 	if srv.HGet("flags:1", "a") != "true" || srv.HGet("flags:1", "b") != "false" {

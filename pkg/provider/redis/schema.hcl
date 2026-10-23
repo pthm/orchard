@@ -14,6 +14,14 @@ provider "redis" {
     - `ttl` uses Go duration syntax (`"30s"`, `"1h"`), like the action-level `timeout`.
     - Each typed action reads what exists and writes in one `MULTI`/`EXEC`, so
       `created` and `new_fields` are exact even with other clients writing.
+    - `orchard teardown` undoes `redis_set` and `redis_hset` automatically, unless the
+      action has its own `lifecycle { teardown { } }` block or sets
+      `lifecycle { managed_teardown = false }`. A key the action created is deleted.
+      An overwritten key is restored as it was, value and expiry, when an earlier
+      action in the run created it, or with `managed_teardown = true`; otherwise an
+      overwritten string is left as written, and an existing hash loses only the
+      fields the action added. Keys larger than 1 MB aren't restored.
+      `redis_command` has no automatic teardown.
     - `redis_command` arguments are sent as text. Interpolated values aren't escaped
       or quoted, but they can't change which command runs: each list element is one
       argument.

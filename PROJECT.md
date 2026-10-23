@@ -1065,7 +1065,7 @@ Harden the tool for real-world use and improve the authoring experience.
 | Clock freezing / deterministic timestamp control | Not started |
 | SQLite support (`builtin/sqlite`, `sqlite_query`) | Done |
 | MySQL support (`builtin/mysql`, `mysql_query`) | Done |
-| Redis support (`builtin/redis`, `redis_command`, `redis_set`, `redis_hset`) | In progress (teardown next) |
+| Redis support (`builtin/redis`, `redis_command`, `redis_set`, `redis_hset`) | Done |
 
 ---
 

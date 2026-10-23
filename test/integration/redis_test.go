@@ -52,6 +52,45 @@ func TestRedis_Seed(t *testing.T) {
 	assert.JSONEq(t, fmt.Sprintf(`{"merchant_id":%d}`, id), job)
 }
 
+// TestRedis_Teardown checks automatic teardown against real Redis: a
+// created key is deleted, an owned key and a requested one are restored
+// from DUMP (value and expiry), an unowned overwritten string is left,
+// and an unowned hash loses only the fields the scenario added.
+func TestRedis_Teardown(t *testing.T) {
+	ctx := context.Background()
+	url := redisServer(t)
+	opts, err := goredis.ParseURL(url)
+	require.NoError(t, err)
+	rdb := goredis.NewClient(opts)
+	t.Cleanup(func() { _ = rdb.Close() })
+	require.NoError(t, rdb.FlushDB(ctx).Err())
+	require.NoError(t, rdb.Set(ctx, "requested", "theirs", 10*time.Minute).Err())
+	require.NoError(t, rdb.Set(ctx, "unowned", "theirs", 0).Err())
+	require.NoError(t, rdb.HSet(ctx, "hash", "a", "theirs").Err())
+	require.NoError(t, rdb.HSet(ctx, "hash_requested", "a", "theirs").Err())
+
+	const scenario = "testdata/scenarios/redis_teardown.hcl"
+	vars := map[string]string{"redis_url": url}
+	_, rec := runScenarioWithRecord(t, scenario, vars, t.TempDir())
+	got, err := rdb.Get(ctx, "created").Result()
+	require.NoError(t, err)
+	assert.Equal(t, "v2", got)
+
+	runTeardown(t, scenario, vars, rec)
+
+	n, err := rdb.Exists(ctx, "created").Result()
+	require.NoError(t, err)
+	assert.Zero(t, n, "created key should be deleted")
+
+	assert.Equal(t, "theirs", rdb.Get(ctx, "requested").Val())
+	ttl := rdb.TTL(ctx, "requested").Val()
+	assert.True(t, ttl > 9*time.Minute && ttl <= 10*time.Minute, "requested ttl restored: %v", ttl)
+
+	assert.Equal(t, "ours", rdb.Get(ctx, "unowned").Val(), "unowned key is left as written")
+	assert.Equal(t, map[string]string{"a": "ours"}, rdb.HGetAll(ctx, "hash").Val(), "only the new field is removed")
+	assert.Equal(t, map[string]string{"a": "theirs"}, rdb.HGetAll(ctx, "hash_requested").Val(), "requested hash restored")
+}
+
 var (
 	redisOnce sync.Once
 	redisURL  string

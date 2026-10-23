@@ -1,6 +1,8 @@
 ---
-title: Reference
-weight: 50
+title: API Reference
+weight: 3
+cascade:
+  type: docs
 ---
 
 Exhaustive reference for Orchard's CLI, HCL schema, expression language, and

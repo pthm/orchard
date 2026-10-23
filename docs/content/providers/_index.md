@@ -28,4 +28,4 @@ Each page follows the same layout:
 
 Types are written using Orchard's HCL type expressions: `string`, `number`, `bool`,
 `list(string)`, `map(string)`, `object({ key = type, ... })`, or `any`. See
-[expressions](/docs/reference/expressions/) for the full type grammar.
+[expressions](/reference/expressions/) for the full type grammar.

@@ -138,7 +138,7 @@ against a scenario that points at a production system.
 - `0` — scenario is valid.
 - `1` — any validation error.
 
-See [plan vs run](../../concepts/plan-vs-run/) for the rationale behind the split.
+See [plan vs run](/docs/concepts/plan-vs-run/) for the rationale behind the split.
 
 ## `orchard teardown`
 
@@ -178,7 +178,7 @@ The joined set of errors is returned at the end.
 - `1` — one or more teardowns failed, or the record / scenario could not be
   loaded.
 
-See [lifecycle](../../concepts/lifecycle/) for authoring guidance.
+See [lifecycle](/docs/concepts/lifecycle/) for authoring guidance.
 
 ## `orchard list`
 

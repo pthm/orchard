@@ -104,4 +104,4 @@ orchard run  scenarios/merchant.hcl     # execute it for real
 orchard list scenarios/                 # list all scenarios in a directory
 ```
 
-See the [CLI reference](../../reference/cli/) for flags and exit codes.
+See the [CLI reference](/reference/cli/) for flags and exit codes.

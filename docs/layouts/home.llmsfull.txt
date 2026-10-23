@@ -5,8 +5,10 @@
 {{ with site.GetPage "/docs" }}
 {{- template "llms-full-page" . }}
 {{- end }}
-{{ with site.GetPage "/providers" }}
+{{ range slice "/reference" "/providers" }}
+{{- with site.GetPage . }}
 {{- template "llms-full-page" . }}
+{{- end }}
 {{- end }}
 
 {{- define "llms-full-page" }}

@@ -123,7 +123,7 @@ Global flags:
 - `--var key=value` — override a scenario variable (repeatable).
 - `--no-color` — disable coloured output (honours `NO_COLOR`).
 
-Full reference at [orchard.pthm.dev/docs/reference/cli/](https://orchard.pthm.dev/docs/reference/cli/).
+Full reference at [orchard.pthm.dev/reference/cli/](https://orchard.pthm.dev/reference/cli/).
 
 ## Built-in providers
 

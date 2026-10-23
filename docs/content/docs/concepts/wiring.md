@@ -134,4 +134,4 @@ to the provider:
 - **`timeout = "30s"`** — wrap the provider's execute call in a Go-duration
   timeout. Exceeding the timeout fails the action.
 - **`retry { }`** — retry the action on failure with backoff. See
-  [HCL schema reference](../../reference/hcl-schema/#retry).
+  [HCL schema reference](/reference/hcl-schema/#retry).

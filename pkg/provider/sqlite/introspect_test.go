@@ -47,6 +47,15 @@ CREATE TABLE product_tags (
 	PRIMARY KEY (product_id, tag),
 	FOREIGN KEY (product_id) REFERENCES products (id)
 ) WITHOUT ROWID;
+CREATE TABLE accounts (
+	id    INTEGER PRIMARY KEY,
+	email TEXT NOT NULL UNIQUE,
+	org   TEXT NOT NULL,
+	slug  TEXT NOT NULL,
+	UNIQUE (org, slug)
+);
+CREATE UNIQUE INDEX accounts_live ON accounts (slug) WHERE org != 'archived';
+CREATE UNIQUE INDEX accounts_lower ON accounts (lower(email));
 CREATE VIEW merchant_names AS SELECT name FROM merchants;
 `
 

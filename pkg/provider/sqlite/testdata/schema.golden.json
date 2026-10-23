@@ -2,6 +2,48 @@
   "dialect": "sqlite",
   "database": "shop.db",
   "tables": {
+    "accounts": {
+      "name": "accounts",
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "kind": "integer",
+          "nullable": false,
+          "has_default": true
+        },
+        {
+          "name": "email",
+          "type": "TEXT",
+          "kind": "text",
+          "nullable": false
+        },
+        {
+          "name": "org",
+          "type": "TEXT",
+          "kind": "text",
+          "nullable": false
+        },
+        {
+          "name": "slug",
+          "type": "TEXT",
+          "kind": "text",
+          "nullable": false
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "unique_keys": [
+        [
+          "email"
+        ],
+        [
+          "org",
+          "slug"
+        ]
+      ]
+    },
     "merchants": {
       "name": "merchants",
       "columns": [

@@ -123,6 +123,23 @@ provider "mysql" {
       description = "Object of `column = value`."
     }
 
+    attribute "on_conflict" {
+      type        = string
+      default     = "error"
+      description = <<-MD
+        What to do when a row with the same conflict columns already exists:
+        `"error"` (the database rejects the insert), `"ignore"` (leave the row as it
+        is), or `"update"` (update it with `values`). With `"ignore"` or `"update"`
+        the outputs are the existing row, and `orchard teardown` doesn't delete it;
+        an update of it is restored like a typed update.
+      MD
+    }
+
+    attribute "conflict_columns" {
+      type        = list(string)
+      description = "Columns that identify an existing row for `on_conflict`: the primary key (the default) or a unique key. `values` must set them."
+    }
+
     output {
       type        = any
       description = "The inserted row, keyed by column name. Columns come back typed by their kind: numbers, bools, strings, decoded JSON."

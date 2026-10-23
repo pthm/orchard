@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 
@@ -49,6 +50,10 @@ type Actions struct {
 	// ponytail: a single slot; key it by action if actions ever run in
 	// parallel.
 	lastUpdate *updated
+	// lastExisted is true when the most recent typed insert found its
+	// row already there (on_conflict = ignore or update), so its undo is
+	// a restore, or nothing, rather than a delete.
+	lastExisted bool
 }
 
 // updated is what a typed update changed: the previous values of the
@@ -240,11 +245,7 @@ func (a *Actions) Execute(ctx context.Context, action string, attrs map[string]c
 
 	switch verb {
 	case "insert":
-		row, err := Insert(ctx, conn, a.Dialect, t, attrs["values"])
-		if err == nil {
-			a.own(t, row)
-		}
-		return row, err
+		return a.insert(ctx, conn, t, attrs)
 	case "update":
 		return a.update(ctx, conn, t, attrs["set"], attrs["where"])
 	case "restore":
@@ -254,6 +255,114 @@ func (a *Actions) Execute(ctx context.Context, action string, attrs map[string]c
 	default:
 		return Delete(ctx, conn, a.Dialect, t, attrs["where"])
 	}
+}
+
+// insert runs a typed insert. With on_conflict = ignore or update it
+// first looks for an existing row by the conflict columns, in the same
+// transaction: if there is one, ignore returns it unchanged and update
+// updates it (recording the previous values, as an update does);
+// otherwise it's a plain insert.
+// ponytail: look-then-write in a transaction rather than each
+// database's ON CONFLICT syntax: one code path for all three, fine for
+// a single client seeding data, but not atomic against concurrent
+// writers.
+func (a *Actions) insert(ctx context.Context, conn *sql.Conn, t *dbschema.Table, attrs map[string]cty.Value) (map[string]cty.Value, error) {
+	a.mu.Lock()
+	a.lastUpdate, a.lastExisted = nil, false
+	a.mu.Unlock()
+
+	values := attrs["values"]
+	mode := conflictMode(attrs)
+	if mode == dbschema.ConflictError {
+		row, err := Insert(ctx, conn, a.Dialect, t, values)
+		if err == nil {
+			a.own(t, row)
+		}
+		return row, err
+	}
+
+	key, err := dbschema.ConflictKey(t, conflictColumns(attrs))
+	if err != nil {
+		return nil, err
+	}
+	fields := values.AsValueMap()
+	where := map[string]cty.Value{}
+	set := map[string]cty.Value{}
+	for name, v := range fields {
+		if slices.Contains(key, name) {
+			where[name] = v
+		} else {
+			set[name] = v
+		}
+	}
+	setCols := make([]string, 0, len(set))
+	for name := range set {
+		setCols = append(setCols, name)
+	}
+	slices.Sort(setCols)
+
+	var (
+		existed bool
+		before  []map[string]cty.Value
+	)
+	row, err := inTx(ctx, conn, func(tx *sql.Tx) (map[string]cty.Value, error) {
+		var err error
+		if before, err = RowsMatching(ctx, tx, a.Dialect, t, setCols, cty.ObjectVal(where), 1); err != nil {
+			return nil, err
+		}
+		if len(before) == 0 {
+			return Insert(ctx, tx, a.Dialect, t, values)
+		}
+		existed = true
+		if mode == dbschema.ConflictUpdate && len(set) > 0 {
+			if _, err := Update(ctx, tx, a.Dialect, t, cty.ObjectVal(set), cty.ObjectVal(where)); err != nil {
+				return nil, err
+			}
+		}
+		return SelectRow(ctx, tx, a.Dialect, t, cty.ObjectVal(where))
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !existed {
+		a.own(t, row)
+		return row, nil
+	}
+	a.mu.Lock()
+	a.lastExisted = true
+	if mode == dbschema.ConflictUpdate && len(set) > 0 && len(t.PrimaryKey) > 0 {
+		u := &updated{table: t, rows: before, owned: true}
+		for _, r := range before {
+			if k, ok := RowKey(t, r); !ok || !a.owned[k] {
+				u.owned = false
+			}
+		}
+		a.lastUpdate = u
+	}
+	a.mu.Unlock()
+	return row, nil
+}
+
+// conflictMode is the insert's on_conflict, defaulting to error.
+func conflictMode(attrs map[string]cty.Value) string {
+	if v, ok := attrs["on_conflict"]; ok && !v.IsNull() && v.IsKnown() {
+		return v.AsString()
+	}
+	return dbschema.ConflictError
+}
+
+// conflictColumns is the insert's conflict_columns, or nil.
+func conflictColumns(attrs map[string]cty.Value) []string {
+	v, ok := attrs["conflict_columns"]
+	if !ok || v.IsNull() || !v.IsWhollyKnown() {
+		return nil
+	}
+	var cols []string
+	for it := v.ElementIterator(); it.Next(); {
+		_, c := it.Element()
+		cols = append(cols, c.AsString())
+	}
+	return cols
 }
 
 // update runs a typed update, first reading the previous values of the
@@ -341,6 +450,15 @@ func (a *Actions) Inverse(action string, attrs, outputs map[string]cty.Value, op
 	}
 	if verb != "insert" {
 		return nil
+	}
+	a.mu.Lock()
+	existed := a.lastExisted
+	a.lastExisted = false
+	a.mu.Unlock()
+	if existed {
+		// An upsert that found its row: restore what it updated, never
+		// delete a row it didn't create.
+		return a.restoreInvocation(opts)
 	}
 	a.mu.Lock()
 	s := a.schema
@@ -433,7 +551,17 @@ func (a *Actions) load(ctx context.Context, refresh bool) (*dbschema.Schema, err
 func check(verb string, t *dbschema.Table, attrs map[string]cty.Value) error {
 	switch verb {
 	case "insert":
-		return dbschema.CheckInsert(t, attrs["values"])
+		if err := dbschema.CheckInsert(t, attrs["values"]); err != nil {
+			return err
+		}
+		mode := ""
+		if v, ok := attrs["on_conflict"]; ok && !v.IsNull() {
+			if !v.IsKnown() {
+				return nil
+			}
+			mode = v.AsString()
+		}
+		return dbschema.CheckConflict(t, mode, conflictColumns(attrs), attrs["values"])
 	case "update":
 		return dbschema.CheckUpdate(t, attrs["set"], attrs["where"])
 	default:

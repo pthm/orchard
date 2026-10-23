@@ -293,3 +293,55 @@ func TestUpdateRestore(t *testing.T) {
 		assert.Equal(t, "Legacy", name, "Legacy restored")
 	})
 }
+
+// TestUpsert: an upsert that finds its row updates it (restored on
+// teardown because it asks), and one that doesn't inserts (deleted on
+// teardown), on Postgres by primary key and on MySQL by a unique key.
+func TestUpsert(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("postgres", func(t *testing.T) {
+		resetDB(t)
+		_, err := testPool.Exec(ctx, "INSERT INTO merchants (id, name) VALUES (100, 'Legacy')")
+		require.NoError(t, err)
+		scenario := "testdata/scenarios/typed_upsert_postgres.hcl"
+		vars := map[string]string{"dsn": testDSN}
+		_, rec := runScenarioWithRecord(t, scenario, vars, t.TempDir())
+
+		var name string
+		require.NoError(t, testPool.QueryRow(ctx, "SELECT name FROM merchants WHERE id = 100").Scan(&name))
+		assert.Equal(t, "Legacy Ltd", name)
+		assertMerchantExists(t, 101, true)
+
+		runTeardown(t, scenario, vars, rec)
+		require.NoError(t, testPool.QueryRow(ctx, "SELECT name FROM merchants WHERE id = 100").Scan(&name))
+		assert.Equal(t, "Legacy", name, "the existing row is restored, not deleted")
+		assertMerchantExists(t, 101, false)
+	})
+
+	t.Run("mysql", func(t *testing.T) {
+		host, port := mysqlServer(t)
+		root, err := sql.Open("mysql", fmt.Sprintf("root:orchard@tcp(%s:%s)/?multiStatements=true", host, port))
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = root.Close() })
+		_, err = root.ExecContext(ctx, `
+			DROP DATABASE IF EXISTS upsert_test;
+			CREATE DATABASE upsert_test;
+			USE upsert_test;
+			CREATE TABLE accounts (id INT AUTO_INCREMENT PRIMARY KEY, email VARCHAR(100) NOT NULL UNIQUE, name VARCHAR(100) NOT NULL) ENGINE=InnoDB;
+			INSERT INTO accounts (email, name) VALUES ('legacy@example.com', 'Legacy');`)
+		require.NoError(t, err)
+
+		scenario := "testdata/scenarios/typed_upsert_mysql.hcl"
+		vars := map[string]string{"dsn": fmt.Sprintf("mysql://root:orchard@%s:%s/upsert_test", host, port)}
+		out, rec := runScenarioWithRecord(t, scenario, vars, t.TempDir())
+		assert.Equal(t, int64(1), ctyInt(t, out["existing_id"]), "the existing row's id comes back")
+
+		runTeardown(t, scenario, vars, rec)
+		var n int
+		var name string
+		require.NoError(t, root.QueryRowContext(ctx, "SELECT COUNT(*), MIN(name) FROM upsert_test.accounts").Scan(&n, &name))
+		assert.Equal(t, 1, n, "the inserted row is deleted")
+		assert.Equal(t, "Legacy", name, "the existing row is restored")
+	})
+}

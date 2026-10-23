@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/pthm/orchard/pkg/dbschema"
@@ -160,7 +161,54 @@ func introspect(ctx context.Context, conn *sql.Conn) (*dbschema.Schema, error) {
 			fk.ReferencedColumns = append(fk.ReferencedColumns, refCol.String)
 		}
 	}
-	return s, rows.Err()
+	if err := closeRows(rows); err != nil {
+		return nil, err
+	}
+
+	// Unique indexes other than the primary key, in column order.
+	// Functional key parts have no COLUMN_NAME and are skipped.
+	rows, err = conn.QueryContext(ctx, `
+		SELECT TABLE_NAME, INDEX_NAME, COLUMN_NAME
+		FROM information_schema.STATISTICS
+		WHERE TABLE_SCHEMA = DATABASE() AND NON_UNIQUE = 0 AND INDEX_NAME != 'PRIMARY'
+		ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX`)
+	if err != nil {
+		return nil, err
+	}
+	type indexKey struct{ table, name string }
+	unique := map[indexKey][]string{}
+	functional := map[indexKey]bool{}
+	var order []indexKey
+	for rows.Next() {
+		var (
+			table, index string
+			column       sql.NullString
+		)
+		if err := rows.Scan(&table, &index, &column); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		k := indexKey{table, index}
+		if _, seen := unique[k]; !seen {
+			order = append(order, k)
+		}
+		if !column.Valid {
+			functional[k] = true
+		}
+		unique[k] = append(unique[k], column.String)
+	}
+	if err := closeRows(rows); err != nil {
+		return nil, err
+	}
+	for _, k := range order {
+		if t, ok := s.Tables[k.table]; ok && !functional[k] {
+			t.UniqueKeys = append(t.UniqueKeys, unique[k])
+		}
+	}
+	for _, t := range s.Tables {
+		slices.SortFunc(t.UniqueKeys, slices.Compare[[]string])
+	}
+	return s, nil
 }
 
 func closeRows(rows *sql.Rows) error {

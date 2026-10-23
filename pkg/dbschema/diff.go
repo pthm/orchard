@@ -50,6 +50,9 @@ func diffTable(key string, old, cur *Table) []string {
 		out = append(out, fmt.Sprintf("primary key of %q: (%s) → (%s)", key,
 			strings.Join(old.PrimaryKey, ", "), strings.Join(cur.PrimaryKey, ", ")))
 	}
+	if !slices.EqualFunc(old.UniqueKeys, cur.UniqueKeys, slices.Equal[[]string]) {
+		out = append(out, fmt.Sprintf("unique keys of %q changed", key))
+	}
 	if !slices.EqualFunc(old.ForeignKeys, cur.ForeignKeys, func(a, b ForeignKey) bool {
 		return a.References == b.References && slices.Equal(a.Columns, b.Columns) &&
 			slices.Equal(a.ReferencedColumns, b.ReferencedColumns)

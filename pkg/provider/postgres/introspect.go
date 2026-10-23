@@ -172,6 +172,37 @@ func (p *Provider) introspect(ctx context.Context, schemas []string) (*dbschema.
 			ReferencedColumns: refCols,
 		})
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+
+	// Unique indexes (unique constraints create one too), other than
+	// the primary key, without partial or expression indexes.
+	rows, err = p.pool.Query(ctx, `
+		SELECT i.indrelid,
+		       ARRAY(SELECT a.attname FROM unnest(i.indkey) WITH ORDINALITY k(num, ord)
+		             JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.num ORDER BY k.ord)
+		FROM pg_index i
+		WHERE i.indrelid = ANY($1) AND i.indisunique AND NOT i.indisprimary
+		  AND i.indpred IS NULL AND i.indexprs IS NULL`, oids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			rel  uint32
+			cols []string
+		)
+		if err := rows.Scan(&rel, &cols); err != nil {
+			return nil, err
+		}
+		byOID[rel].UniqueKeys = append(byOID[rel].UniqueKeys, cols)
+	}
+	for _, t := range byOID {
+		slices.SortFunc(t.UniqueKeys, slices.Compare[[]string])
+	}
 	return s, rows.Err()
 }
 

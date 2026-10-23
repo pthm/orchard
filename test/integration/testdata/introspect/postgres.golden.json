@@ -149,6 +149,11 @@
       ],
       "primary_key": [
         "id"
+      ],
+      "unique_keys": [
+        [
+          "name"
+        ]
       ]
     },
     "introspect.product_tags": {
@@ -221,6 +226,12 @@
             "id"
           ]
         }
+      ],
+      "unique_keys": [
+        [
+          "merchant_id",
+          "name"
+        ]
       ]
     }
   }

@@ -380,3 +380,104 @@ func TestUpdateRestore(t *testing.T) {
 		t.Fatalf("after teardown: %v; want Acme deleted, Legacy left as changed, Forced restored", regions)
 	}
 }
+
+func TestUpsert(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "accounts.db")
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.Exec(`
+		CREATE TABLE accounts (id INTEGER PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT NOT NULL);
+		INSERT INTO accounts (email, name) VALUES
+			('kept@example.com', 'Kept'), ('updated@example.com', 'Original'), ('restored@example.com', 'Original');`); err != nil {
+		t.Fatal(err)
+	}
+	const scenario = "testdata/typed_upsert.hcl"
+	vars := map[string]string{"path": path}
+
+	rec := runRecorded(t, scenario, vars)
+	outputs, err := record.DecodeCty(rec.Outputs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !outputs["kept_name"].RawEquals(cty.StringVal("Kept")) || !outputs["kept_id"].RawEquals(cty.NumberIntVal(1)) {
+		t.Fatalf("ignore should return the existing row unchanged: %#v", outputs)
+	}
+	names := func() map[string]string {
+		out := map[string]string{}
+		rows, err := db.Query("SELECT email, name FROM accounts")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var e, n string
+			_ = rows.Scan(&e, &n)
+			out[e] = n
+		}
+		return out
+	}
+	if got := fmt.Sprint(names()); got != fmt.Sprint(map[string]string{
+		"kept@example.com": "Kept", "updated@example.com": "Updated", "restored@example.com": "Updated", "new@example.com": "New",
+	}) {
+		t.Fatalf("after run: %s", got)
+	}
+
+	undos := map[string]string{}
+	for _, n := range rec.Nodes {
+		if n.Undo != nil {
+			undos[n.ID] = n.Undo.Action
+		}
+	}
+	if fmt.Sprint(undos) != fmt.Sprint(map[string]string{
+		"action.sqlite_insert.existing_restored": "sqlite_restore",
+		"action.sqlite_insert.new":               "sqlite_delete",
+	}) {
+		t.Fatalf("recorded undos: %v", undos)
+	}
+
+	teardown(t, scenario, vars, rec)
+	if got := fmt.Sprint(names()); got != fmt.Sprint(map[string]string{
+		"kept@example.com": "Kept", "updated@example.com": "Updated", "restored@example.com": "Original",
+	}) {
+		t.Fatalf("after teardown: %s (new deleted, restored put back, the rest untouched)", got)
+	}
+}
+
+func TestUpsertValidation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "accounts.db")
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.Exec(`CREATE TABLE accounts (id INTEGER PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	scenario := filepath.Join(t.TempDir(), "bad.hcl")
+	if err := os.WriteFile(scenario, []byte(`scenario "bad" {
+  required_providers {
+    sqlite = { source = "builtin/sqlite" }
+  }
+  variable "path" {}
+  provider "sqlite" {
+    path = var.path
+  }
+  action "sqlite_insert" "account" {
+    table            = "accounts"
+    values           = { email = "a@example.com", name = "A" }
+    on_conflict      = "update"
+    conflict_columns = ["name"]
+  }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ps, g, eng := load(t, scenario, map[string]string{"path": path})
+	err = eng.ValidateReferences(context.Background(), ps, g)
+	if err == nil || !strings.Contains(err.Error(), "conflict_columns (name) isn't the primary key or a unique key; it has primary key (id), (email)") {
+		t.Fatalf("expected a conflict_columns error before the run, got %v", err)
+	}
+}

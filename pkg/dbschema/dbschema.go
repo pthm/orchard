@@ -77,6 +77,11 @@ type Table struct {
 	Columns     []Column     `json:"columns"`
 	PrimaryKey  []string     `json:"primary_key,omitempty"`
 	ForeignKeys []ForeignKey `json:"foreign_keys,omitempty"`
+	// UniqueKeys lists the column sets of the table's unique
+	// constraints and unique indexes, besides the primary key. Partial
+	// and expression indexes are left out: they can't identify a row
+	// from column values alone.
+	UniqueKeys [][]string `json:"unique_keys,omitempty"`
 }
 
 // Column is one column.

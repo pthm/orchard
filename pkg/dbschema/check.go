@@ -305,3 +305,84 @@ func editDistance(a, b string) int {
 	}
 	return prev[len(b)]
 }
+
+// Conflict modes for an insert's on_conflict.
+const (
+	ConflictError  = "error"
+	ConflictIgnore = "ignore"
+	ConflictUpdate = "update"
+)
+
+// CheckConflict validates an insert's conflict handling: mode is
+// error (the default, ""), ignore or update; columns, defaulting to the
+// primary key, must be the primary key or a unique key; and values must
+// set every one of them, so the existing row can be found.
+func CheckConflict(t *Table, mode string, columns []string, values cty.Value) error {
+	switch mode {
+	case "", ConflictError:
+		if len(columns) > 0 {
+			return fmt.Errorf("table %q: conflict_columns only applies with on_conflict = %q or %q", t.Key(), ConflictIgnore, ConflictUpdate)
+		}
+		return nil
+	case ConflictIgnore, ConflictUpdate:
+	default:
+		return fmt.Errorf("table %q: on_conflict must be %q, %q or %q; got %q", t.Key(), ConflictError, ConflictIgnore, ConflictUpdate, mode)
+	}
+	key, err := ConflictKey(t, columns)
+	if err != nil {
+		return err
+	}
+	if fields, err := objectFields(values); err == nil && fields != nil {
+		for _, col := range key {
+			if _, ok := fields[col]; !ok {
+				return fmt.Errorf("table %q: values must set conflict column %q, to find an existing row", t.Key(), col)
+			}
+		}
+	}
+	return nil
+}
+
+// ConflictKey resolves an insert's conflict columns: the given columns
+// if they're the primary key or a unique key (in any order), or the
+// primary key when none are given.
+func ConflictKey(t *Table, columns []string) ([]string, error) {
+	if len(columns) == 0 {
+		if len(t.PrimaryKey) == 0 {
+			return nil, fmt.Errorf("table %q has no primary key; set conflict_columns to a unique key%s", t.Key(), listKeys(t))
+		}
+		return t.PrimaryKey, nil
+	}
+	for _, key := range append([][]string{t.PrimaryKey}, t.UniqueKeys...) {
+		if len(key) > 0 && sameSet(key, columns) {
+			return columns, nil
+		}
+	}
+	return nil, fmt.Errorf("table %q: conflict_columns (%s) isn't the primary key or a unique key%s",
+		t.Key(), strings.Join(columns, ", "), listKeys(t))
+}
+
+func listKeys(t *Table) string {
+	var keys []string
+	if len(t.PrimaryKey) > 0 {
+		keys = append(keys, "primary key ("+strings.Join(t.PrimaryKey, ", ")+")")
+	}
+	for _, k := range t.UniqueKeys {
+		keys = append(keys, "("+strings.Join(k, ", ")+")")
+	}
+	if len(keys) == 0 {
+		return " (it has none)"
+	}
+	return "; it has " + strings.Join(keys, ", ")
+}
+
+func sameSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for _, x := range b {
+		if !contains(a, x) {
+			return false
+		}
+	}
+	return true
+}

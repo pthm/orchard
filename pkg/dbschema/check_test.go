@@ -137,3 +137,45 @@ func TestCheckUpdateAndDelete(t *testing.T) {
 		t.Errorf("valid delete: %v", err)
 	}
 }
+
+func TestCheckConflict(t *testing.T) {
+	tb := &Table{
+		Name:       "accounts",
+		Columns:    []Column{{Name: "id", Kind: KindInteger, HasDefault: true}, {Name: "email", Kind: KindText}, {Name: "org", Kind: KindText}, {Name: "slug", Kind: KindText}},
+		PrimaryKey: []string{"id"},
+		UniqueKeys: [][]string{{"email"}, {"org", "slug"}},
+	}
+	keyless := &Table{Name: "log", Columns: []Column{{Name: "msg", Kind: KindText}}}
+	values := cty.ObjectVal(map[string]cty.Value{"email": cty.StringVal("a@b"), "org": cty.StringVal("x"), "slug": cty.StringVal("y")})
+
+	cases := []struct {
+		name    string
+		table   *Table
+		mode    string
+		columns []string
+		want    string // "" means valid
+	}{
+		{"default error mode", tb, "", nil, ""},
+		{"unique key", tb, "update", []string{"email"}, ""},
+		{"composite key, any order", tb, "ignore", []string{"slug", "org"}, ""},
+		{"columns without a mode", tb, "", []string{"email"}, "conflict_columns only applies"},
+		{"bad mode", tb, "replace", nil, `on_conflict must be "error", "ignore" or "update"; got "replace"`},
+		{"not a key", tb, "update", []string{"org"}, `conflict_columns (org) isn't the primary key or a unique key; it has primary key (id), (email), (org, slug)`},
+		{"primary key not in values", tb, "update", nil, `values must set conflict column "id"`},
+		{"no primary key", keyless, "ignore", nil, `has no primary key; set conflict_columns to a unique key (it has none)`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := CheckConflict(c.table, c.mode, c.columns, values)
+			if c.want == "" {
+				if err != nil {
+					t.Fatalf("expected valid, got %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("expected %q, got %v", c.want, err)
+			}
+		})
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/pthm/orchard/pkg/dbschema"
@@ -161,6 +162,10 @@ func readTable(ctx context.Context, conn *sql.Conn, name string, withoutRowid bo
 		}
 	}
 
+	if t.UniqueKeys, err = uniqueKeys(ctx, conn, name); err != nil {
+		return nil, err
+	}
+
 	fks, err := conn.QueryContext(ctx,
 		`SELECT id, "table", "from", "to" FROM pragma_foreign_key_list(?) ORDER BY id, seq`, name)
 	if err != nil {
@@ -191,6 +196,57 @@ func readTable(ctx context.Context, conn *sql.Conn, name string, withoutRowid bo
 		}
 	}
 	return t, fks.Err()
+}
+
+// uniqueKeys lists a table's unique indexes (UNIQUE constraints create
+// them too), other than the primary key, skipping partial indexes and
+// ones over expressions. Sorted, so snapshots are stable.
+func uniqueKeys(ctx context.Context, conn *sql.Conn, table string) ([][]string, error) {
+	rows, err := conn.QueryContext(ctx,
+		`SELECT name FROM pragma_index_list(?) WHERE "unique" = 1 AND origin != 'pk' AND partial = 0 ORDER BY name`, table)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		names = append(names, n)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	var keys [][]string
+	for _, index := range names {
+		cols, err := conn.QueryContext(ctx, `SELECT name FROM pragma_index_info(?) ORDER BY seqno`, index)
+		if err != nil {
+			return nil, err
+		}
+		var key []string
+		expression := false
+		for cols.Next() {
+			var c sql.NullString
+			if err := cols.Scan(&c); err != nil {
+				_ = cols.Close()
+				return nil, err
+			}
+			if !c.Valid {
+				expression = true
+			}
+			key = append(key, c.String)
+		}
+		if err := cols.Close(); err != nil {
+			return nil, err
+		}
+		if !expression && len(key) > 0 {
+			keys = append(keys, key)
+		}
+	}
+	slices.SortFunc(keys, slices.Compare[[]string])
+	return keys, nil
 }
 
 // kindOf maps a declared column type to a kind. Common explicit names

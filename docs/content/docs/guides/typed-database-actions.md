@@ -223,6 +223,34 @@ Tables without a primary key, deletes, and updates matching more than 1,000 rows
 have no automatic undo. Give them an explicit `teardown` block if they need one.
 See [lifecycle and teardown](../../concepts/lifecycle/).
 
+## Inserting idempotently
+
+By default an insert that collides with an existing row fails, as the database
+would. To make a scenario safe to run again (re-seeding a local database, say),
+set `on_conflict`:
+
+```hcl
+action "postgres_insert" "admin" {
+  table            = "accounts"
+  values           = { email = "admin@example.com", name = "Admin" }
+  on_conflict      = "update"   # or "ignore"
+  conflict_columns = ["email"]
+}
+```
+
+- **`conflict_columns`** identify the existing row: the primary key (the
+  default) or a unique key, and `values` must set them. Plan checks they really
+  are a key, from the snapshot.
+- **`"ignore"`** leaves an existing row as it is; **`"update"`** updates it with
+  `values`. Either way the outputs are the row, so later steps can use its `id`.
+- **Teardown** deletes the row only if this insert created it. An existing row
+  that was updated is treated like a typed update: restored by default if this
+  run inserted it, otherwise only with `managed_teardown = true`.
+
+Orchard looks for the existing row and then inserts or updates in one
+transaction, the same way on every database. That's safe for a single scenario
+run, but it isn't a substitute for `ON CONFLICT` under concurrent writers.
+
 ## Values and types
 
 Each column has a portable kind, worked out from its native type. Values convert
@@ -254,7 +282,7 @@ Typed actions cover single-row inserts and equality-matched updates and deletes.
 Reach for the raw action when you need:
 
 - conditions beyond equality (`WHERE created_at < now() - interval '30 days'`);
-- upserts, joins, CTEs or anything else SQL does that a single-table write doesn't;
+- joins, CTEs or anything else SQL does that a single-table write doesn't;
 - statements that span several tables in one transaction
   (`BEGIN; ... COMMIT;` in one `query`);
 - bulk loading: `postgres_copy` for Postgres, or `count` / `for_each` over a typed

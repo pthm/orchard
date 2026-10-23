@@ -140,6 +140,20 @@ func readBack(ctx context.Context, q querier, d Dialect, t *dbschema.Table, valu
 	return readRow(t, rows)
 }
 
+// SelectRow reads the first row of t matching where, every column
+// decoded by kind.
+func SelectRow(ctx context.Context, q querier, d Dialect, t *dbschema.Table, where cty.Value) (map[string]cty.Value, error) {
+	cond, args, err := whereClause(d, t, where, nil)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.QueryContext(ctx, fmt.Sprintf("SELECT * FROM %s WHERE %s LIMIT 1", tableRef(d, t), cond), args...)
+	if err != nil {
+		return nil, err
+	}
+	return readRow(t, rows)
+}
+
 // Update sets columns on the rows of t matching where, and returns
 // rows_affected.
 func Update(ctx context.Context, q querier, d Dialect, t *dbschema.Table, set, where cty.Value) (map[string]cty.Value, error) {

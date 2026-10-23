@@ -967,6 +967,7 @@ User guide: [Typed database actions](docs/content/docs/guides/typed-database-act
 | `orchard schema pull` — introspect Postgres, MySQL and SQLite into snapshots | Done |
 | `.orchard/schema/<alias>.json` snapshots (`pkg/snapshot` envelope, `pkg/dbschema` model) | Done |
 | `<p>_insert` — schema-checked inserts returning the full row (postgres, mysql, sqlite) | Done |
+| Upserts: `on_conflict = "ignore" / "update"` with `conflict_columns` (primary or unique key) | Done |
 | `<p>_update` — schema-checked updates by `where` equality | Done |
 | `<p>_delete` — schema-checked deletes by `where` equality | Done |
 | Values bound as parameters, converted by column kind | Done |

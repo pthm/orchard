@@ -69,6 +69,10 @@ func TestPostgresIntrospection(t *testing.T) {
 		CREATE TABLE introspect.events (id bigint NOT NULL, at timestamptz NOT NULL) PARTITION BY RANGE (at);
 		CREATE TABLE introspect.events_2026 PARTITION OF introspect.events
 			FOR VALUES FROM ('2026-01-01') TO ('2027-01-01');
+		CREATE UNIQUE INDEX products_name ON introspect.products (merchant_id, name);
+		CREATE UNIQUE INDEX products_live ON introspect.products (name) WHERE merchant_id > 0;
+		CREATE UNIQUE INDEX products_lower ON introspect.products (lower(name));
+		ALTER TABLE introspect.merchants ADD CONSTRAINT merchants_name UNIQUE (name);
 		CREATE VIEW introspect.merchant_names AS SELECT name FROM introspect.merchants;`)
 	require.NoError(t, err, "creating the sample schema")
 	t.Cleanup(func() { _, _ = testPool.Exec(ctx, "DROP SCHEMA IF EXISTS introspect CASCADE") })

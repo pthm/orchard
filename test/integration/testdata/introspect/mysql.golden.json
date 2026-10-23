@@ -144,6 +144,12 @@
             "id"
           ]
         }
+      ],
+      "unique_keys": [
+        [
+          "tag",
+          "product_id"
+        ]
       ]
     },
     "products": {

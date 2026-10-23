@@ -20,6 +20,7 @@ import (
 	"github.com/pthm/orchard/internal/sqlcrud"
 	"github.com/pthm/orchard/pkg/protocol"
 	"github.com/pthm/orchard/pkg/provider"
+	"github.com/pthm/orchard/pkg/snapshot"
 )
 
 //go:embed schema.hcl
@@ -121,16 +122,28 @@ func (p *Provider) Execute(ctx context.Context, action string, attrs map[string]
 // Compile-time assertion that typed actions are checked before a run.
 var _ provider.ActionPlanner = (*Provider)(nil)
 
-// PlanAction checks a typed action against the live schema before the
-// run. Before Configure there's no database to check against.
+// PlanAction checks a typed action before the run: against the live
+// schema after Configure, or the snapshot during `orchard plan`.
 func (p *Provider) PlanAction(ctx context.Context, action string, attrs map[string]cty.Value) (cty.Type, error) {
-	if p.typed == nil {
-		return cty.DynamicPseudoType, nil
+	return sqlcrud.PlanAction(ctx, p.typed, "sqlite", action, attrs)
+}
+
+// Compile-time assertion that `orchard plan` can check typed actions.
+var _ provider.PlanConfigurer = (*Provider)(nil)
+
+// PlanConfigure loads the schema snapshot `orchard plan` checks typed
+// actions against. Without one, typed actions go unchecked at plan
+// time. It doesn't connect.
+func (p *Provider) PlanConfigure(_ context.Context, _ map[string]cty.Value, snap *snapshot.Snapshot) error {
+	if snap == nil {
+		return nil
 	}
-	if _, ok := p.typed.Verb(action); !ok {
-		return cty.DynamicPseudoType, nil
+	typed, err := sqlcrud.FromSnapshot("sqlite", sqlcrud.SQLite, "sqlite", snap)
+	if err != nil {
+		return err
 	}
-	return p.typed.Plan(ctx, action, attrs)
+	p.typed = typed
+	return nil
 }
 
 // Close closes the database. Safe to call on an unconfigured

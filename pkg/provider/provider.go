@@ -27,6 +27,7 @@ import (
 	"github.com/zclconf/go-cty/cty/convert"
 
 	"github.com/pthm/orchard/pkg/protocol"
+	"github.com/pthm/orchard/pkg/snapshot"
 )
 
 // Provider executes actions and advertises the schema that describes them.
@@ -178,6 +179,29 @@ func (r *Registry) Configure(ctx context.Context, configs map[string]map[string]
 		p := r.providers[name]
 		if err := p.Configure(ctx, coerced[name]); err != nil {
 			return fmt.Errorf("configure provider %q: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// PlanConfigure prepares providers for `orchard plan`, which doesn't
+// call Configure: configs are validated and coerced as for Configure,
+// then each PlanConfigurer receives its config and snapshot (looked up
+// by provider name in snaps; nil when absent). Other providers are
+// left alone.
+func (r *Registry) PlanConfigure(ctx context.Context, configs map[string]map[string]cty.Value, snaps map[string]*snapshot.Snapshot) error {
+	coerced, err := r.validateAndCoerceConfigs(configs)
+	if err != nil {
+		return err
+	}
+	for _, name := range r.Names() {
+		p, _ := r.Get(name)
+		pc, ok := p.(PlanConfigurer)
+		if !ok {
+			continue
+		}
+		if err := pc.PlanConfigure(ctx, coerced[name], snaps[name]); err != nil {
+			return fmt.Errorf("provider %q: %w", name, err)
 		}
 	}
 	return nil

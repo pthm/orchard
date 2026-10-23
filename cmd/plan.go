@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -9,6 +10,7 @@ import (
 	"github.com/pthm/orchard/internal/engine"
 	"github.com/pthm/orchard/internal/graph"
 	"github.com/pthm/orchard/internal/parser"
+	"github.com/pthm/orchard/pkg/snapshot"
 )
 
 var planScenarioFlag string
@@ -52,9 +54,14 @@ func newPlanCmd() *cobra.Command {
 
 			// Surface provider-config typos at plan time — run catches
 			// these too, but only after Configure has already opened
-			// connections. Plan is the right layer for the cheap
-			// schema-only check.
-			if err := reg.ValidateConfigs(ps.ProviderConfigs); err != nil {
+			// connections. PlanConfigure does the same schema-only
+			// check, and hands database providers their schema
+			// snapshots so typed actions can be checked offline.
+			snaps, err := loadSnapshots(args[0], reg.Names())
+			if err != nil {
+				return err
+			}
+			if err := reg.PlanConfigure(cmd.Context(), ps.ProviderConfigs, snaps); err != nil {
 				return fmt.Errorf("validation failed: %w", err)
 			}
 			if err := eng.ValidateGraph(g); err != nil {
@@ -79,10 +86,37 @@ func newPlanCmd() *cobra.Command {
 			out := cmd.OutOrStdout()
 			planview.Render(out, ps, g, providerOf)
 			planview.RenderSuccess(out)
+			for _, alias := range eng.UncheckedProviders() {
+				fmt.Fprintf(cmd.ErrOrStderr(),
+					"note: no schema snapshot for provider %q, so its typed actions weren't checked against the database; run \"orchard schema pull %s\" to check them here\n",
+					alias, args[0])
+			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&planScenarioFlag, "scenario", "",
 		"Pick a scenario by name when the file defines multiple")
 	return cmd
+}
+
+// loadSnapshots reads the schema snapshot for each provider alias from
+// the project the scenario belongs to (the nearest .orchard/ above
+// it). Aliases without a snapshot are left out.
+func loadSnapshots(scenario string, aliases []string) (map[string]*snapshot.Snapshot, error) {
+	snaps := map[string]*snapshot.Snapshot{}
+	project, ok := snapshot.FindProject(scenario)
+	if !ok {
+		return snaps, nil
+	}
+	for _, alias := range aliases {
+		snap, err := snapshot.Read(snapshot.Path(project, alias))
+		if errors.Is(err, snapshot.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		snaps[alias] = snap
+	}
+	return snaps, nil
 }

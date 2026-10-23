@@ -3,6 +3,7 @@ package sqlcrud
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,6 +12,8 @@ import (
 	"github.com/zclconf/go-cty/cty"
 
 	"github.com/pthm/orchard/pkg/dbschema"
+	"github.com/pthm/orchard/pkg/provider"
+	"github.com/pthm/orchard/pkg/snapshot"
 )
 
 // Actions runs one provider's typed actions (<prefix>_insert, _update,
@@ -25,16 +28,54 @@ type Actions struct {
 	// Introspect reads the live schema. It must acquire and release its
 	// own connection: Actions calls it before taking one for the
 	// statement, which matters for SQLite's single-connection pool.
+	// Introspect is nil for actions built from a snapshot.
 	Introspect func(ctx context.Context) (*dbschema.Schema, error)
+	// Strict makes Plan reject tables that don't exist, rather than
+	// skipping them. Snapshots are strict: they're the database's
+	// shape as committed, so a missing table is most likely a typo.
+	Strict bool
 
 	mu     sync.Mutex
 	schema *dbschema.Schema
 }
 
+// FromSnapshot builds plan-only Actions from a "database" snapshot,
+// which must be of the given dialect ("postgres", ...).
+func FromSnapshot(prefix string, d Dialect, dialect string, snap *snapshot.Snapshot) (*Actions, error) {
+	if snap.Kind != dbschema.SnapshotKind {
+		return nil, fmt.Errorf("snapshot is of kind %q, not %q", snap.Kind, dbschema.SnapshotKind)
+	}
+	var s dbschema.Schema
+	if err := json.Unmarshal(snap.Body, &s); err != nil {
+		return nil, fmt.Errorf("read snapshot: %w", err)
+	}
+	if s.Dialect != dialect {
+		return nil, fmt.Errorf("snapshot %s is of a %s database, not %s", snap.Target, s.Dialect, dialect)
+	}
+	return &Actions{Prefix: prefix, Dialect: d, Strict: true, schema: &s}, nil
+}
+
+// PlanAction implements provider.ActionPlanner for a provider whose
+// typed actions are a (nil before Configure or a snapshot). Actions
+// that aren't typed have nothing to check.
+func PlanAction(ctx context.Context, a *Actions, prefix, action string, attrs map[string]cty.Value) (cty.Type, error) {
+	if _, ok := Verb(prefix, action); !ok {
+		return cty.DynamicPseudoType, nil
+	}
+	if a == nil {
+		return cty.DynamicPseudoType, provider.ErrNoSchema
+	}
+	return a.Plan(ctx, action, attrs)
+}
+
 // Verb returns "insert", "update" or "delete" for one of this
 // provider's typed actions, or false.
-func (a *Actions) Verb(action string) (string, bool) {
-	verb, ok := strings.CutPrefix(action, a.Prefix+"_")
+func (a *Actions) Verb(action string) (string, bool) { return Verb(a.Prefix, action) }
+
+// Verb returns "insert", "update" or "delete" when action is one of
+// the typed actions for prefix, or false.
+func Verb(prefix, action string) (string, bool) {
+	verb, ok := strings.CutPrefix(action, prefix+"_")
 	if !ok {
 		return "", false
 	}
@@ -45,11 +86,11 @@ func (a *Actions) Verb(action string) (string, bool) {
 	return "", false
 }
 
-// Plan checks a typed action before the run. A table that doesn't
-// exist yet is skipped rather than rejected, because an earlier action
-// in the scenario may create it; Execute checks again.
-// ponytail: output types stay dynamic until plan-time typing (spec
-// change 3) builds them from the table's columns.
+// Plan checks a typed action before the run and returns its output
+// type: for an insert, an object of the table's columns. Against the
+// live database a table that doesn't exist yet is skipped, because an
+// earlier action in the scenario may create it (Execute checks again);
+// against a snapshot (Strict) it's an error.
 func (a *Actions) Plan(ctx context.Context, action string, attrs map[string]cty.Value) (cty.Type, error) {
 	verb, _ := a.Verb(action)
 	table := attrs["table"]
@@ -61,13 +102,37 @@ func (a *Actions) Plan(ctx context.Context, action string, attrs map[string]cty.
 		return cty.DynamicPseudoType, err
 	}
 	t, err := s.Lookup(table.AsString())
-	if errors.Is(err, dbschema.ErrNoTable) {
+	if errors.Is(err, dbschema.ErrNoTable) && !a.Strict {
 		return cty.DynamicPseudoType, nil
 	}
 	if err != nil {
+		if a.Strict {
+			return cty.DynamicPseudoType, fmt.Errorf("%w in the schema snapshot; if an earlier action creates it, run the scenario once and re-run \"orchard schema pull\"", err)
+		}
 		return cty.DynamicPseudoType, err
 	}
-	return cty.DynamicPseudoType, check(verb, t, attrs)
+	if err := check(verb, t, attrs); err != nil {
+		return cty.DynamicPseudoType, err
+	}
+	if verb != "insert" {
+		return cty.DynamicPseudoType, nil // the action schema declares update/delete outputs
+	}
+	return a.rowType(t), nil
+}
+
+// rowType is the output type of an insert into t: an object of its
+// columns, typed by kind (JSON and other kinds stay dynamic). Without
+// RETURNING, a table with no primary key returns its values instead,
+// so its type isn't known.
+func (a *Actions) rowType(t *dbschema.Table) cty.Type {
+	if !a.Dialect.Returning && len(t.PrimaryKey) == 0 {
+		return cty.DynamicPseudoType
+	}
+	attrs := make(map[string]cty.Type, len(t.Columns))
+	for _, c := range t.Columns {
+		attrs[c.Name] = dbschema.KindType(c.Kind)
+	}
+	return cty.Object(attrs)
 }
 
 // Execute validates and runs a typed action, returning its outputs.
@@ -119,7 +184,7 @@ func (a *Actions) table(ctx context.Context, name string) (*dbschema.Table, erro
 func (a *Actions) load(ctx context.Context, refresh bool) (*dbschema.Schema, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.schema != nil && !refresh {
+	if a.schema != nil && (!refresh || a.Introspect == nil) {
 		return a.schema, nil
 	}
 	s, err := a.Introspect(ctx)

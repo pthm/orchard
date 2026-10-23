@@ -14,6 +14,8 @@ import (
 	"github.com/pthm/orchard/internal/engine"
 	"github.com/pthm/orchard/internal/graph"
 	"github.com/pthm/orchard/internal/parser"
+	"github.com/pthm/orchard/pkg/provider"
+	"github.com/pthm/orchard/pkg/snapshot"
 )
 
 // TestPostgresTypedActions runs insert, update and delete against the
@@ -111,6 +113,80 @@ func validateLive(t *testing.T, path string, vars map[string]string) error {
 	reg, err := buildRegistry(ps)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = reg.Close() })
+	eng, err := engine.New(reg)
+	require.NoError(t, err)
+	require.NoError(t, eng.ValidateGraph(g))
+	return eng.ValidateReferences(context.Background(), ps, g)
+}
+
+// TestPlanFromSnapshots plans the typed scenarios the way `orchard
+// plan` does — providers never configured, only given a snapshot taken
+// from the live database — for Postgres and MySQL.
+func TestPlanFromSnapshots(t *testing.T) {
+	ctx := context.Background()
+	pgSnap := captureSnapshot(t, "builtin/postgres", "postgres", map[string]cty.Value{"dsn": cty.StringVal(testDSN)})
+
+	require.NoError(t, planOffline(t, "testdata/scenarios/typed_postgres.hcl", "postgres", pgSnap),
+		"the valid postgres scenario should plan")
+	err := planOffline(t, "testdata/scenarios/typed_postgres_invalid.hcl", "postgres", pgSnap)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `missing required column "price"`)
+
+	// A postgres snapshot can't stand in for a mysql database.
+	err = planOffline(t, "testdata/scenarios/typed_mysql.hcl", "mysql", pgSnap)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is of a postgres database, not mysql")
+
+	host, port := mysqlServer(t)
+	root, err := sql.Open("mysql", fmt.Sprintf("root:orchard@tcp(%s:%s)/?multiStatements=true", host, port))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = root.Close() })
+	_, err = root.ExecContext(ctx, `
+		CREATE DATABASE IF NOT EXISTS plan_test;
+		USE plan_test;
+		CREATE TABLE IF NOT EXISTS merchants (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(100) NOT NULL, active TINYINT(1) NOT NULL DEFAULT 1, settings JSON);
+		CREATE TABLE IF NOT EXISTS products (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, merchant_id INT NOT NULL, name VARCHAR(100) NOT NULL, price DECIMAL(10,2) NOT NULL);`)
+	require.NoError(t, err)
+	mySnap := captureSnapshot(t, "builtin/mysql", "mysql", map[string]cty.Value{
+		"dsn": cty.StringVal(fmt.Sprintf("mysql://root:orchard@%s:%s/plan_test", host, port)),
+	})
+	require.NoError(t, planOffline(t, "testdata/scenarios/typed_mysql.hcl", "mysql", mySnap),
+		"the valid mysql scenario should plan")
+}
+
+// captureSnapshot configures a provider against a live database and
+// captures its schema as `orchard schema pull` would.
+func captureSnapshot(t *testing.T, source, alias string, config map[string]cty.Value) *snapshot.Snapshot {
+	t.Helper()
+	p, err := provider.NewBuiltin(source)
+	require.NoError(t, err)
+	require.NoError(t, p.Configure(context.Background(), config))
+	t.Cleanup(func() { _ = p.Close() })
+	capture, err := p.(provider.SchemaSource).PullSchema(context.Background(), provider.PullOptions{})
+	require.NoError(t, err)
+	return &snapshot.Snapshot{
+		Format: snapshot.Format, Kind: capture.Kind, Target: capture.Target,
+		Provider: snapshot.Provider{Source: source, Alias: alias}, Body: capture.Body,
+	}
+}
+
+// planOffline validates a scenario the way `orchard plan` does:
+// providers are registered and given the snapshot, never configured.
+func planOffline(t *testing.T, path, alias string, snap *snapshot.Snapshot) error {
+	t.Helper()
+	ps, err := parser.LoadScenario(path, "", map[string]string{"dsn": "unused"})
+	require.NoError(t, err)
+	g, err := graph.Build(ps)
+	require.NoError(t, err)
+	reg := provider.NewRegistry()
+	for name, spec := range ps.RequiredProviders {
+		p, err := provider.NewBuiltin(spec.Source)
+		require.NoError(t, err)
+		require.NoError(t, reg.Register(name, p))
+	}
+	if err := reg.PlanConfigure(context.Background(), ps.ProviderConfigs, map[string]*snapshot.Snapshot{alias: snap}); err != nil {
+		return err
+	}
 	eng, err := engine.New(reg)
 	require.NoError(t, err)
 	require.NoError(t, eng.ValidateGraph(g))

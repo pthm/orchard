@@ -53,6 +53,13 @@ type Engine struct {
 	// Used to resolve `file` attributes on actions to absolute
 	// paths before dispatching to providers.
 	scenarioDir string
+
+	// planTypes holds output types that ActionPlanners reported during
+	// ValidateReferences, by node; they take precedence over the static
+	// schema's declared type. unchecked records providers whose planner
+	// had no schema to check against.
+	planTypes map[graph.NodeID]cty.Type
+	unchecked map[string]bool
 }
 
 // Reporter receives observability events from the engine's

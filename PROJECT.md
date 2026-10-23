@@ -975,7 +975,7 @@ The typed actions cover all three SQL providers and supersede the `db.insert` na
 | Required field enforcement | Done |
 | Default/generated column handling | Done |
 | Validation against the live schema before `orchard run` executes anything | Done |
-| Plan-time validation and typed outputs from snapshots | Not started |
+| Plan-time validation and typed outputs from snapshots, including inside components | Done |
 | Foreign key reference hints | Not started |
 
 ### Milestone 5: Lifecycle and Teardown

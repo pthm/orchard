@@ -128,11 +128,23 @@ Validate a scenario and print its execution plan without side effects.
    - Built-in providers are instantiated in-process.
    - External providers are probed with `<binary> schema` — a short-lived
      process that prints the schema JSON and exits.
-3. Validate references, types, and required attributes across the scenario.
-4. Build the dependency graph and print it.
+3. Load each provider's schema snapshot from `.orchard/schema/<alias>.json`
+   (written by [`orchard schema pull`](#orchard-schema-pull)), if there is one.
+4. Validate references, types, and required attributes across the scenario,
+   inside components as well as at scenario level. Typed database actions
+   (`*_insert`, `*_update`, `*_delete`) are checked against their snapshot:
+   the table and columns exist, values fit their columns, required columns are
+   set, generated ones aren't. References to an insert's outputs are checked
+   against the table's columns, so `action.postgres_insert.merchant.idd` fails.
+5. Build the dependency graph and print it.
 
-Plan never calls `configure` or `execute` on any provider. It is safe to run
-against a scenario that points at a production system.
+Plan never calls `configure` or `execute` on any provider, and never connects
+to a database; snapshots are read from disk. It is safe to run against a
+scenario that points at a production system.
+
+If a provider has typed actions but no snapshot, plan skips those checks and
+prints a note saying so. `orchard run` always checks typed actions against the
+live database before executing anything.
 
 **Exit codes**
 

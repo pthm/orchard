@@ -2,7 +2,9 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/hashicorp/hcl/v2"
@@ -21,11 +23,10 @@ import (
 // undeclared variable references — all at plan time, without
 // running a single provider call.
 //
-// The check walks three places: scenario-level action body
-// attributes, scenario output expressions, and component input
-// expressions. Component-internal action bodies evaluate against
-// the component's local var namespace and are deferred to a later
-// pass — those references surface at execute time today.
+// The check walks action bodies (scenario-level ones against the
+// scenario's namespaces, component-internal ones against their
+// component's var namespace and actions), scenario output
+// expressions, component input expressions and component outputs.
 //
 // Coverage caveat: actions whose provider schema declares
 // `output { type = any }` (e.g. postgres.sql with its open-ended
@@ -36,25 +37,61 @@ import (
 // when they do.
 //
 // Providers that implement provider.ActionPlanner also check each of
-// their scenario-level actions here, against external state such as a
-// database's schema. During `orchard run` this happens after Configure,
-// so the check sees the live system before any action executes.
+// their actions here, against external state such as a database's
+// schema: during `orchard plan` from a snapshot, during `orchard run`
+// (after Configure) against the live system, before any action
+// executes. A planner can report a concrete output type, which then
+// types references to that action's outputs.
+//
+// Actions are checked in dependency order, inside components as well
+// as at scenario level, so each action sees the output types of the
+// ones before it.
 func (e *Engine) ValidateReferences(runCtx context.Context, ps *parser.ParsedScenario, g *graph.Graph) error {
-	ctx := e.buildTypedEvalContext(ps, g)
+	e.planTypes = map[graph.NodeID]cty.Type{}
+	e.unchecked = map[string]bool{}
 
-	// Scenario-level action bodies.
+	// Typed contexts are rebuilt only when a planner adds a type.
+	var ctx *hcl.EvalContext
+	compCtx := map[string]*hcl.EvalContext{}
+	stale := true
+
 	for _, nodeID := range g.Order {
 		node := g.Nodes[nodeID]
-		if node.Kind != graph.ActionNode || node.ComponentKey != "" {
+		if node.Kind != graph.ActionNode {
 			continue
 		}
-		nodeCtx := withInstance(ctx, node.Instance)
+		if stale {
+			ctx = e.buildTypedEvalContext(ps, g)
+			compCtx = map[string]*hcl.EvalContext{}
+			stale = false
+		}
+		scope := ctx
+		if key := node.ComponentKey; key != "" {
+			comp, ok := ps.Components[key]
+			if !ok {
+				continue
+			}
+			if compCtx[key] == nil {
+				compCtx[key] = e.buildComponentTypedEvalContext(key, comp, g)
+			}
+			scope = compCtx[key]
+		}
+		nodeCtx := withInstance(scope, node.Instance)
 		if err := checkActionBody(nodeCtx, node); err != nil {
 			return err
 		}
-		if err := e.planAction(runCtx, nodeCtx, node); err != nil {
+		t, err := e.planAction(runCtx, nodeCtx, node)
+		if err != nil {
 			return fmt.Errorf("%s%s: %w", node.ID, formatSourceLoc(node.SourceRange), err)
 		}
+		// A zero Type means the planner didn't say; treat it as dynamic.
+		if t != cty.NilType && t != cty.DynamicPseudoType {
+			e.planTypes[node.ID] = t
+			stale = true
+		}
+	}
+	if stale {
+		ctx = e.buildTypedEvalContext(ps, g)
 	}
 
 	// Scenario output expressions.
@@ -103,29 +140,45 @@ func (e *Engine) ValidateReferences(runCtx context.Context, ps *parser.ParsedSce
 }
 
 // planAction hands an action's evaluated attributes to its provider's
-// ActionPlanner, if it has one. Attributes that depend on other actions
-// are typed unknowns.
-// ponytail: the returned output type is discarded until plan-time
-// typing (spec change 3) feeds it to downstream references.
-func (e *Engine) planAction(runCtx context.Context, evalCtx *hcl.EvalContext, node *graph.Node) error {
+// ActionPlanner, if it has one, and returns the output type it
+// reports. Attributes that depend on other actions are typed unknowns.
+// A planner with no schema to check against marks its provider
+// unchecked rather than failing.
+func (e *Engine) planAction(runCtx context.Context, evalCtx *hcl.EvalContext, node *graph.Node) (cty.Type, error) {
 	route, err := e.resolveRoute(node.ActionType, node.ProviderAlias)
 	if err != nil {
-		return nil // reported by ValidateGraph
+		return cty.DynamicPseudoType, nil // reported by ValidateGraph
 	}
 	p, err := e.registry.Get(route.providerAlias)
 	if err != nil {
-		return nil
+		return cty.DynamicPseudoType, nil
 	}
 	planner, ok := p.(provider.ActionPlanner)
 	if !ok {
-		return nil
+		return cty.DynamicPseudoType, nil
 	}
 	attrs, err := evalAttrs(node.Body, route.schema, evalCtx)
 	if err != nil {
-		return err
+		return cty.DynamicPseudoType, err
 	}
-	_, err = planner.PlanAction(runCtx, route.actionName, attrs)
-	return err
+	t, err := planner.PlanAction(runCtx, route.actionName, attrs)
+	if errors.Is(err, provider.ErrNoSchema) {
+		e.unchecked[route.providerAlias] = true
+		return cty.DynamicPseudoType, nil
+	}
+	return t, err
+}
+
+// UncheckedProviders lists, in order, the providers whose actions the
+// last ValidateReferences couldn't check for want of a schema (no
+// snapshot during `orchard plan`).
+func (e *Engine) UncheckedProviders() []string {
+	out := make([]string, 0, len(e.unchecked))
+	for alias := range e.unchecked {
+		out = append(out, alias)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // buildComponentTypedEvalContext builds the typed eval context used
@@ -273,11 +326,15 @@ func (e *Engine) componentOutputsObject(
 	return cty.ObjectVal(fields)
 }
 
-// actionOutputType resolves a node's route and returns the cty
-// Type of its declared output schema. Falls back to
+// actionOutputType returns the type an ActionPlanner reported for the
+// node, or else resolves its route and returns the cty Type of its
+// declared output schema. Falls back to
 // DynamicPseudoType when the routing is unresolvable (already
 // flagged by ValidateGraph) or the schema has no output declared.
 func (e *Engine) actionOutputType(node *graph.Node) cty.Type {
+	if t, ok := e.planTypes[node.ID]; ok {
+		return t
+	}
 	route, err := e.resolveRoute(node.ActionType, node.ProviderAlias)
 	if err != nil {
 		return cty.DynamicPseudoType

@@ -71,6 +71,44 @@ Inside the teardown body, three reference namespaces are in scope:
 - `action.*` — any other action's recorded outputs, for teardowns that need
   upstream state.
 
+## Automatic teardown for typed inserts
+
+Typed database inserts (`postgres_insert`, `mysql_insert`, `sqlite_insert`)
+don't need a `lifecycle` block. When one runs, its provider records how to undo
+it, a delete of the new row by its primary key, in the run record, and
+`orchard teardown` runs that:
+
+```hcl
+action "postgres_insert" "merchant" {
+  table  = "merchants"
+  values = { name = var.name }
+}
+# orchard teardown deletes the row: DELETE FROM merchants WHERE id = <its id>
+```
+
+Which teardown runs, for each action:
+
+1. An explicit `lifecycle { teardown { } }` block, if the action has one.
+2. Otherwise the automatic undo, if its provider recorded one.
+3. Otherwise nothing.
+
+To keep a typed insert's row through teardown, opt out:
+
+```hcl
+action "postgres_insert" "reference_data" {
+  table  = "regions"
+  values = { code = "eu" }
+
+  lifecycle {
+    managed_teardown = false
+  }
+}
+```
+
+Tables without a primary key get no automatic teardown, since there's no way
+to target just the inserted row. Updates and deletes don't either; give them an
+explicit `teardown` block if they need one.
+
 ## `orchard teardown <record>`
 
 Hand the record file to `orchard teardown` and Orchard walks the scenario in
@@ -97,7 +135,7 @@ not stop at the first stubborn row.
   email, a run tag) if you may need to clean up from a lost record.
 - **Non-reversible actions.** Sending an email, enqueuing a message, firing a
   webhook — these don't have an inverse. Leave them without a `lifecycle`
-  block; teardown skips actions that don't declare one.
+  block; teardown skips actions that declare none and have no automatic undo.
 - **Bulk isolation-based cleanup.** For heavy scenarios, a cleaner pattern is
   to create resources inside a dedicated isolation boundary (a Postgres
   schema-per-run, a tenant tag) and drop the whole boundary rather than
@@ -120,9 +158,9 @@ not stop at the first stubborn row.
 
 ## What doesn't (yet) exist
 
-- **Managed teardowns.** Built-in actions don't generate their own teardowns
-  today. When the typed DB provider lands, `db.insert` will auto-produce its
-  `DELETE` without the author writing one.
+- **Automatic teardown beyond inserts.** Restoring the previous values of a
+  typed update, or re-inserting what a typed delete removed, isn't automatic
+  yet.
 - **Scenario-level lifecycle policies** (`on_failure = "rollback"`). Planned;
   not yet implemented.
 - **`orchard run --teardown` one-shot.** Also planned.

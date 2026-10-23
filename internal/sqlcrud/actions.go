@@ -162,6 +162,43 @@ func (a *Actions) Execute(ctx context.Context, action string, attrs map[string]c
 	}
 }
 
+// Inverse describes how to undo a typed insert: delete the row by its
+// primary key, read from the inserted row. Updates, deletes, tables
+// without a primary key, and rows whose key didn't come back have no
+// automatic undo. It uses the schema cached when the insert ran, so it
+// does no I/O.
+func (a *Actions) Inverse(action string, attrs, outputs map[string]cty.Value) *provider.Invocation {
+	if verb, _ := a.Verb(action); verb != "insert" {
+		return nil
+	}
+	a.mu.Lock()
+	s := a.schema
+	a.mu.Unlock()
+	table := attrs["table"]
+	if s == nil || !table.IsKnown() || table.IsNull() {
+		return nil
+	}
+	t, err := s.Lookup(table.AsString())
+	if err != nil || len(t.PrimaryKey) == 0 {
+		return nil
+	}
+	where := make(map[string]cty.Value, len(t.PrimaryKey))
+	for _, col := range t.PrimaryKey {
+		v, ok := outputs[col]
+		if !ok || !v.IsKnown() || v.IsNull() {
+			return nil
+		}
+		where[col] = v
+	}
+	return &provider.Invocation{
+		Action: a.Prefix + "_delete",
+		Attrs: map[string]cty.Value{
+			"table": cty.StringVal(t.Key()),
+			"where": cty.ObjectVal(where),
+		},
+	}
+}
+
 // table looks a table up, re-reading the schema once on a miss in case
 // an earlier action created it.
 func (a *Actions) table(ctx context.Context, name string) (*dbschema.Table, error) {

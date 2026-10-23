@@ -192,3 +192,51 @@ func planOffline(t *testing.T, path, alias string, snap *snapshot.Snapshot) erro
 	require.NoError(t, eng.ValidateGraph(g))
 	return eng.ValidateReferences(context.Background(), ps, g)
 }
+
+// TestManagedTeardown runs chained typed inserts with no lifecycle
+// blocks and tears them down from the record, on Postgres and MySQL.
+// The products foreign key means the undo steps must run in reverse.
+func TestManagedTeardown(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("postgres", func(t *testing.T) {
+		resetDB(t)
+		scenario := "testdata/scenarios/typed_teardown_postgres.hcl"
+		vars := map[string]string{"dsn": testDSN}
+		out, rec := runScenarioWithRecord(t, scenario, vars, t.TempDir())
+		assertMerchantExists(t, ctyInt(t, out["merchant_id"]), true)
+		assertProductExists(t, ctyInt(t, out["product_id"]), true)
+
+		runTeardown(t, scenario, vars, rec)
+		assertMerchantExists(t, ctyInt(t, out["merchant_id"]), false)
+		assertProductExists(t, ctyInt(t, out["product_id"]), false)
+	})
+
+	t.Run("mysql", func(t *testing.T) {
+		host, port := mysqlServer(t)
+		root, err := sql.Open("mysql", fmt.Sprintf("root:orchard@tcp(%s:%s)/?multiStatements=true", host, port))
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = root.Close() })
+		_, err = root.ExecContext(ctx, `
+			DROP DATABASE IF EXISTS teardown_test;
+			CREATE DATABASE teardown_test;
+			USE teardown_test;
+			CREATE TABLE merchants (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(100) NOT NULL) ENGINE=InnoDB;
+			CREATE TABLE products (
+				id INT AUTO_INCREMENT PRIMARY KEY, merchant_id INT NOT NULL, name VARCHAR(100) NOT NULL, price DECIMAL(10,2) NOT NULL,
+				FOREIGN KEY (merchant_id) REFERENCES merchants (id)
+			) ENGINE=InnoDB;`)
+		require.NoError(t, err)
+
+		scenario := "testdata/scenarios/typed_teardown_mysql.hcl"
+		vars := map[string]string{"dsn": fmt.Sprintf("mysql://root:orchard@%s:%s/teardown_test", host, port)}
+		_, rec := runScenarioWithRecord(t, scenario, vars, t.TempDir())
+		runTeardown(t, scenario, vars, rec)
+
+		for _, table := range []string{"products", "merchants"} {
+			var n int
+			require.NoError(t, root.QueryRowContext(ctx, "SELECT COUNT(*) FROM teardown_test."+table).Scan(&n))
+			assert.Zero(t, n, "%s should be empty after teardown", table)
+		}
+	})
+}

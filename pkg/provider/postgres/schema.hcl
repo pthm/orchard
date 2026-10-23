@@ -162,6 +162,10 @@ provider "postgres" {
       columns exist, every value fits its column, every required column (not
       nullable, no default, not generated) is set, and no generated column is.
       The outputs are the inserted row, including generated ids and defaults.
+
+      `orchard teardown` deletes the row again by its primary key, unless the action
+      has its own `lifecycle { teardown { } }` block or sets
+      `lifecycle { managed_teardown = false }`.
     MD
 
     attribute "table" {

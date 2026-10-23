@@ -17,12 +17,14 @@ package record
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"time"
 
 	"github.com/zclconf/go-cty/cty"
 
 	"github.com/pthm/orchard/pkg/protocol"
+	"github.com/pthm/orchard/pkg/provider"
 )
 
 // Format is a monotonically-increasing record format version. Bump
@@ -76,6 +78,18 @@ type Node struct {
 	Status     string                     `json:"status"`
 	Outputs    map[string]json.RawMessage `json:"outputs,omitempty"`
 	Error      string                     `json:"error,omitempty"`
+	// Undo is how the node's provider says to reverse it (a typed
+	// insert: delete the row by its primary key). `orchard teardown`
+	// runs it when the action has no explicit teardown block. Records
+	// from before undo existed simply don't have it.
+	Undo *Undo `json:"undo,omitempty"`
+}
+
+// Undo is a recorded provider.Invocation: an action and its evaluated
+// attributes.
+type Undo struct {
+	Action string                     `json:"action"`
+	Attrs  map[string]json.RawMessage `json:"attrs"`
 }
 
 // EncodeCty serialises a map of cty values using ctyjson, preserving
@@ -134,6 +148,23 @@ func IndexOutputs(r *Record) (map[string]map[string]cty.Value, error) {
 			return nil, err
 		}
 		out[n.ID] = m
+	}
+	return out, nil
+}
+
+// IndexUndos decodes each succeeded node's undo invocation, keyed by
+// full node ID, for engine.Teardown. Nodes without one are omitted.
+func IndexUndos(r *Record) (map[string]provider.Invocation, error) {
+	out := map[string]provider.Invocation{}
+	for _, n := range r.Nodes {
+		if n.Status != StatusSucceeded || n.Undo == nil {
+			continue
+		}
+		attrs, err := DecodeCty(n.Undo.Attrs)
+		if err != nil {
+			return nil, fmt.Errorf("%s: undo: %w", n.ID, err)
+		}
+		out[n.ID] = provider.Invocation{Action: n.Undo.Action, Attrs: attrs}
 	}
 	return out, nil
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
+	"github.com/zclconf/go-cty/cty"
 
 	"github.com/pthm/orchard/internal/parser"
 )
@@ -58,6 +59,11 @@ type Node struct {
 	// non-nil Teardown in reverse topological order; actions with
 	// no Teardown are skipped.
 	Teardown hcl.Body
+
+	// NoManagedTeardown is set by `lifecycle { managed_teardown =
+	// false }`: the action's provider may know how to undo it (a typed
+	// insert deletes its row), but the scenario opted out.
+	NoManagedTeardown bool
 
 	// SourceRange locates the action's definition in its source
 	// file. Non-zero when the body was parsed from HCL text (the
@@ -120,17 +126,18 @@ func Build(ps *parser.ParsedScenario) (*Graph, error) {
 				return nil, fmt.Errorf("action %s: %w", id, err)
 			}
 			if err := addNode(&Node{
-				ID:            id,
-				Kind:          ActionNode,
-				ActionType:    action.Type,
-				Body:          body,
-				ProviderAlias: reserved.ProviderAlias,
-				Dependencies:  reserved.DependsOn,
-				Timeout:       reserved.Timeout,
-				Retry:         reserved.Retry,
-				Teardown:      reserved.Teardown,
-				Instance:      inst,
-				SourceRange:   actionSourceRange(action.Remain),
+				ID:                id,
+				Kind:              ActionNode,
+				ActionType:        action.Type,
+				Body:              body,
+				ProviderAlias:     reserved.ProviderAlias,
+				Dependencies:      reserved.DependsOn,
+				Timeout:           reserved.Timeout,
+				Retry:             reserved.Retry,
+				Teardown:          reserved.Teardown,
+				NoManagedTeardown: reserved.NoManagedTeardown,
+				Instance:          inst,
+				SourceRange:       actionSourceRange(action.Remain),
 			}); err != nil {
 				return nil, err
 			}
@@ -160,17 +167,18 @@ func Build(ps *parser.ParsedScenario) (*Graph, error) {
 				return nil, fmt.Errorf("action %s: %w", actionID, err)
 			}
 			if err := addNode(&Node{
-				ID:            actionID,
-				Kind:          ActionNode,
-				ActionType:    action.Type,
-				Body:          body,
-				ComponentKey:  key,
-				ProviderAlias: reserved.ProviderAlias,
-				Dependencies:  reserved.DependsOn,
-				Timeout:       reserved.Timeout,
-				Retry:         reserved.Retry,
-				Teardown:      reserved.Teardown,
-				SourceRange:   actionSourceRange(action.Remain),
+				ID:                actionID,
+				Kind:              ActionNode,
+				ActionType:        action.Type,
+				Body:              body,
+				ComponentKey:      key,
+				ProviderAlias:     reserved.ProviderAlias,
+				Dependencies:      reserved.DependsOn,
+				Timeout:           reserved.Timeout,
+				Retry:             reserved.Retry,
+				Teardown:          reserved.Teardown,
+				NoManagedTeardown: reserved.NoManagedTeardown,
+				SourceRange:       actionSourceRange(action.Remain),
 			}); err != nil {
 				return nil, err
 			}
@@ -425,10 +433,13 @@ var reservedActionSchema = &hcl.BodySchema{
 	},
 }
 
-// lifecycleBodySchema parses the inside of a lifecycle { ... } block.
-// Today only `teardown { }` is supported; future additions (pre,
-// post, rollback) would live alongside it here.
+// lifecycleBodySchema parses the inside of a lifecycle { ... } block:
+// a `teardown { }` block and the `managed_teardown` flag. Future
+// additions (pre, post, rollback) would live alongside them here.
 var lifecycleBodySchema = &hcl.BodySchema{
+	Attributes: []hcl.AttributeSchema{
+		{Name: "managed_teardown"},
+	},
 	Blocks: []hcl.BlockHeaderSchema{
 		{Type: "teardown"},
 	},
@@ -501,6 +512,9 @@ type reservedActionAttrs struct {
 	// block. nil means the action has no teardown — it is skipped
 	// by `orchard teardown`.
 	Teardown hcl.Body
+
+	// NoManagedTeardown records `managed_teardown = false`.
+	NoManagedTeardown bool
 }
 
 // extractReservedActionAttrs pulls orchard-reserved attributes off
@@ -594,11 +608,12 @@ func extractReservedActionAttrs(body hcl.Body, componentKey string) (reservedAct
 		return out, nil, fmt.Errorf("lifecycle: at most one lifecycle block per action, got %d", len(lifecycleBlocks))
 	}
 	if len(lifecycleBlocks) == 1 {
-		tdBody, err := parseLifecycleBlock(lifecycleBlocks[0])
+		tdBody, managed, err := parseLifecycleBlock(lifecycleBlocks[0])
 		if err != nil {
 			return out, nil, fmt.Errorf("lifecycle: %w", err)
 		}
 		out.Teardown = tdBody
+		out.NoManagedTeardown = !managed
 	}
 
 	return out, remain, nil
@@ -622,14 +637,22 @@ func actionSourceRange(body hcl.Body) hcl.Range {
 }
 
 // parseLifecycleBlock extracts the teardown block's body from a
-// lifecycle block. Returns nil when the lifecycle block has no
-// teardown — that is legal even if currently useless, because
-// future lifecycle members (pre, post, rollback) would also slot in
-// here without forcing existing scenarios to declare teardown.
-func parseLifecycleBlock(block *hcl.Block) (hcl.Body, error) {
+// lifecycle block, and whether managed teardown is on (it is unless
+// `managed_teardown = false`). The body is nil when the lifecycle block
+// has no teardown — that is legal, since managed_teardown and future
+// lifecycle members (pre, post, rollback) live here too.
+func parseLifecycleBlock(block *hcl.Block) (hcl.Body, bool, error) {
 	content, diags := block.Body.Content(lifecycleBodySchema)
 	if diags.HasErrors() {
-		return nil, fmt.Errorf("%s", diags.Error())
+		return nil, false, fmt.Errorf("%s", diags.Error())
+	}
+	managed := true
+	if attr, ok := content.Attributes["managed_teardown"]; ok {
+		v, diags := attr.Expr.Value(nil)
+		if diags.HasErrors() || v.Type() != cty.Bool || v.IsNull() {
+			return nil, false, fmt.Errorf("managed_teardown must be true or false")
+		}
+		managed = v.True()
 	}
 	var tds []*hcl.Block
 	for _, b := range content.Blocks {
@@ -638,12 +661,12 @@ func parseLifecycleBlock(block *hcl.Block) (hcl.Body, error) {
 		}
 	}
 	if len(tds) > 1 {
-		return nil, fmt.Errorf("teardown: at most one teardown block per lifecycle, got %d", len(tds))
+		return nil, false, fmt.Errorf("teardown: at most one teardown block per lifecycle, got %d", len(tds))
 	}
 	if len(tds) == 0 {
-		return nil, nil
+		return nil, managed, nil
 	}
-	return tds[0].Body, nil
+	return tds[0].Body, managed, nil
 }
 
 // parseRetryBlock decodes the attributes of a retry { ... } block

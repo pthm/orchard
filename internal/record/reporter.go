@@ -13,6 +13,7 @@ import (
 
 	"github.com/pthm/orchard/internal/engine"
 	"github.com/pthm/orchard/internal/parser"
+	"github.com/pthm/orchard/pkg/provider"
 )
 
 // Writer accepts a rendered Record. The default implementation
@@ -177,6 +178,22 @@ func (r *Reporter) NodeCompleted(nodeID string, outputs map[string]cty.Value, d 
 		Outputs:    encoded,
 	})
 	r.inner.NodeCompleted(nodeID, outputs, d)
+}
+
+// NodeUndo implements engine.UndoReporter: it attaches the undo
+// invocation to the node that just completed.
+func (r *Reporter) NodeUndo(nodeID string, undo provider.Invocation) {
+	attrs, err := EncodeCty(undo.Attrs)
+	if err != nil {
+		_, _ = fmt.Fprintf(r.log, "orchard: record: encode undo for %s: %v\n", nodeID, err)
+		return
+	}
+	for i := len(r.nodes) - 1; i >= 0; i-- {
+		if r.nodes[i].ID == nodeID {
+			r.nodes[i].Undo = &Undo{Action: undo.Action, Attrs: attrs}
+			return
+		}
+	}
 }
 
 // NodeFailed implements engine.Reporter.

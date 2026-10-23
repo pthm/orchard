@@ -175,12 +175,13 @@ the record, and evaluates each action's `lifecycle { teardown { } }` body in
 3. Verify the scenario name matches the one in the record (reject if the file
    has been rewritten to declare a different scenario).
 4. Register and configure providers using the scenario's current config blocks.
-5. Walk the dependency graph in reverse; for each action that (a) has a
-   `lifecycle { teardown { } }` block, (b) succeeded in the recorded run, and
-   (c) still routes to a registered provider, evaluate the teardown body and
-   dispatch it through the provider.
-6. Skip actions without teardown blocks, actions whose original run failed, and
-   component nodes.
+5. Walk the dependency graph in reverse; for each action that succeeded in the
+   recorded run and still routes to a registered provider, run its
+   `lifecycle { teardown { } }` body if it has one, or otherwise the undo step
+   its provider recorded (a typed insert's delete by primary key), unless the
+   action sets `managed_teardown = false`.
+6. Skip actions with neither, actions whose original run failed, and component
+   nodes.
 
 Teardown is **best-effort**: a failure on one action doesn't abort the walk.
 The joined set of errors is returned at the end.

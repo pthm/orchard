@@ -52,6 +52,10 @@ func newTeardownCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("decoding record outputs: %w", err)
 			}
+			undos, err := record.IndexUndos(rec)
+			if err != nil {
+				return fmt.Errorf("decoding record undo steps: %w", err)
+			}
 
 			// Reload the scenario. The record's scenario.path is
 			// absolute, so it resolves regardless of cwd. Use the
@@ -108,7 +112,7 @@ func newTeardownCmd() *cobra.Command {
 				ForcePlain: noColorFlag,
 			}))
 
-			return eng.Teardown(ctx, ps, g, vars, outputs)
+			return eng.Teardown(ctx, ps, g, vars, outputs, undos)
 		},
 	}
 }

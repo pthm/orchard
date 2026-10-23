@@ -60,6 +60,19 @@ type Engine struct {
 	// had no schema to check against.
 	planTypes map[graph.NodeID]cty.Type
 	unchecked map[string]bool
+
+	// undos holds, during Execute, the undo invocation each succeeded
+	// action's provider described (see provider.Inverter).
+	undos map[graph.NodeID]*provider.Invocation
+}
+
+// UndoReporter is implemented by reporters that keep run records.
+// After NodeCompleted, the engine passes it the invocation that undoes
+// the action, when the action's provider described one and the action
+// has no explicit teardown block and hasn't opted out with
+// `managed_teardown = false`.
+type UndoReporter interface {
+	NodeUndo(nodeID string, undo provider.Invocation)
 }
 
 // Reporter receives observability events from the engine's
@@ -301,6 +314,7 @@ func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *grap
 	// the inputs.
 	compVars := make(map[string]map[string]cty.Value)
 
+	e.undos = map[graph.NodeID]*provider.Invocation{}
 	runStart := time.Now()
 	e.reporter.RunStarted(ps.Scenario.Name)
 	succeeded := 0
@@ -342,6 +356,11 @@ func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *grap
 			}
 			resolved[string(nodeID)] = outputs
 			e.reporter.NodeCompleted(string(nodeID), outputs, time.Since(start))
+			if undo := e.undos[nodeID]; undo != nil {
+				if ur, ok := e.reporter.(UndoReporter); ok {
+					ur.NodeUndo(string(nodeID), *undo)
+				}
+			}
 			succeeded++
 
 		case graph.ComponentNode:
@@ -480,6 +499,12 @@ func (e *Engine) executeActionOnce(
 		// Don't prefix with node.ID here — the caller in Execute
 		// already wraps with "executing <nodeID> (file:line)".
 		return nil, fmt.Errorf("output validation: %w", err)
+	}
+	// An explicit teardown block wins over the provider's own undo.
+	if inv, ok := p.(provider.Inverter); ok && node.Teardown == nil && !node.NoManagedTeardown {
+		if undo := inv.Inverse(route.actionName, attrs, validated); undo != nil {
+			e.undos[node.ID] = undo
+		}
 	}
 	return validated, nil
 }

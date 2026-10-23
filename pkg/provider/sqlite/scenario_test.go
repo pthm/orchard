@@ -99,7 +99,11 @@ func TestScenarioRunAndTeardown(t *testing.T) {
 	}
 
 	ps, g, eng = load(t, scenario, vars)
-	if err := eng.Teardown(context.Background(), ps, g, recVars, recOutputs); err != nil {
+	undos, err := record.IndexUndos(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Teardown(context.Background(), ps, g, recVars, recOutputs, undos); err != nil {
 		t.Fatalf("teardown: %v", err)
 	}
 	assertCount(t, db, "products", 0)
@@ -232,4 +236,104 @@ func run(t *testing.T, scenario, dbPath string) map[string]cty.Value {
 		t.Fatalf("run: %v", err)
 	}
 	return result.Outputs
+}
+
+func TestManagedTeardown(t *testing.T) {
+	path, db := newShopDB(t)
+	if _, err := db.Exec("CREATE TABLE log (msg TEXT NOT NULL)"); err != nil {
+		t.Fatal(err)
+	}
+	const scenario = "testdata/typed_teardown.hcl"
+	vars := map[string]string{"path": path}
+
+	rec := runRecorded(t, scenario, vars)
+	undos := map[string]string{}
+	for _, n := range rec.Nodes {
+		if n.Undo != nil {
+			undos[n.ID] = n.Undo.Action
+		}
+	}
+	want := map[string]string{
+		"action.sqlite_insert.merchant": "sqlite_delete",
+		"action.sqlite_insert.product":  "sqlite_delete",
+	}
+	if len(undos) != len(want) || undos["action.sqlite_insert.merchant"] != "sqlite_delete" || undos["action.sqlite_insert.product"] != "sqlite_delete" {
+		t.Fatalf("recorded undos: %v, want %v (opted-out and explicit-teardown actions record none)", undos, want)
+	}
+
+	teardown(t, scenario, vars, rec)
+
+	assertCount(t, db, "products", 0)
+	rows, err := db.Query("SELECT name FROM merchants ORDER BY name")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var left []string
+	for rows.Next() {
+		var n string
+		_ = rows.Scan(&n)
+		left = append(left, n)
+	}
+	_ = rows.Close()
+	if strings.Join(left, ",") != "Kept,Noted" {
+		t.Fatalf("merchants after teardown: %v, want Kept (opted out) and Noted (explicit teardown)", left)
+	}
+	var msg string
+	if err := db.QueryRow("SELECT msg FROM log").Scan(&msg); err != nil || !strings.HasPrefix(msg, "noted ") {
+		t.Fatalf("explicit teardown should have run: %q %v", msg, err)
+	}
+}
+
+// runRecorded runs a scenario writing a run record, and returns the
+// record as loaded back from disk.
+func runRecorded(t *testing.T, scenario string, vars map[string]string) *record.Record {
+	t.Helper()
+	ps, g, eng := load(t, scenario, vars)
+	if err := eng.ValidateReferences(context.Background(), ps, g); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	dir := t.TempDir()
+	rep, err := record.NewReporter(record.Options{
+		Writer:    record.FileWriter{Dir: dir},
+		Scenario:  record.ScenarioFromParser(ps, scenario),
+		Variables: ps.Variables,
+		LogOutput: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng.SetReporter(rep)
+	if _, err := eng.Execute(context.Background(), ps, g); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("expected one record, got %v (%v)", entries, err)
+	}
+	rec, err := record.Load(filepath.Join(dir, entries[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rec
+}
+
+// teardown tears a recorded run down, the way `orchard teardown` does.
+func teardown(t *testing.T, scenario string, vars map[string]string, rec *record.Record) {
+	t.Helper()
+	recVars, err := record.DecodeCty(rec.Variables)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputs, err := record.IndexOutputs(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	undos, err := record.IndexUndos(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ps, g, eng := load(t, scenario, vars)
+	if err := eng.Teardown(context.Background(), ps, g, recVars, outputs, undos); err != nil {
+		t.Fatalf("teardown: %v", err)
+	}
 }

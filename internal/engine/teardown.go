@@ -12,19 +12,26 @@ import (
 
 	"github.com/pthm/orchard/internal/graph"
 	"github.com/pthm/orchard/internal/parser"
+	"github.com/pthm/orchard/pkg/provider"
 )
 
 // Teardown walks the scenario graph in reverse topological order and
-// runs each action's `lifecycle { teardown { } }` body against its
-// provider. vars + recordedOutputs are the state a prior
-// `orchard run` captured in its record — the scenario's resolved
-// variables, and each succeeded node's outputs keyed by full node
-// ID ("action.sql.create_merchant" etc.).
+// undoes each action that succeeded in a prior `orchard run`. vars,
+// recordedOutputs and undos are the state that run captured in its
+// record: the scenario's resolved variables, each succeeded node's
+// outputs, and the undo invocations providers described, keyed by full
+// node ID ("action.sql.create_merchant" etc.).
 //
-// Only nodes that (a) have a teardown body, (b) have a matching
-// entry in recordedOutputs, and (c) still route to a registered
-// provider are processed. Actions without teardown bodies, actions
-// whose original run failed, and component nodes are skipped.
+// For each action, in order of precedence:
+//  1. its `lifecycle { teardown { } }` body, evaluated and run against
+//     its provider;
+//  2. otherwise its recorded undo invocation (a typed insert's delete
+//     by primary key), unless the scenario now says
+//     `managed_teardown = false`;
+//  3. otherwise nothing.
+//
+// Actions whose original run failed, actions that no longer route to a
+// registered provider, and component nodes are skipped.
 //
 // Teardown is best-effort: failures on individual actions are
 // logged via the reporter's NodeFailed hook but don't abort the
@@ -52,6 +59,7 @@ func (e *Engine) Teardown(
 	g *graph.Graph,
 	vars map[string]cty.Value,
 	recordedOutputs map[string]map[string]cty.Value,
+	undos map[string]provider.Invocation,
 ) error {
 	e.reporter.RunStarted(ps.Scenario.Name)
 	start := time.Now()
@@ -71,21 +79,28 @@ func (e *Engine) Teardown(
 		if node.Kind != graph.ActionNode {
 			continue
 		}
-		if node.Teardown == nil {
-			continue
-		}
-		// Only teardown what actually ran successfully. Failed or
-		// missing entries in the record imply nothing was created;
-		// attempting teardown would at best be a no-op and at worst
-		// fail with confusing errors.
-		selfOutputs, ok := recordedOutputs[string(nodeID)]
-		if !ok {
+		var run func() error
+		undo, hasUndo := undos[string(nodeID)]
+		switch {
+		case node.Teardown != nil:
+			// Only teardown what actually ran successfully. Failed or
+			// missing entries in the record imply nothing was created;
+			// attempting teardown would at best be a no-op and at worst
+			// fail with confusing errors.
+			selfOutputs, ok := recordedOutputs[string(nodeID)]
+			if !ok {
+				continue
+			}
+			run = func() error { return e.teardownAction(ctx, node, vars, selfOutputs, recordedOutputs) }
+		case hasUndo && !node.NoManagedTeardown:
+			run = func() error { return e.runUndo(ctx, node, undo) }
+		default:
 			continue
 		}
 
 		e.reporter.NodeStarted(string(nodeID))
 		nodeStart := time.Now()
-		err := e.teardownAction(ctx, node, vars, selfOutputs, recordedOutputs)
+		err := run()
 		if err != nil {
 			e.reporter.NodeFailed(string(nodeID), err)
 			errs = append(errs, fmt.Errorf("%s%s: %w", nodeID, formatSourceLoc(node.SourceRange), err))
@@ -157,6 +172,28 @@ func (e *Engine) teardownAction(
 		return err
 	}
 	return nil
+}
+
+// runUndo runs a recorded undo invocation against the node's provider.
+// The attributes were evaluated when the action ran, so there's nothing
+// to evaluate now.
+func (e *Engine) runUndo(ctx context.Context, node *graph.Node, undo provider.Invocation) error {
+	route, err := e.resolveRoute(node.ActionType, node.ProviderAlias)
+	if err != nil {
+		return err
+	}
+	p, err := e.registry.Get(route.providerAlias)
+	if err != nil {
+		return err
+	}
+	execCtx := ctx
+	if node.Timeout > 0 {
+		var cancel context.CancelFunc
+		execCtx, cancel = context.WithTimeout(ctx, node.Timeout)
+		defer cancel()
+	}
+	_, err = p.Execute(execCtx, undo.Action, undo.Attrs)
+	return err
 }
 
 // buildTeardownEvalContext composes the reference namespaces

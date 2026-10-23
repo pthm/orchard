@@ -645,13 +645,12 @@ Teardown walks the graph in reverse of the execute order. For `merchant → prod
 
 Teardown is best-effort: a per-action failure is surfaced through the reporter but doesn't abort the walk, and the joined set of errors is returned at the end. Rationale: manual cleanup typically wants "get as far as you can, tell me what's still there" rather than "stop at the first unexpected row". A fail-fast flag can grow later if automation demands it.
 
-### Resource Ownership (future)
+### Resource Ownership
 
-Today teardown depends on the scenario author writing a `lifecycle { teardown { } }` for every action they want cleaned up. A future pass will let providers advertise a **managed** teardown strategy — e.g. `db.insert` auto-generates the matching `DELETE`, closing the loop so plain CRUD actions don't need authored teardowns. That belongs with Milestone 4 (Schema-Aware Database Provider), where the typed DB layer already carries the primary-key metadata needed to generate the inverse.
-
-Until then, resources are one of:
-- **Explicit** — cleanup declared via `lifecycle { teardown { } }`.
-- **Unmanaged** — no automatic cleanup (sending an email, enqueuing a message, HTTP calls without an idempotent delete endpoint).
+Resources are one of:
+- **Explicit** — cleanup declared via `lifecycle { teardown { } }`. Always wins.
+- **Managed** — the provider records how to undo the action when it runs (`provider.Inverter`), stored as the node's `undo` in the run record. Typed inserts (`<p>_insert`) are managed: the undo deletes the row by its primary key. `lifecycle { managed_teardown = false }` opts an action out.
+- **Unmanaged** — no automatic cleanup (sending an email, enqueuing a message, HTTP calls without an idempotent delete endpoint, typed updates and deletes).
 
 ### Failure Behavior (future)
 
@@ -994,7 +993,8 @@ Make cleanup a first-class operation so that scenarios can be torn down cleanly,
 | Reverse-order cleanup driven by the dependency graph | Done |
 | Best-effort teardown with joined error reporting | Done |
 | End-to-end integration test over Postgres (FK-bound merchant+product) | Done |
-| Managed cleanup for `<p>_insert` / `<p>_update` actions (depends on M4) | Not started |
+| Managed cleanup for `<p>_insert` (undo recorded at run time; `managed_teardown = false` opts out) | Done |
+| Managed cleanup for `<p>_update` (restore previous values) | Not started |
 | `lifecycle` blocks on scenarios (`on_failure`, `on_success` policies) | Not started |
 | Rollback on partial failure | Not started |
 | `orchard list runs` — list past runs | Not started |
@@ -1205,7 +1205,9 @@ pkg/ (public SDK surface)
     provider.go                 Provider interface (Schema/Configure/Execute/Close) + Registry
     builtins.go                 Source-string → factory-function registry for "builtin/*"
     schema_source.go            Optional SchemaSource interface (PullSchema) for `orchard schema pull`
-    planner.go                  Optional ActionPlanner interface (PlanAction), called before a run
+    planner.go                  Optional ActionPlanner (PlanAction, ErrNoSchema) and PlanConfigurer
+                                (snapshot at plan time) interfaces
+    inverter.go                 Optional Inverter interface: the undo step recorded for teardown
     postgres/                   builtin/postgres — postgres_query (raw SQL) +
                                 postgres_copy (COPY FROM STDIN bulk load)
       schema.hcl                Embedded via //go:embed; carries description, notes,

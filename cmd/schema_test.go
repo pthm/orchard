@@ -224,3 +224,65 @@ func writeFile(t *testing.T, path, content string) {
 		t.Fatal(err)
 	}
 }
+
+// TestSnapshotDrift: after the database changes, schema pull --check
+// lists the differences and fails, and run warns before executing.
+// Re-pulling brings the snapshot back up to date.
+func TestSnapshotDrift(t *testing.T) {
+	project := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(project, ".orchard"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db := filepath.Join(project, "shop.db")
+	createDB(t, db, "CREATE TABLE merchants (id INTEGER PRIMARY KEY, name TEXT NOT NULL)")
+	scenario := filepath.Join(project, "shop.hcl")
+	writeFile(t, scenario, `scenario "shop" {
+  required_providers {
+    db = { source = "builtin/sqlite" }
+  }
+  provider "db" {
+    path = "./shop.db"
+  }
+  action "sqlite_insert" "merchant" {
+    table  = "merchants"
+    values = { name = "Acme" }
+  }
+}
+`)
+	if out, err := runCLI(t, "schema", "pull", scenario); err != nil {
+		t.Fatalf("pull: %v\n%s", err, out)
+	}
+	if out, err := runCLI(t, "schema", "pull", scenario, "--check"); err != nil || !strings.Contains(out, "up to date") {
+		t.Fatalf("a fresh snapshot should be up to date: %v\n%s", err, out)
+	}
+
+	createDB(t, db, `
+		ALTER TABLE merchants ADD COLUMN region TEXT;
+		CREATE TABLE products (id INTEGER PRIMARY KEY);`)
+
+	out, err := runCLI(t, "schema", "pull", scenario, "--check")
+	if err == nil || !strings.Contains(err.Error(), "1 snapshot(s) missing or out of date") {
+		t.Fatalf("--check should fail on drift: %v\n%s", err, out)
+	}
+	for _, want := range []string{"out of date", `column "merchants.region" added`, `table "products" added`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("--check output is missing %q:\n%s", want, out)
+		}
+	}
+
+	out, err = runCLI(t, "run", scenario, "--no-record", "--no-color")
+	if err != nil {
+		t.Fatalf("drift should only warn: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, `warning: the schema snapshot for provider "db" is out of date`) ||
+		!strings.Contains(out, `column "merchants.region" added`) {
+		t.Fatalf("run should warn about drift:\n%s", out)
+	}
+
+	if out, err := runCLI(t, "schema", "pull", scenario); err != nil {
+		t.Fatalf("re-pull: %v\n%s", err, out)
+	}
+	if out, err := runCLI(t, "schema", "pull", scenario, "--check"); err != nil || !strings.Contains(out, "up to date") {
+		t.Fatalf("after re-pulling, --check should pass: %v\n%s", err, out)
+	}
+}

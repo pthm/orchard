@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/pthm/orchard/pkg/dbschema"
 	"github.com/pthm/orchard/pkg/provider"
@@ -31,6 +32,9 @@ func (p *Provider) PullSchema(ctx context.Context, opts provider.PullOptions) (*
 
 func (p *Provider) introspect(ctx context.Context, schemas []string) (*dbschema.Schema, error) {
 	s := &dbschema.Schema{Dialect: "postgres", Tables: map[string]*dbschema.Table{}}
+	if len(schemas) > 0 {
+		s.Namespaces = slices.Sorted(slices.Values(schemas))
+	}
 	if err := p.pool.QueryRow(ctx, `SELECT current_database(), coalesce(current_schema(), '')`).
 		Scan(&s.Database, &s.DefaultSchema); err != nil {
 		return nil, err

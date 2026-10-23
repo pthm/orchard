@@ -2,9 +2,11 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +24,7 @@ var (
 	schemaScenarioFlag string
 	schemaSchemasFlag  []string
 	schemaForceFlag    bool
+	schemaCheckFlag    bool
 )
 
 func newSchemaCmd() *cobra.Command {
@@ -48,7 +51,11 @@ scenario, or a new one in the current directory. Commit snapshots so
 and re-run pull after migrations.
 
 pull won't replace a snapshot of a different database (two scenarios
-using one alias for different databases) unless --force is given.`,
+using one alias for different databases) unless --force is given.
+
+With --check, pull writes nothing: it compares each snapshot with the
+database, lists any differences, and fails if a snapshot is missing or
+out of date. Use it in CI.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -78,7 +85,7 @@ using one alias for different databases) unless --force is given.`,
 				}
 			}
 
-			pulled := 0
+			pulled, stale := 0, 0
 			for _, alias := range reg.Names() {
 				p, err := reg.Get(alias)
 				if err != nil {
@@ -88,11 +95,22 @@ using one alias for different databases) unless --force is given.`,
 				if !ok {
 					continue
 				}
+				path := snapshot.Path(project, alias)
+				if schemaCheckFlag {
+					ok, err := checkSnapshot(ctx, out, src, path)
+					if err != nil {
+						return fmt.Errorf("provider %q: %w", alias, err)
+					}
+					if !ok {
+						stale++
+					}
+					pulled++
+					continue
+				}
 				capture, err := src.PullSchema(ctx, provider.PullOptions{Schemas: schemaSchemasFlag})
 				if err != nil {
 					return fmt.Errorf("provider %q: %w", alias, err)
 				}
-				path := snapshot.Path(project, alias)
 				status, err := writeSnapshot(path, alias, ps.RequiredProviders[alias].Source, capture)
 				if err != nil {
 					return fmt.Errorf("provider %q: %w", alias, err)
@@ -107,6 +125,9 @@ using one alias for different databases) unless --force is given.`,
 			if pulled == 0 {
 				return errors.New("no provider in this scenario can capture a schema (postgres, mysql and sqlite can)")
 			}
+			if stale > 0 {
+				return fmt.Errorf("%d snapshot(s) missing or out of date; run \"orchard schema pull %s\" to update", stale, args[0])
+			}
 			return nil
 		},
 	}
@@ -116,6 +137,8 @@ using one alias for different databases) unless --force is given.`,
 		"Only capture these schemas (Postgres; comma-separated)")
 	cmd.Flags().BoolVar(&schemaForceFlag, "force", false,
 		"Replace a snapshot even if it's of a different database")
+	cmd.Flags().BoolVar(&schemaCheckFlag, "check", false,
+		"Compare snapshots with the database without writing; fail if any differ")
 	return cmd
 }
 
@@ -151,6 +174,106 @@ func writeSnapshot(path, alias, source string, capture *provider.Capture) (strin
 		return "", err
 	}
 	return "wrote", nil
+}
+
+// checkSnapshot compares the snapshot at path with the database and
+// reports the result to out. It returns false when the snapshot is
+// missing or out of date.
+func checkSnapshot(ctx context.Context, out io.Writer, src provider.SchemaSource, path string) (bool, error) {
+	snap, err := snapshot.Read(path)
+	if errors.Is(err, snapshot.ErrNotFound) {
+		fmt.Fprintf(out, "  missing %s\n", displayPath(path))
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	diffs, err := snapshotDiff(ctx, src, snap)
+	if err != nil {
+		return false, err
+	}
+	if len(diffs) == 0 {
+		fmt.Fprintf(out, "  up to date %s (%s)\n", displayPath(path), snap.Target)
+		return true, nil
+	}
+	fmt.Fprintf(out, "  out of date %s (%s):\n", displayPath(path), snap.Target)
+	writeDiffs(out, diffs, "    ")
+	return false, nil
+}
+
+// snapshotDiff captures the provider's schema again, with the same
+// scope as snap, and lists how the database differs from snap.
+func snapshotDiff(ctx context.Context, src provider.SchemaSource, snap *snapshot.Snapshot) ([]string, error) {
+	var old dbschema.Schema
+	if snap.Kind == dbschema.SnapshotKind {
+		if err := json.Unmarshal(snap.Body, &old); err != nil {
+			return nil, fmt.Errorf("read %s snapshot: %w", snap.Target, err)
+		}
+	}
+	capture, err := src.PullSchema(ctx, provider.PullOptions{Schemas: old.Namespaces})
+	if err != nil {
+		return nil, err
+	}
+	if capture.Target != snap.Target {
+		return []string{fmt.Sprintf("snapshot is of %s, but the provider now points at %s", snap.Target, capture.Target)}, nil
+	}
+	if snap.Kind != dbschema.SnapshotKind || capture.Kind != dbschema.SnapshotKind {
+		if sameJSON(snap.Body, capture.Body) {
+			return nil, nil
+		}
+		return []string{"schema changed"}, nil
+	}
+	var cur dbschema.Schema
+	if err := json.Unmarshal(capture.Body, &cur); err != nil {
+		return nil, err
+	}
+	return dbschema.Diff(&old, &cur), nil
+}
+
+// writeDiffs prints up to ten differences, then a count of the rest.
+func writeDiffs(out io.Writer, diffs []string, indent string) {
+	const shown = 10
+	for i, d := range diffs {
+		if i == shown {
+			fmt.Fprintf(out, "%s… and %d more\n", indent, len(diffs)-shown)
+			return
+		}
+		fmt.Fprintf(out, "%s- %s\n", indent, d)
+	}
+}
+
+// warnSnapshotDrift is run's check: for each provider with a committed
+// snapshot, warn when the database has drifted from it, so a stale
+// snapshot doesn't quietly weaken `orchard plan`. Problems checking are
+// warnings too; they never stop the run.
+func warnSnapshotDrift(ctx context.Context, errOut io.Writer, reg *provider.Registry, scenario string) {
+	snaps, err := loadSnapshots(scenario, reg.Names())
+	if err != nil {
+		fmt.Fprintf(errOut, "warning: couldn't read schema snapshots: %v\n", err)
+		return
+	}
+	for _, alias := range reg.Names() {
+		snap, ok := snaps[alias]
+		if !ok {
+			continue
+		}
+		p, _ := reg.Get(alias)
+		src, ok := p.(provider.SchemaSource)
+		if !ok {
+			continue
+		}
+		diffs, err := snapshotDiff(ctx, src, snap)
+		if err != nil {
+			fmt.Fprintf(errOut, "warning: couldn't check the %q schema snapshot against the database: %v\n", alias, err)
+			continue
+		}
+		if len(diffs) == 0 {
+			continue
+		}
+		fmt.Fprintf(errOut, "warning: the schema snapshot for provider %q is out of date with the database:\n", alias)
+		writeDiffs(errOut, diffs, "  ")
+		fmt.Fprintf(errOut, "  Run \"orchard schema pull %s\" to update it; until then, orchard plan checks against the old schema.\n", scenario)
+	}
 }
 
 // emptyDatabase reports whether capture is a database snapshot with no

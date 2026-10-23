@@ -140,7 +140,11 @@ nearest `.orchard/` directory above the scenario. Then:
 - **Commit the snapshot.** `orchard plan` in CI can then catch every check above
   with no database running, and schema changes show up in review.
 - **Re-pull after migrations.** Pulling an unchanged schema leaves the file alone,
-  so re-pulling is cheap and doesn't create noise.
+  so re-pulling is cheap and doesn't create noise. If a snapshot falls behind,
+  `orchard run` warns that it's out of date and lists what changed.
+- **Check it in CI.** `orchard schema pull <scenario> --check` writes nothing and
+  fails if a snapshot is missing or doesn't match the database, so a migration
+  without a re-pull doesn't slip through.
 - **A table the scenario creates itself** isn't in a snapshot pulled before the
   scenario first ran, so plan reports it missing. Run the scenario once and
   re-pull.

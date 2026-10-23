@@ -66,6 +66,7 @@ func newRunCmd() *cobra.Command {
 			if err := reg.Configure(ctx, ps.ProviderConfigs); err != nil {
 				return fmt.Errorf("configuring providers: %w", err)
 			}
+			warnSnapshotDrift(ctx, cmd.ErrOrStderr(), reg, args[0])
 
 			eng, err := engine.New(reg)
 			if err != nil {

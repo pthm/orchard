@@ -2,6 +2,9 @@
   "dialect": "postgres",
   "database": "orchard_test",
   "default_schema": "public",
+  "namespaces": [
+    "introspect"
+  ],
   "tables": {
     "introspect.events": {
       "schema": "introspect",

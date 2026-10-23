@@ -197,7 +197,7 @@ See [lifecycle](/docs/concepts/lifecycle/) for authoring guidance.
 ## `orchard schema pull`
 
 ```
-orchard schema pull <scenario> [--schemas a,b] [--force]
+orchard schema pull <scenario> [--schemas a,b] [--force] [--check]
 ```
 
 Snapshot the schema of each database the scenario uses. Orchard connects to
@@ -213,6 +213,7 @@ details are stored.
 | `--scenario <name>` | Pick a scenario by name when the file defines multiple. |
 | `--schemas a,b` | Postgres only: capture just these schemas. Useful when extensions add schemas full of internal tables. |
 | `--force` | Replace a snapshot even if it's of a different database. |
+| `--check` | Write nothing: compare each snapshot with the database, list the differences, and fail if any snapshot is missing or out of date. For CI. |
 
 **Behavior**
 
@@ -231,7 +232,15 @@ database (two scenarios using one alias for different databases), `pull`
 refuses to replace it. Rename the alias in one scenario, or pass `--force`.
 
 Commit snapshots so `orchard plan` can check scenarios against them without a
-database, and re-run `pull` after migrations.
+database, and re-run `pull` after migrations. If you forget, `orchard run` warns
+when a provider's snapshot no longer matches its database, and
+`orchard schema pull --check` fails, listing what changed:
+
+```
+  out of date .orchard/schema/db.json (postgres/app_dev):
+    - column "public.products.price": type numeric(10,2) → numeric(12,2)
+    - table "public.invoices" added
+```
 
 **Exit codes**
 

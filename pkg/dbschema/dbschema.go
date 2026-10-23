@@ -59,6 +59,10 @@ type Schema struct {
 	// against (Postgres's current_schema()). Empty for databases with
 	// a single namespace.
 	DefaultSchema string `json:"default_schema,omitempty"`
+	// Namespaces lists the schemas the capture was limited to (`schema
+	// pull --schemas`), so a later comparison captures the same scope.
+	// Empty means everything.
+	Namespaces []string `json:"namespaces,omitempty"`
 	// Tables is keyed by TableKey.
 	Tables map[string]*Table `json:"tables"`
 }

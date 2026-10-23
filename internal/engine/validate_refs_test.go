@@ -94,7 +94,7 @@ func validateReferencesFromHCL(t *testing.T, src string, providers map[string]pr
 	if err != nil {
 		return err
 	}
-	return eng.ValidateReferences(ps, g)
+	return eng.ValidateReferences(context.Background(), ps, g)
 }
 
 func TestValidateRefsTypoOnTypedOutput(t *testing.T) {

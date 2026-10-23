@@ -21,13 +21,7 @@ func (p *Provider) PullSchema(ctx context.Context, _ provider.PullOptions) (*pro
 	if p.db == nil {
 		return nil, fmt.Errorf("sqlite: not configured")
 	}
-	conn, err := p.db.Conn(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("sqlite: connect: %w", err)
-	}
-	defer func() { _ = conn.Close() }()
-
-	s, err := introspect(ctx, conn, p.path)
+	s, err := p.readSchema(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: read schema: %w", err)
 	}
@@ -36,6 +30,16 @@ func (p *Provider) PullSchema(ctx context.Context, _ provider.PullOptions) (*pro
 		return nil, err
 	}
 	return &provider.Capture{Kind: dbschema.SnapshotKind, Target: "sqlite/" + s.Database, Body: body}, nil
+}
+
+// readSchema reads the live schema on a connection of its own.
+func (p *Provider) readSchema(ctx context.Context) (*dbschema.Schema, error) {
+	conn, err := p.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = conn.Close() }()
+	return introspect(ctx, conn, p.path)
 }
 
 // introspect reads every table's columns, primary key and foreign

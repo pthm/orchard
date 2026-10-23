@@ -8,6 +8,10 @@ provider "postgres" {
   # free-form fields passes through to docs output literally.
   notes = <<-MD
     - Orchard does **not** manage schema. Tables must exist before the scenario runs.
+    - `postgres_insert`, `postgres_update` and `postgres_delete` are typed alternatives to `postgres_query`:
+      values are bound as parameters, and each action is checked against the live
+      schema before the run starts. A table that doesn't exist yet (because an
+      earlier action creates it) is checked when the action runs instead.
     - Each `sql` action runs in its own transaction. There is no cross-action
       transactional scope today — if you need atomicity across multiple statements,
       bundle them into one `query` with a `BEGIN;...COMMIT;` block, or use a CTE.
@@ -146,6 +150,127 @@ provider "postgres" {
           format  = "csv"
           header  = true
           file    = "./fixtures/products.csv"
+        }
+      HCL
+    }
+  }
+
+  action "postgres_insert" {
+    description = <<-MD
+      Insert one row. Values are sent as bind parameters, never pasted into SQL, and
+      are checked against the table's schema before the run starts: the table and
+      columns exist, every value fits its column, every required column (not
+      nullable, no default, not generated) is set, and no generated column is.
+      The outputs are the inserted row, including generated ids and defaults.
+    MD
+
+    attribute "table" {
+      type        = string
+      required    = true
+      description = "Table name, or `schema.name`. Unqualified names resolve against the connection's current schema."
+    }
+
+    attribute "values" {
+      type        = any
+      required    = true
+      description = "Object of `column = value`."
+    }
+
+    output {
+      type        = any
+      description = "The inserted row, keyed by column name. Columns come back typed by their kind: numbers, bools, strings, decoded JSON."
+    }
+
+    example {
+      description = "Insert a merchant, then a product that references it."
+      code        = <<-HCL
+        action "postgres_insert" "merchant" {
+          table  = "merchants"
+          values = { name = "Acme", region = "us" }
+        }
+
+        action "postgres_insert" "product" {
+          table  = "products"
+          values = {
+            merchant_id = action.postgres_insert.merchant.id
+            name        = "Widget"
+            price       = 9.99
+          }
+        }
+      HCL
+    }
+  }
+
+  action "postgres_update" {
+    description = <<-MD
+      Update the rows matching `where`, with the same checks and bind parameters as
+      `postgres_insert`. Generated columns can't be set.
+    MD
+
+    attribute "table" {
+      type        = string
+      required    = true
+      description = "Table name, or `schema.name`. Unqualified names resolve against the connection's current schema."
+    }
+
+    attribute "set" {
+      type        = any
+      required    = true
+      description = "Object of `column = new value`."
+    }
+
+    attribute "where" {
+      type        = any
+      required    = true
+      description = "Object of `column = value` conditions, joined with `AND`; `null` matches `NULL`. Must name at least one column, so an update can't hit every row by accident. Use `postgres_query` for anything more complex."
+    }
+
+    output {
+      type        = object({ rows_affected = number })
+      description = "`rows_affected`: how many rows the update changed."
+    }
+
+    example {
+      description = "Suspend the merchant inserted earlier."
+      code        = <<-HCL
+        action "postgres_update" "suspend" {
+          table = "merchants"
+          set   = { status = "suspended" }
+          where = { id = action.postgres_insert.merchant.id }
+        }
+      HCL
+    }
+  }
+
+  action "postgres_delete" {
+    description = <<-MD
+      Delete the rows matching `where`, checked against the table's schema before the
+      run starts.
+    MD
+
+    attribute "table" {
+      type        = string
+      required    = true
+      description = "Table name, or `schema.name`. Unqualified names resolve against the connection's current schema."
+    }
+
+    attribute "where" {
+      type        = any
+      required    = true
+      description = "Object of `column = value` conditions, joined with `AND`; `null` matches `NULL`. Must name at least one column."
+    }
+
+    output {
+      type        = object({ rows_affected = number })
+      description = "`rows_affected`: how many rows were deleted."
+    }
+
+    example {
+      description = "Remove a merchant's test products."
+      code        = <<-HCL
+        action "postgres_delete" "test_products" {
+          table = "products"
+          where = { merchant_id = action.postgres_insert.merchant.id, name = "Test" }
         }
       HCL
     }

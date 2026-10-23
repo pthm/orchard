@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -10,6 +11,7 @@ import (
 
 	"github.com/pthm/orchard/internal/graph"
 	"github.com/pthm/orchard/internal/parser"
+	"github.com/pthm/orchard/pkg/provider"
 )
 
 // ValidateReferences type-checks scenario expressions against the
@@ -32,7 +34,12 @@ import (
 // errors. The fix is for providers to declare concrete output
 // shapes where they can; the plan check gets stricter for free
 // when they do.
-func (e *Engine) ValidateReferences(ps *parser.ParsedScenario, g *graph.Graph) error {
+//
+// Providers that implement provider.ActionPlanner also check each of
+// their scenario-level actions here, against external state such as a
+// database's schema. During `orchard run` this happens after Configure,
+// so the check sees the live system before any action executes.
+func (e *Engine) ValidateReferences(runCtx context.Context, ps *parser.ParsedScenario, g *graph.Graph) error {
 	ctx := e.buildTypedEvalContext(ps, g)
 
 	// Scenario-level action bodies.
@@ -41,8 +48,12 @@ func (e *Engine) ValidateReferences(ps *parser.ParsedScenario, g *graph.Graph) e
 		if node.Kind != graph.ActionNode || node.ComponentKey != "" {
 			continue
 		}
-		if err := checkActionBody(withInstance(ctx, node.Instance), node); err != nil {
+		nodeCtx := withInstance(ctx, node.Instance)
+		if err := checkActionBody(nodeCtx, node); err != nil {
 			return err
+		}
+		if err := e.planAction(runCtx, nodeCtx, node); err != nil {
+			return fmt.Errorf("%s%s: %w", node.ID, formatSourceLoc(node.SourceRange), err)
 		}
 	}
 
@@ -89,6 +100,32 @@ func (e *Engine) ValidateReferences(ps *parser.ParsedScenario, g *graph.Graph) e
 	}
 
 	return nil
+}
+
+// planAction hands an action's evaluated attributes to its provider's
+// ActionPlanner, if it has one. Attributes that depend on other actions
+// are typed unknowns.
+// ponytail: the returned output type is discarded until plan-time
+// typing (spec change 3) feeds it to downstream references.
+func (e *Engine) planAction(runCtx context.Context, evalCtx *hcl.EvalContext, node *graph.Node) error {
+	route, err := e.resolveRoute(node.ActionType, node.ProviderAlias)
+	if err != nil {
+		return nil // reported by ValidateGraph
+	}
+	p, err := e.registry.Get(route.providerAlias)
+	if err != nil {
+		return nil
+	}
+	planner, ok := p.(provider.ActionPlanner)
+	if !ok {
+		return nil
+	}
+	attrs, err := evalAttrs(node.Body, route.schema, evalCtx)
+	if err != nil {
+		return err
+	}
+	_, err = planner.PlanAction(runCtx, route.actionName, attrs)
+	return err
 }
 
 // buildComponentTypedEvalContext builds the typed eval context used

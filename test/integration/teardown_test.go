@@ -84,7 +84,7 @@ func runScenarioWithRecord(
 	require.NoError(t, err)
 
 	require.NoError(t, eng.ValidateGraph(g))
-	require.NoError(t, eng.ValidateReferences(ps, g))
+	require.NoError(t, eng.ValidateReferences(context.Background(), ps, g))
 
 	rep, err := record.NewReporter(record.Options{
 		Writer:    record.FileWriter{Dir: recordDir},

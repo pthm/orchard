@@ -57,10 +57,12 @@ func TestColumnValueDecodesNumericBytes(t *testing.T) {
 		{"point is not int", []byte("x"), "POINT", cty.StringVal("x")},
 		{"unparseable falls back", []byte("n/a"), "INT", cty.StringVal("n/a")},
 		{"typed values pass through", int64(3), "INT", cty.NumberIntVal(3)},
+		{"numeric as string (pgx stdlib)", "9.99", "NUMERIC", cty.MustParseNumberVal("9.99")},
+		{"text strings stay strings", "42", "TEXT", cty.StringVal("42")},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := columnValue(c.in, c.dbType); !got.RawEquals(c.want) {
+			if got := ColumnValue(c.in, c.dbType); !got.RawEquals(c.want) {
 				t.Fatalf("got %#v want %#v", got, c.want)
 			}
 		})

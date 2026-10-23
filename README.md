@@ -130,9 +130,9 @@ Full reference at [orchard.pthm.dev/reference/cli/](https://orchard.pthm.dev/ref
 
 | Source | Actions | What it does |
 |--------|---------|--------------|
-| `builtin/postgres` | `postgres_query`, `postgres_copy` | Execute SQL or bulk-load CSV via COPY; capture outputs. |
-| `builtin/mysql` | `mysql_query` | Execute SQL against MySQL or MariaDB; capture the returned row or the insert id. |
-| `builtin/sqlite` | `sqlite_query` | Execute SQL against a database file; capture the returned row or the insert id. |
+| `builtin/postgres` | `postgres_query`, `postgres_copy`, `postgres_insert`, `postgres_update`, `postgres_delete` | Execute SQL, bulk-load CSV via COPY, or run schema-checked inserts, updates and deletes. |
+| `builtin/mysql` | `mysql_query`, `mysql_insert`, `mysql_update`, `mysql_delete` | Execute SQL against MySQL or MariaDB, or run schema-checked inserts, updates and deletes. |
+| `builtin/sqlite` | `sqlite_query`, `sqlite_insert`, `sqlite_update`, `sqlite_delete` | Execute SQL against a database file, or run schema-checked inserts, updates and deletes. |
 | `builtin/http` | `http_request` | Issue HTTP requests; capture status, body, and headers. |
 | `builtin/exec` | `exec_run` | Run a shell command; capture stdout, stderr, and exit code. |
 

@@ -20,6 +20,7 @@ import (
 	"github.com/go-sql-driver/mysql"
 	"github.com/zclconf/go-cty/cty"
 
+	"github.com/pthm/orchard/internal/sqlcrud"
 	"github.com/pthm/orchard/pkg/protocol"
 	"github.com/pthm/orchard/pkg/provider"
 )
@@ -35,6 +36,7 @@ var schemaHCL []byte
 type Provider struct {
 	schema protocol.ProviderSchema
 	db     *sql.DB
+	typed  *sqlcrud.Actions
 }
 
 // New returns an unconfigured MySQL provider. Schema is parsed once
@@ -72,6 +74,12 @@ func (p *Provider) Configure(ctx context.Context, config map[string]cty.Value) e
 		return fmt.Errorf("mysql: %w", err)
 	}
 	p.db = sql.OpenDB(connector)
+	p.typed = &sqlcrud.Actions{
+		Prefix:     "mysql",
+		Dialect:    sqlcrud.MySQL,
+		Conn:       p.db.Conn,
+		Introspect: p.readSchema,
+	}
 	return nil
 }
 
@@ -132,12 +140,34 @@ func (p *Provider) Execute(ctx context.Context, action string, attrs map[string]
 	if p.db == nil {
 		return nil, fmt.Errorf("mysql: not configured")
 	}
+	if _, ok := p.typed.Verb(action); ok {
+		out, err := p.typed.Execute(ctx, action, attrs)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", action, err)
+		}
+		return out, nil
+	}
 	switch action {
 	case "mysql_query":
 		return p.executeQuery(ctx, attrs)
 	default:
 		return nil, fmt.Errorf("mysql: unknown action %q", action)
 	}
+}
+
+// Compile-time assertion that typed actions are checked before a run.
+var _ provider.ActionPlanner = (*Provider)(nil)
+
+// PlanAction checks a typed action against the live schema before the
+// run. Before Configure there's no database to check against.
+func (p *Provider) PlanAction(ctx context.Context, action string, attrs map[string]cty.Value) (cty.Type, error) {
+	if p.typed == nil {
+		return cty.DynamicPseudoType, nil
+	}
+	if _, ok := p.typed.Verb(action); !ok {
+		return cty.DynamicPseudoType, nil
+	}
+	return p.typed.Plan(ctx, action, attrs)
 }
 
 // Close closes the pool. Safe to call on an unconfigured provider or

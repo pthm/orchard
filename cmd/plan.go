@@ -60,7 +60,7 @@ func newPlanCmd() *cobra.Command {
 			if err := eng.ValidateGraph(g); err != nil {
 				return fmt.Errorf("validation failed: %w", err)
 			}
-			if err := eng.ValidateReferences(ps, g); err != nil {
+			if err := eng.ValidateReferences(cmd.Context(), ps, g); err != nil {
 				return fmt.Errorf("validation failed: %w", err)
 			}
 

@@ -8,6 +8,10 @@ provider "mysql" {
   # free-form fields passes through to docs output literally.
   notes = <<-MD
     - Orchard does **not** manage schema. Tables must exist before the scenario runs.
+    - `mysql_insert`, `mysql_update` and `mysql_delete` are typed alternatives to `mysql_query`:
+      values are bound as parameters, and each action is checked against the live
+      schema before the run starts. A table that doesn't exist yet (because an
+      earlier action creates it) is checked when the action runs instead.
     - MySQL has no `RETURNING` clause. After an `INSERT`, wire the new row's id into
       later steps with `last_insert_id` (see the examples below). MariaDB 10.5+ does
       support `RETURNING`, and its rows come back as outputs like any `SELECT`.
@@ -89,6 +93,127 @@ provider "mysql" {
       code        = <<-HCL
         action "mysql_query" "merchant" {
           query = "SELECT id, name FROM merchants WHERE id = $${action.mysql_query.create_merchant.last_insert_id}"
+        }
+      HCL
+    }
+  }
+
+  action "mysql_insert" {
+    description = <<-MD
+      Insert one row. Values are sent as bind parameters, never pasted into SQL, and
+      are checked against the table's schema before the run starts: the table and
+      columns exist, every value fits its column, every required column (not
+      nullable, no default, not generated) is set, and no generated column is.
+      The outputs are the inserted row, including generated ids and defaults.
+    MD
+
+    attribute "table" {
+      type        = string
+      required    = true
+      description = "Table name in the connected database."
+    }
+
+    attribute "values" {
+      type        = any
+      required    = true
+      description = "Object of `column = value`."
+    }
+
+    output {
+      type        = any
+      description = "The inserted row, keyed by column name. Columns come back typed by their kind: numbers, bools, strings, decoded JSON."
+    }
+
+    example {
+      description = "Insert a merchant, then a product that references it."
+      code        = <<-HCL
+        action "mysql_insert" "merchant" {
+          table  = "merchants"
+          values = { name = "Acme", region = "us" }
+        }
+
+        action "mysql_insert" "product" {
+          table  = "products"
+          values = {
+            merchant_id = action.mysql_insert.merchant.id
+            name        = "Widget"
+            price       = 9.99
+          }
+        }
+      HCL
+    }
+  }
+
+  action "mysql_update" {
+    description = <<-MD
+      Update the rows matching `where`, with the same checks and bind parameters as
+      `mysql_insert`. Generated columns can't be set.
+    MD
+
+    attribute "table" {
+      type        = string
+      required    = true
+      description = "Table name in the connected database."
+    }
+
+    attribute "set" {
+      type        = any
+      required    = true
+      description = "Object of `column = new value`."
+    }
+
+    attribute "where" {
+      type        = any
+      required    = true
+      description = "Object of `column = value` conditions, joined with `AND`; `null` matches `NULL`. Must name at least one column, so an update can't hit every row by accident. Use `mysql_query` for anything more complex."
+    }
+
+    output {
+      type        = object({ rows_affected = number })
+      description = "`rows_affected`: how many rows the update changed."
+    }
+
+    example {
+      description = "Suspend the merchant inserted earlier."
+      code        = <<-HCL
+        action "mysql_update" "suspend" {
+          table = "merchants"
+          set   = { status = "suspended" }
+          where = { id = action.mysql_insert.merchant.id }
+        }
+      HCL
+    }
+  }
+
+  action "mysql_delete" {
+    description = <<-MD
+      Delete the rows matching `where`, checked against the table's schema before the
+      run starts.
+    MD
+
+    attribute "table" {
+      type        = string
+      required    = true
+      description = "Table name in the connected database."
+    }
+
+    attribute "where" {
+      type        = any
+      required    = true
+      description = "Object of `column = value` conditions, joined with `AND`; `null` matches `NULL`. Must name at least one column."
+    }
+
+    output {
+      type        = object({ rows_affected = number })
+      description = "`rows_affected`: how many rows were deleted."
+    }
+
+    example {
+      description = "Remove a merchant's test products."
+      code        = <<-HCL
+        action "mysql_delete" "test_products" {
+          table = "products"
+          where = { merchant_id = action.mysql_insert.merchant.id, name = "Test" }
         }
       HCL
     }

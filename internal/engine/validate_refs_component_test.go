@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,7 +44,7 @@ func validateComponentRefs(t *testing.T, compSrc, scenarioSrc string, providers 
 	if err != nil {
 		return err
 	}
-	return eng.ValidateReferences(ps, g)
+	return eng.ValidateReferences(context.Background(), ps, g)
 }
 
 // TestValidateRefsComponentOutputTypo: a typo in a component output

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -71,7 +72,7 @@ scenario "s" {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := eng.ValidateReferences(ps, g); err != nil {
+	if err := eng.ValidateReferences(context.Background(), ps, g); err != nil {
 		t.Fatalf("plan-time validation: %v", err)
 	}
 

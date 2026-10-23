@@ -1,19 +1,23 @@
 // Package postgres is the builtin Orchard provider for PostgreSQL.
 //
-// It implements one action today — "sql", a raw-query runner that
-// captures the first returned row as outputs — and is the provider
-// the rest of the codebase exercises end-to-end. Schema-aware
-// actions (db.insert, db.update, db.delete) land in a later milestone.
+// It offers raw SQL (postgres_query, capturing the first returned row
+// as outputs), bulk loading (postgres_copy), and typed, schema-checked
+// postgres_insert / _update / _delete, shared with the other SQL
+// providers through internal/sqlcrud.
 package postgres
 
 import (
 	"context"
+	"database/sql"
 	_ "embed"
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/zclconf/go-cty/cty"
 
+	"github.com/pthm/orchard/internal/sqlcrud"
+	"github.com/pthm/orchard/pkg/dbschema"
 	"github.com/pthm/orchard/pkg/protocol"
 	"github.com/pthm/orchard/pkg/provider"
 )
@@ -30,6 +34,10 @@ var schemaHCL []byte
 type Provider struct {
 	schema protocol.ProviderSchema
 	pool   *pgxpool.Pool
+	// db is a database/sql view of pool, for the typed actions shared
+	// with the other SQL providers.
+	db    *sql.DB
+	typed *sqlcrud.Actions
 }
 
 // New returns an unconfigured PostgreSQL provider. Schema is parsed
@@ -65,6 +73,15 @@ func (p *Provider) Configure(ctx context.Context, config map[string]cty.Value) e
 		return fmt.Errorf("postgres: create pool: %w", err)
 	}
 	p.pool = pool
+	p.db = stdlib.OpenDBFromPool(pool)
+	p.typed = &sqlcrud.Actions{
+		Prefix:  "postgres",
+		Dialect: sqlcrud.Postgres,
+		Conn:    p.db.Conn,
+		Introspect: func(ctx context.Context) (*dbschema.Schema, error) {
+			return p.introspect(ctx, nil)
+		},
+	}
 	return nil
 }
 
@@ -72,6 +89,13 @@ func (p *Provider) Configure(ctx context.Context, config map[string]cty.Value) e
 func (p *Provider) Execute(ctx context.Context, action string, attrs map[string]cty.Value) (map[string]cty.Value, error) {
 	if p.pool == nil {
 		return nil, fmt.Errorf("postgres: not configured")
+	}
+	if _, ok := p.typed.Verb(action); ok {
+		out, err := p.typed.Execute(ctx, action, attrs)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", action, err)
+		}
+		return out, nil
 	}
 	switch action {
 	case "postgres_query":
@@ -89,7 +113,23 @@ func (p *Provider) Close() error {
 	if p.pool == nil {
 		return nil
 	}
+	_ = p.db.Close()
 	p.pool.Close()
-	p.pool = nil
+	p.pool, p.db = nil, nil
 	return nil
+}
+
+// Compile-time assertion that typed actions are checked before a run.
+var _ provider.ActionPlanner = (*Provider)(nil)
+
+// PlanAction checks a typed action against the live schema before the
+// run. Before Configure there's no database to check against.
+func (p *Provider) PlanAction(ctx context.Context, action string, attrs map[string]cty.Value) (cty.Type, error) {
+	if p.typed == nil {
+		return cty.DynamicPseudoType, nil
+	}
+	if _, ok := p.typed.Verb(action); !ok {
+		return cty.DynamicPseudoType, nil
+	}
+	return p.typed.Plan(ctx, action, attrs)
 }

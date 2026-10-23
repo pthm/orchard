@@ -17,6 +17,7 @@ import (
 	"github.com/zclconf/go-cty/cty"
 	_ "modernc.org/sqlite" // registers the "sqlite" database/sql driver
 
+	"github.com/pthm/orchard/internal/sqlcrud"
 	"github.com/pthm/orchard/pkg/protocol"
 	"github.com/pthm/orchard/pkg/provider"
 )
@@ -33,6 +34,7 @@ type Provider struct {
 	schema protocol.ProviderSchema
 	db     *sql.DB
 	path   string // as configured; its base name names the database in snapshots
+	typed  *sqlcrud.Actions
 }
 
 // New returns an unconfigured SQLite provider. Schema is parsed once
@@ -78,6 +80,12 @@ func (p *Provider) Configure(ctx context.Context, config map[string]cty.Value) e
 	db.SetMaxOpenConns(1)
 	p.db = db
 	p.path = path.AsString()
+	p.typed = &sqlcrud.Actions{
+		Prefix:     "sqlite",
+		Dialect:    sqlcrud.SQLite,
+		Conn:       db.Conn,
+		Introspect: p.readSchema,
+	}
 	return nil
 }
 
@@ -95,12 +103,34 @@ func (p *Provider) Execute(ctx context.Context, action string, attrs map[string]
 	if p.db == nil {
 		return nil, fmt.Errorf("sqlite: not configured")
 	}
+	if _, ok := p.typed.Verb(action); ok {
+		out, err := p.typed.Execute(ctx, action, attrs)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", action, err)
+		}
+		return out, nil
+	}
 	switch action {
 	case "sqlite_query":
 		return p.executeQuery(ctx, attrs)
 	default:
 		return nil, fmt.Errorf("sqlite: unknown action %q", action)
 	}
+}
+
+// Compile-time assertion that typed actions are checked before a run.
+var _ provider.ActionPlanner = (*Provider)(nil)
+
+// PlanAction checks a typed action against the live schema before the
+// run. Before Configure there's no database to check against.
+func (p *Provider) PlanAction(ctx context.Context, action string, attrs map[string]cty.Value) (cty.Type, error) {
+	if p.typed == nil {
+		return cty.DynamicPseudoType, nil
+	}
+	if _, ok := p.typed.Verb(action); !ok {
+		return cty.DynamicPseudoType, nil
+	}
+	return p.typed.Plan(ctx, action, attrs)
 }
 
 // Close closes the database. Safe to call on an unconfigured

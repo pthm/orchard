@@ -80,7 +80,7 @@ func newRunCmd() *cobra.Command {
 			if err := eng.ValidateGraph(g); err != nil {
 				return fmt.Errorf("validation failed: %w", err)
 			}
-			if err := eng.ValidateReferences(ps, g); err != nil {
+			if err := eng.ValidateReferences(ctx, ps, g); err != nil {
 				return fmt.Errorf("validation failed: %w", err)
 			}
 

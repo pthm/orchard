@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/zclconf/go-cty/cty"
@@ -46,7 +47,7 @@ func TestScenarioRunAndTeardown(t *testing.T) {
 
 	// --- run, recording to a temp dir ---
 	ps, g, eng := load(t, scenario, vars)
-	if err := eng.ValidateReferences(ps, g); err != nil {
+	if err := eng.ValidateReferences(context.Background(), ps, g); err != nil {
 		t.Fatalf("plan validation: %v", err)
 	}
 	recordDir := t.TempDir()
@@ -151,4 +152,84 @@ func assertCount(t *testing.T, db *sql.DB, table string, want int) {
 	if n != want {
 		t.Fatalf("%s: %d rows, want %d", table, n, want)
 	}
+}
+
+func TestTypedActionsScenario(t *testing.T) {
+	path, db := newShopDB(t)
+	out := run(t, "testdata/typed.hcl", path)
+
+	merchantID := out["merchant_id"]
+	if !merchantID.RawEquals(cty.NumberIntVal(1)) || !out["merchant_name"].RawEquals(cty.StringVal("O'Brien & Co")) {
+		t.Fatalf("insert outputs: %#v", out)
+	}
+	if !out["product_owner"].RawEquals(merchantID) {
+		t.Fatalf("the product should reference the merchant: %#v", out["product_owner"])
+	}
+	if !out["moved"].RawEquals(cty.NumberIntVal(1)) || !out["deleted"].RawEquals(cty.NumberIntVal(1)) {
+		t.Fatalf("update/delete outputs: %#v", out)
+	}
+	var region string
+	if err := db.QueryRow("SELECT region FROM merchants WHERE id = 1").Scan(&region); err != nil || region != "eu" {
+		t.Fatalf("region after update: %q %v", region, err)
+	}
+	assertCount(t, db, "products", 0)
+}
+
+// A typed action that fails validation stops the run before any action
+// executes, including valid ones earlier in the order.
+func TestTypedActionValidationRunsBeforeAnyAction(t *testing.T) {
+	path, db := newShopDB(t)
+	ps, g, eng := load(t, "testdata/typed_invalid.hcl", map[string]string{"path": path})
+
+	err := eng.ValidateReferences(context.Background(), ps, g)
+	if err == nil {
+		t.Fatal("expected a validation error")
+	}
+	for _, want := range []string{"action.sqlite_insert.broken", `no column "nme" (did you mean "name"?)`, `missing required column "name"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q is missing %q", err, want)
+		}
+	}
+	assertCount(t, db, "merchants", 0)
+}
+
+func TestTypedInsertIntoTableCreatedDuringRun(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "notes.db")
+	out := run(t, "testdata/typed_ddl.hcl", path)
+	if !out["note_id"].RawEquals(cty.NumberIntVal(1)) {
+		t.Fatalf("note_id: %#v", out["note_id"])
+	}
+}
+
+// newShopDB creates a database with the merchants and products tables.
+func newShopDB(t *testing.T) (string, *sql.DB) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "shop.db")
+	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.Exec(`
+		CREATE TABLE merchants (id INTEGER PRIMARY KEY, name TEXT NOT NULL, region TEXT NOT NULL);
+		CREATE TABLE products (id INTEGER PRIMARY KEY, merchant_id INTEGER NOT NULL REFERENCES merchants(id), name TEXT NOT NULL);
+	`); err != nil {
+		t.Fatal(err)
+	}
+	return path, db
+}
+
+// run validates and executes a scenario the way `orchard run` does,
+// returning its outputs.
+func run(t *testing.T, scenario, dbPath string) map[string]cty.Value {
+	t.Helper()
+	ps, g, eng := load(t, scenario, map[string]string{"path": dbPath})
+	if err := eng.ValidateReferences(context.Background(), ps, g); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	result, err := eng.Execute(context.Background(), ps, g)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	return result.Outputs
 }

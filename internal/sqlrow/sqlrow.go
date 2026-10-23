@@ -54,7 +54,7 @@ func Query(ctx context.Context, conn *sql.Conn, query, statusQuery string) (map[
 			return nil, fmt.Errorf("read row: %w", err)
 		}
 		for i, col := range cols {
-			outputs[col.Name()] = columnValue(values[i], col.DatabaseTypeName())
+			outputs[col.Name()] = ColumnValue(values[i], col.DatabaseTypeName())
 		}
 	}
 	if err := rows.Close(); err != nil {
@@ -75,13 +75,23 @@ func Query(ctx context.Context, conn *sql.Conn, query, statusQuery string) (map[
 	return outputs, nil
 }
 
-// columnValue converts one scanned value. MySQL's text protocol (used
-// for queries without bind parameters) returns numbers as []byte, so
-// those are decoded by the column's declared type; everything else
+// ColumnValue converts one scanned value. Some drivers return numbers
+// as text: MySQL's text protocol (queries without bind parameters) as
+// []byte, and pgx's database/sql adapter returns NUMERIC as a string.
+// Those are decoded by the column's declared type; everything else
 // goes through ToCty.
-func columnValue(v any, dbType string) cty.Value {
-	if b, ok := v.([]byte); ok && isNumericType(dbType) {
-		if n, err := cty.ParseNumberVal(string(b)); err == nil {
+func ColumnValue(v any, dbType string) cty.Value {
+	if isNumericType(dbType) {
+		var text string
+		switch val := v.(type) {
+		case []byte:
+			text = string(val)
+		case string:
+			text = val
+		default:
+			return ToCty(v)
+		}
+		if n, err := cty.ParseNumberVal(text); err == nil {
 			return n
 		}
 	}
@@ -94,7 +104,8 @@ func columnValue(v any, dbType string) cty.Value {
 func isNumericType(name string) bool {
 	switch strings.TrimPrefix(strings.ToUpper(name), "UNSIGNED ") {
 	case "TINYINT", "SMALLINT", "MEDIUMINT", "INT", "INTEGER", "BIGINT",
-		"DECIMAL", "NUMERIC", "FLOAT", "DOUBLE", "REAL":
+		"DECIMAL", "NUMERIC", "FLOAT", "DOUBLE", "REAL",
+		"INT2", "INT4", "INT8", "FLOAT4", "FLOAT8": // Postgres spellings
 		return true
 	}
 	return false

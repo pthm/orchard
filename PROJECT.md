@@ -704,7 +704,7 @@ The database interaction model provides three layers, from most flexible to most
 |-------|-------------|---------|
 | **Raw SQL** | Maximum flexibility, no validation | `action "postgres_query" "seed" { query = "..." }` |
 | **Bulk load** | High-throughput fixture import | `action "postgres_copy" "seed" { table = "..." file = "..." }` |
-| **Typed DB** | Schema-aware, validated operations (future — M4) | `action "postgres_insert" "merchant" { table = "merchants" ... }` |
+| **Typed DB** | Schema-checked insert / update / delete with bound parameters (`postgres_*`, `mysql_*`, `sqlite_*`) | `action "postgres_insert" "merchant" { table = "merchants" values = {...} }` |
 | **Components** | Business-level abstractions | `component "merchant" "base" { source = "..." }` |
 
 Users choose the appropriate layer for each situation. Raw SQL for complex queries and migrations. Typed DB for common CRUD. Components for reusable business-level state.
@@ -967,13 +967,15 @@ The typed actions cover all three SQL providers and supersede the `db.insert` na
 |---------|--------|
 | `orchard schema pull` — introspect Postgres, MySQL and SQLite into snapshots | Done |
 | `.orchard/schema/<alias>.json` snapshots (`pkg/snapshot` envelope, `pkg/dbschema` model) | Done |
-| `action "db.insert"` — schema-validated inserts | Not started |
-| `action "db.update"` — schema-validated updates | Not started |
-| `action "db.delete"` — schema-validated deletes | Not started |
-| Column type validation | Not started |
-| Required field enforcement | Not started |
-| Default/generated column handling | Not started |
-| `RETURNING` field validation | Not started |
+| `<p>_insert` — schema-checked inserts returning the full row (postgres, mysql, sqlite) | Done |
+| `<p>_update` — schema-checked updates by `where` equality | Done |
+| `<p>_delete` — schema-checked deletes by `where` equality | Done |
+| Values bound as parameters, converted by column kind | Done |
+| Column type validation (incl. enum members, whole integers, nullability) | Done |
+| Required field enforcement | Done |
+| Default/generated column handling | Done |
+| Validation against the live schema before `orchard run` executes anything | Done |
+| Plan-time validation and typed outputs from snapshots | Not started |
 | Foreign key reference hints | Not started |
 
 ### Milestone 5: Lifecycle and Teardown
@@ -992,7 +994,7 @@ Make cleanup a first-class operation so that scenarios can be torn down cleanly,
 | Reverse-order cleanup driven by the dependency graph | Done |
 | Best-effort teardown with joined error reporting | Done |
 | End-to-end integration test over Postgres (FK-bound merchant+product) | Done |
-| Managed cleanup for `db.insert` / `db.update` actions (depends on M4) | Not started |
+| Managed cleanup for `<p>_insert` / `<p>_update` actions (depends on M4) | Not started |
 | `lifecycle` blocks on scenarios (`on_failure`, `on_success` policies) | Not started |
 | Rollback on partial failure | Not started |
 | `orchard list runs` — list past runs | Not started |
@@ -1159,6 +1161,11 @@ internal/
                                 a Record from engine events; writes via Writer
                                 on RunCompleted.
 
+  sqlcrud/
+    sqlcrud.go                  Typed insert/update/delete over database/sql: dialects (placeholders,
+                                quoting, RETURNING), bind by column kind, decode rows by kind
+    actions.go                  Per-provider glue: live schema cache, validate, execute, PlanAction
+
   sqlrow/
     sqlrow.go                   Shared by the SQL providers: Query (first row, or
                                 last_insert_id + rows_affected for statements that
@@ -1191,11 +1198,14 @@ pkg/ (public SDK surface)
   dbschema/
     dbschema.go                 Portable database model (tables, columns, kinds, keys, enums):
                                 the body of a "database" snapshot
+    check.go                    Lookup (default schema, did-you-mean) and the validation rules:
+                                CheckInsert / CheckUpdate / CheckDelete / CheckValue
 
   provider/
     provider.go                 Provider interface (Schema/Configure/Execute/Close) + Registry
     builtins.go                 Source-string → factory-function registry for "builtin/*"
     schema_source.go            Optional SchemaSource interface (PullSchema) for `orchard schema pull`
+    planner.go                  Optional ActionPlanner interface (PlanAction), called before a run
     postgres/                   builtin/postgres — postgres_query (raw SQL) +
                                 postgres_copy (COPY FROM STDIN bulk load)
       schema.hcl                Embedded via //go:embed; carries description, notes,

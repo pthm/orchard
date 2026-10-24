@@ -111,7 +111,7 @@ scenario "demo_smb" {
 
 `fake()` covers 364 kinds of data, from `name` and `address` to
 `creditcard` and `productname`; see the
-[functions reference](../../../reference/functions/#fake-data-kinds) for the
+[functions reference](../../../reference/functions/fake-kinds/) for the
 list. Drop the `seed` line, or pass `--seed`, for a different set of
 customers; every run prints its seed, and `orchard run --seed <n>` repeats
 it.

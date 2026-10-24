@@ -20,8 +20,8 @@ func init() {
 		FunctionDef{
 			Name: "fake", Category: "fake",
 			Description: "Generate fake data of the given kind: a name, email, address, company, sentence, and 350 more.",
-			Detail: "Kinds come from [gofakeit](https://github.com/brianvoe/gofakeit); the [fake data kinds](#fake-data-kinds) " +
-				"section lists them with their parameters. Pass parameters as an object; a list sets a parameter that takes " +
+			Detail: "Kinds come from [gofakeit](https://github.com/brianvoe/gofakeit); the [fake data kinds](../fake-kinds/) " +
+				"page lists them with their parameters. Pass parameters as an object; a list sets a parameter that takes " +
 				"several values. Kinds that produce a number, bool or string return that type; the rest (`person`, `address`, " +
 				"`creditcard`, ...) return an object. An unknown kind or parameter fails at plan time.",
 			Params:     []ParamDef{{Name: "kind", Type: "string", Description: "What to generate, e.g. `\"email\"`."}},

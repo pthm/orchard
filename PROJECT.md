@@ -1106,7 +1106,7 @@ cmd/
                                 lipgloss (bold names, violet tags, muted paths)
   docs.go                       orchard docs — resolve provider source, render schema to markdown
   functions.go                  orchard functions — render function registry as markdown
-                                or JSON (--json for tooling, --hugo for docs generation)
+                                or JSON (--json for tooling, --hugo-dir for docs generation)
   teardown.go                   orchard teardown — load record, reload scenario, invoke engine.Teardown
   schema.go                     orchard schema pull — configure providers, capture each SchemaSource,
                                 write .orchard/schema/<alias>.json (overwrite safeguard, unchanged = no-op)

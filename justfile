@@ -16,7 +16,8 @@ docs-generate:
     go run . docs builtin/grpc     > docs/content-generated/providers/grpc.md
     go run . docs builtin/http     > docs/content-generated/providers/http.md
     go run . docs builtin/exec     > docs/content-generated/providers/exec.md
-    go run . functions --hugo      > docs/content-generated/reference/functions.md
+    rm -rf docs/content-generated/reference/functions.md docs/content-generated/reference/functions
+    go run . functions --hugo-dir docs/content-generated/reference/functions
 
 # Generate one provider page. Useful while iterating.
 docs-provider name:

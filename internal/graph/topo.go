@@ -106,8 +106,8 @@ func lessNodeID(a, b string) bool {
 }
 
 // leadingInt parses the digits at the start of s, returning -1 when
-// there are none.
-func leadingInt(s string) (int, string) {
+// there are none, and the rest of s.
+func leadingInt(s string) (n int, rest string) {
 	i := 0
 	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
 		i++

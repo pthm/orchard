@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -71,8 +72,14 @@ type Reporter struct {
 	seed     uint64
 	configs  map[string]map[string]cty.Value
 	compVars map[string]map[string]json.RawMessage
-	writer   Writer
-	log      io.Writer
+	// secret holds the sensitive variables until RunCompleted hashes
+	// them; compRedact and compSecret are the component variables
+	// left out of compVars.
+	secret     map[string]cty.Value
+	compRedact map[string]map[string]bool
+	compSecret map[string][]string
+	writer     Writer
+	log        io.Writer
 
 	startedAt time.Time
 
@@ -106,7 +113,13 @@ type Options struct {
 	// ProviderConfigs are the evaluated provider configs, recorded as
 	// hashes (see HashConfig).
 	ProviderConfigs map[string]map[string]cty.Value
-	LogOutput       io.Writer // where write failures surface; defaults to os.Stderr
+	// Sensitive names the scenario variables recorded as a hash
+	// rather than a value (ParsedScenario.Sensitive).
+	Sensitive map[string]bool
+	// ComponentSensitive names, per component key, the component
+	// variables left out of the record (ParsedComponent.Sensitive).
+	ComponentSensitive map[string]map[string]bool
+	LogOutput          io.Writer // where write failures surface; defaults to os.Stderr
 }
 
 // NewReporter constructs a Reporter from options. The scenario
@@ -119,19 +132,30 @@ func NewReporter(opts Options) (*Reporter, error) {
 	if opts.LogOutput == nil {
 		opts.LogOutput = os.Stderr
 	}
-	vars, err := EncodeCty(opts.Variables)
+	plain := map[string]cty.Value{}
+	secret := map[string]cty.Value{}
+	for name, v := range opts.Variables {
+		if opts.Sensitive[name] {
+			secret[name] = v
+		} else {
+			plain[name] = v
+		}
+	}
+	vars, err := EncodeCty(plain)
 	if err != nil {
 		return nil, fmt.Errorf("encode variables: %w", err)
 	}
 	return &Reporter{
-		inner:    opts.Inner,
-		scenario: opts.Scenario,
-		vars:     vars,
-		seed:     opts.Seed,
-		configs:  opts.ProviderConfigs,
-		writer:   opts.Writer,
-		log:      opts.LogOutput,
-		pending:  make(map[string]time.Time),
+		inner:      opts.Inner,
+		scenario:   opts.Scenario,
+		vars:       vars,
+		secret:     secret,
+		compRedact: opts.ComponentSensitive,
+		seed:       opts.Seed,
+		configs:    opts.ProviderConfigs,
+		writer:     opts.Writer,
+		log:        opts.LogOutput,
+		pending:    make(map[string]time.Time),
 	}, nil
 }
 
@@ -194,7 +218,19 @@ func (r *Reporter) NodeUndo(nodeID string, undo provider.Invocation) {
 
 // ComponentVars implements engine.ComponentVarsReporter.
 func (r *Reporter) ComponentVars(componentKey string, vars map[string]cty.Value) {
-	raw, err := EncodeCty(vars)
+	plain := map[string]cty.Value{}
+	for name, v := range vars {
+		if r.compRedact[componentKey][name] {
+			if r.compSecret == nil {
+				r.compSecret = map[string][]string{}
+			}
+			r.compSecret[componentKey] = append(r.compSecret[componentKey], name)
+			continue
+		}
+		plain[name] = v
+	}
+	slices.Sort(r.compSecret[componentKey])
+	raw, err := EncodeCty(plain)
 	if err != nil {
 		_, _ = fmt.Fprintf(r.log, "orchard: record: encode variables for component %s: %v\n", componentKey, err)
 		return
@@ -263,6 +299,18 @@ func (r *Reporter) RunCompleted(summary engine.RunSummary) {
 	if rec.ConfigHashes, err = HashConfig(rec.ID, r.configs); err != nil {
 		_, _ = fmt.Fprintf(r.log, "orchard: record: hash provider configs: %v\n", err)
 	}
+	for name, v := range r.secret {
+		h, err := HashValue(rec.ID, "var", name, v)
+		if err != nil {
+			// Never fall back to the value: record that it was there.
+			_, _ = fmt.Fprintf(r.log, "orchard: record: hash sensitive variable %s: %v\n", name, err)
+		}
+		if rec.SensitiveVariables == nil {
+			rec.SensitiveVariables = map[string]string{}
+		}
+		rec.SensitiveVariables[name] = h
+	}
+	rec.SensitiveComponentVariables = r.compSecret
 
 	if r.writer == nil {
 		return

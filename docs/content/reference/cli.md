@@ -213,16 +213,22 @@ order).
 | `--record-dir <path>` | string | `.` (cwd) | Directory to look a run ID or `--latest` run up in. Ignored when the argument is an existing record file. |
 | `--latest` | bool | `false` | Treat the argument as a scenario file and tear down the newest record in `--record-dir` for it that isn't fully torn down (failed runs included). Prints `tearing down run <id> (<record path>)` first. Repeat to unwind runs newest first; errors with `no runs left to tear down for <path> in <dir>` when none remain. |
 | `--scenario <name>` | string | — | With `--latest`, which scenario to pick when runs of several scenarios in the file match. Required in that case. |
-| `--ignore-config-drift` | bool | `false` | Tear down even when a provider config differs from the one the run used, e.g. after a password rotation. |
+| `--var key=value` | string map | — | The run's [sensitive variables](../hcl-schema/#variable), which the record keeps only as hashes. Any other variable is refused: teardown uses the recorded value. |
+| `--ignore-config-drift` | bool | `false` | Tear down even when a provider config or a sensitive variable differs from the one the run used, e.g. after a password rotation. |
 
 **Behavior**
 
 1. Load and decode the record. Refuse a record whose format isn't `1`, and one
    already fully torn down (`already torn down at <time>`).
 2. Load the scenario at the absolute path stored in the record, with the
-   variables the recorded run used (`--var` does not apply), so `count` /
-   `for_each` expand to the same instances, variables without a default
-   resolve, and a default such as `uuid()` keeps the value the run recorded.
+   variables the recorded run used, so `count` / `for_each` expand to the same
+   instances, variables without a default resolve, and a default such as
+   `uuid()` keeps the value the run recorded. Sensitive variables come from
+   `--var` (or their default). If one is missing, the error names it
+   (`pass them again with --var dsn=<value>`); if its hash doesn't match the
+   record's, teardown refuses (`differ from the value the run used`) unless
+   `--ignore-config-drift` is set. `--var` for a variable that wasn't sensitive
+   is refused.
 3. Verify the scenario name matches the one in the record (reject if the file
    has been rewritten to declare a different scenario), and that every
    recorded node with outputs or an undo step, and not yet torn down, is still

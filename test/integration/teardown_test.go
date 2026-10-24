@@ -167,7 +167,7 @@ func runTeardown(t *testing.T, scenarioPath string, rec *record.Record) {
 
 	undos, err := record.IndexUndos(rec)
 	require.NoError(t, err)
-	_, err = eng.Teardown(context.Background(), ps, g, recVars, compVars, outputs, undos, nil, nil)
+	_, err = eng.Teardown(context.Background(), ps, g, ps.Variables, compVars, outputs, undos, nil, nil)
 	require.NoError(t, err, "teardown reported errors")
 }
 

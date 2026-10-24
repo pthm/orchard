@@ -43,6 +43,11 @@ type ParsedScenario struct {
 	// file.
 	ScenarioDir string
 
+	// Sensitive names the scenario variables declared
+	// `sensitive = true`. Run records keep a hash of each, not its
+	// value.
+	Sensitive map[string]bool
+
 	// Seed drives every random function in the run: --seed, else the
 	// scenario's seed attribute, else a fresh random one. The run
 	// record keeps it so a run can be repeated.
@@ -52,7 +57,17 @@ type ParsedScenario struct {
 // Option changes how a scenario loads.
 type Option func(*loadConfig)
 
-type loadConfig struct{ seed *uint64 }
+type loadConfig struct {
+	seed      *uint64
+	overrides map[string]string
+}
+
+// WithOverrides layers --var style overrides over the values
+// LoadScenarioValues is given; teardown uses it to take sensitive
+// variables, which records leave out.
+func WithOverrides(vars map[string]string) Option {
+	return func(c *loadConfig) { c.overrides = vars }
+}
 
 // WithSeed sets the run's seed, overriding the scenario's own.
 func WithSeed(seed uint64) Option {
@@ -74,6 +89,11 @@ type ParsedComponent struct {
 	// plain single component. Its count.* / each.* namespace is in
 	// scope for the ref's inputs.
 	Instance *Instance
+	// Sensitive names the component variables that hold a sensitive
+	// value: declared `sensitive = true`, or given an input that
+	// references a sensitive scenario variable. Run records leave
+	// them out.
+	Sensitive map[string]bool
 }
 
 // LoadScenario parses a scenario HCL file, picks the scenario block
@@ -103,6 +123,9 @@ func loadScenario(path, name string, vars map[string]string, values map[string]c
 	var cfg loadConfig
 	for _, o := range opts {
 		o(&cfg)
+	}
+	if vars == nil {
+		vars = cfg.overrides
 	}
 	parser := hclparse.NewParser()
 
@@ -202,6 +225,16 @@ func loadScenario(path, name string, vars map[string]string, values map[string]c
 		}
 	}
 
+	sensitive, err := sensitiveVariables(scenario.Variables)
+	if err != nil {
+		return nil, err
+	}
+	for _, comp := range components {
+		if comp.Sensitive, err = componentSensitive(comp, sensitive); err != nil {
+			return nil, err
+		}
+	}
+
 	// Validate each component instance's inputs against its declared
 	// variables. Static check only — value expressions may reference
 	// runtime outputs that do not exist yet.
@@ -219,6 +252,7 @@ func loadScenario(path, name string, vars map[string]string, values map[string]c
 		RequiredProviders: required,
 		ProviderConfigs:   providerConfigs,
 		ScenarioDir:       absDir,
+		Sensitive:         sensitive,
 		Seed:              seed,
 	}, nil
 }
@@ -538,6 +572,7 @@ var variableBodySchema = &hcl.BodySchema{
 		{Name: "type"},
 		{Name: "default"},
 		{Name: "description"},
+		{Name: "sensitive"},
 	},
 }
 
@@ -546,6 +581,7 @@ type variableParts struct {
 	typeExpr    hcl.Expression // nil when absent
 	defaultExpr hcl.Expression // nil when absent
 	description string         // empty when absent
+	sensitive   bool
 }
 
 func decodeVariable(v *VariableBlock) (variableParts, error) {
@@ -568,6 +604,16 @@ func decodeVariable(v *VariableBlock) (variableParts, error) {
 		if val.Type() == cty.String {
 			p.description = val.AsString()
 		}
+	}
+	if a, ok := content.Attributes["sensitive"]; ok {
+		val, diags := a.Expr.Value(nil)
+		if diags.HasErrors() {
+			return variableParts{}, fmt.Errorf("variable %q sensitive: %s", v.Name, diags.Error())
+		}
+		if val.Type() != cty.Bool || val.IsNull() {
+			return variableParts{}, fmt.Errorf("variable %q: sensitive must be true or false", v.Name)
+		}
+		p.sensitive = val.True()
 	}
 	return p, nil
 }

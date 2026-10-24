@@ -212,7 +212,10 @@ teardown runs the product `DELETE` first and the merchant `DELETE` second.
 Forward order would fail on the FK constraint.
 
 Teardown reloads the scenario with the variables the recorded run used, not
-their current defaults, and `--var` doesn't apply. A scenario run with
+their current defaults, and `--var` doesn't apply, except to
+[sensitive variables](../../../reference/hcl-schema/#variable): the record keeps
+only a hash of those, so pass them again (`--var dsn=...`) and teardown checks
+they match. A scenario run with
 `--var rows=3` against an action with `count = var.rows` tears down all three
 instances, and a variable with no default needs no override. If the scenario
 no longer declares an action the record says created something, teardown

@@ -81,6 +81,15 @@ type Record struct {
 	// refuse a config that now points somewhere else without the
 	// record holding DSNs or keys. Absent in older records.
 	ConfigHashes map[string]map[string]string `json:"config_hashes,omitempty"`
+	// SensitiveVariables holds, for each scenario variable declared
+	// `sensitive = true`, a hash of its value (see HashValue) in place
+	// of the value, which Variables leaves out. Teardown needs the
+	// value passed again and checks it against the hash.
+	SensitiveVariables map[string]string `json:"sensitive_variables,omitempty"`
+	// SensitiveComponentVariables names, per component key, the
+	// component variables ComponentVariables leaves out because they
+	// hold a sensitive value. Teardown evaluates them again.
+	SensitiveComponentVariables map[string][]string `json:"sensitive_component_variables,omitempty"`
 }
 
 // Scenario is the subset of scenario metadata worth persisting. Path
@@ -214,9 +223,23 @@ func IndexUndos(r *Record) (map[string]provider.Invocation, error) {
 	return out, nil
 }
 
-// HashConfig fingerprints evaluated provider configs as HMAC-SHA256
-// per attribute, keyed by the run ID so equal values in different
-// records hash differently.
+// HashValue fingerprints v as HMAC-SHA256 keyed by the run ID, so
+// equal values in different records hash differently. scope and name
+// say what v is ("var" and the variable, or a provider and its
+// attribute), so equal values in one record differ too.
+func HashValue(runID, scope, name string, v cty.Value) (string, error) {
+	raw, err := protocol.MarshalValue(v)
+	if err != nil {
+		return "", fmt.Errorf("%s.%s: %w", scope, name, err)
+	}
+	mac := hmac.New(sha256.New, []byte(runID))
+	mac.Write([]byte(scope + "\x00" + name + "\x00"))
+	mac.Write(raw)
+	return hex.EncodeToString(mac.Sum(nil)), nil
+}
+
+// HashConfig fingerprints evaluated provider configs per attribute
+// with HashValue.
 func HashConfig(runID string, configs map[string]map[string]cty.Value) (map[string]map[string]string, error) {
 	if len(configs) == 0 {
 		return nil, nil
@@ -225,14 +248,11 @@ func HashConfig(runID string, configs map[string]map[string]cty.Value) (map[stri
 	for name, attrs := range configs {
 		hashes := make(map[string]string, len(attrs))
 		for attr, v := range attrs {
-			raw, err := protocol.MarshalValue(v)
+			h, err := HashValue(runID, name, attr, v)
 			if err != nil {
-				return nil, fmt.Errorf("%s.%s: %w", name, attr, err)
+				return nil, err
 			}
-			mac := hmac.New(sha256.New, []byte(runID))
-			mac.Write([]byte(name + "\x00" + attr + "\x00"))
-			mac.Write(raw)
-			hashes[attr] = hex.EncodeToString(mac.Sum(nil))
+			hashes[attr] = h
 		}
 		out[name] = hashes
 	}
@@ -264,6 +284,37 @@ func ConfigDrift(r *Record, configs map[string]map[string]cty.Value) ([]string, 
 				drift = append(drift, name+"."+attr)
 			}
 		}
+	}
+	slices.Sort(drift)
+	return drift, nil
+}
+
+// SensitiveDrift checks vars, the variables teardown loaded, against
+// the hashes of the run's sensitive variables. It returns, sorted, the
+// names whose value differs, and an error naming any the scenario no
+// longer declares.
+func SensitiveDrift(r *Record, vars map[string]cty.Value) ([]string, error) {
+	var drift, gone []string
+	for name, want := range r.SensitiveVariables {
+		v, ok := vars[name]
+		if !ok {
+			gone = append(gone, name)
+			continue
+		}
+		if want == "" {
+			continue // the run couldn't hash it; nothing to check against
+		}
+		got, err := HashValue(r.ID, "var", name, v)
+		if err != nil {
+			return nil, err
+		}
+		if got != want {
+			drift = append(drift, name)
+		}
+	}
+	if len(gone) > 0 {
+		slices.Sort(gone)
+		return nil, fmt.Errorf("the scenario no longer declares sensitive variable(s) %s", strings.Join(gone, ", "))
 	}
 	slices.Sort(drift)
 	return drift, nil

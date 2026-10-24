@@ -77,8 +77,22 @@ variable "dsn" {
 | `type` | type expression | no | Declared type. Defaults to dynamic (`any`) if omitted. |
 | `default` | any | no | Default value. Used when no CLI override is given. |
 | `description` | `string` | no | Free-text documentation. |
+| `sensitive` | `bool` | no | Keep the value out of the run record. Defaults to `false`. |
 
 Variables without a default **must** be supplied via `--var` at runtime.
+
+A `sensitive` variable is stored in the run record as a hash of its value
+rather than the value, so a DSN or API key doesn't end up in a file next to the
+scenario. `orchard inspect` shows it as `(sensitive)`. To tear the run down,
+pass the value again with `--var`; teardown checks it against the hash. A
+sensitive variable with a default (`default = env("DB_PASSWORD")`) needs no
+`--var` if the default still gives the run's value.
+
+A component variable counts as sensitive, and is left out of the record too,
+when it is declared `sensitive = true` or its input expression reads a
+sensitive scenario variable (`inputs = { dsn = var.dsn }`). Only variables are
+covered: a sensitive value that ends up in an action's outputs, a typed
+insert's undo step, or a scenario output is recorded like any other value.
 
 ### `provider`
 

@@ -604,6 +604,7 @@ Every `orchard run` writes a JSON record to the working directory (override with
 
 - A format version; readers refuse any format other than the one they know.
 - Per-attribute HMAC-SHA256 hashes of each provider config (`config_hashes`), keyed by the run ID; teardown refuses a config that no longer matches.
+- Sensitive variables as hashes only (`sensitive_variables`), and the names of component variables left out for holding one (`sensitive_component_variables`).
 - Teardown progress: `torn_down` on each node whose teardown succeeded, and `torn_down_at` once a teardown finished with no failures.
 - Run id, scenario name and absolute path, start/finish timestamps.
 - Overall status (`succeeded` / `failed`) and top-level error, if any.
@@ -865,7 +866,7 @@ These are intentional tradeoffs or deferred items that surfaced during code revi
 - **Dynamic-output actions (`outputs { type = any }`) skip runtime output validation.** There's nothing to coerce against, by design. `postgres_query` is the main example today because `RETURNING` shapes are open-ended. Providers should declare concrete output types where they can — the runtime check gets stricter for free when they do.
 - **HCL heredocs interpolate `${...}` by default.** Schema authors embedding literal `${...}` in `description`, `notes`, or example `code` fields must escape them as `$${...}`. A future iteration may teach the decoder to read raw heredoc source bytes so authors can write `${...}` literally.
 - **Teardown re-evaluates provider configs from the current scenario, not the record.** The record holds only per-attribute HMAC hashes of the configs (`config_hashes`, keyed by run ID), so teardown can refuse a config that drifted (`--ignore-config-drift` overrides) but can't restore the original. Configs fed by `var.*` match automatically because variables are recorded.
-- **Variables are recorded in clear.** A DSN or key passed with `--var` lands in the run record as plain text. Keep records out of version control, or feed secrets through `env()` in the provider block instead.
+- **Only variables can be marked sensitive.** A `sensitive = true` variable (and a component variable fed from one) is recorded as a hash, and teardown takes it again via `--var`. A secret that flows into an action's outputs, a typed insert's undo step, or a scenario output is recorded in clear, and `orchard plan --show-values` prints it. Detection of component inputs is static: a secret reaching an input through an action's outputs isn't caught.
 - **Partial-run teardown is best-effort, not transactional.** A teardown that fails mid-walk leaves earlier teardowns committed. The engine reports the joined error; there's no automatic rollback of already-run teardowns. For scenarios where partial teardown is unacceptable, author teardowns that are idempotent or use an isolation-boundary pattern (schema-per-run, tag-based deletes; see the [Isolating runs](docs/content/docs/guides/isolation.md) guide).
 - **Records don't capture action attribute values.** Per-node outputs, undo steps and variables are recorded (provider configs only as hashes); the action's input attrs aren't. Teardown uses `self.<output>` / `var.*`, so this is usually fine — but a teardown expression that needs the original action's input can't read it from the record.
 
@@ -1018,6 +1019,7 @@ Make cleanup a first-class operation so that scenarios can be torn down cleanly,
 | `orchard teardown <scenario> --latest` — newest run of the file not fully torn down; `--scenario` picks among several | Done |
 | Run metadata tagging on created resources | Done (via variables): a `variable "run_tag" { default = uuid() }` is evaluated once per run and recorded, and teardown reuses the recorded value; `--var run_tag=...` pins it. Components' resolved variables are recorded too (`component_variables`), so `var.*` in a component's teardown body sees the run's values |
 | Provider config drift check (hashed configs in the record; `--ignore-config-drift`) | Done |
+| `sensitive = true` variables: hashed in the record, passed again to teardown with `--var` and checked | Done |
 | Record format migrations / version negotiation | Version check done; migrations when a format 2 exists |
 
 **Done summary.** The core records + teardown loop is functional: every `orchard run` writes a JSON record with per-node outputs and resolved variables; `orchard teardown <record-file | run-id>` replays the scenario in reverse topological order and evaluates each action's `lifecycle { teardown { } }` body against a `var.* / self.* / action.*` eval context. Teardown uses the provider's existing `Execute` — no new provider surface — so any action type automatically supports teardown once its author writes a lifecycle block.

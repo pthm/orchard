@@ -59,9 +59,12 @@ func newInspectCmd() *cobra.Command {
 				fmt.Fprintf(out, "  Error       %s\n", style(render.Error, rec.Error))
 			}
 
-			if len(rec.Variables) > 0 {
+			if len(rec.Variables) > 0 || len(rec.SensitiveVariables) > 0 {
 				fmt.Fprintf(out, "\n  %s\n", style(render.Bold, "Variables"))
 				printValues(out, rec.Variables)
+				for _, k := range slices.Sorted(maps.Keys(rec.SensitiveVariables)) {
+					fmt.Fprintf(out, "    %s = %s\n", k, style(render.Muted, "(sensitive)"))
+				}
 			}
 
 			fmt.Fprintf(out, "\n  %s\n", style(render.Bold, "Nodes"))

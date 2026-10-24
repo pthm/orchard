@@ -611,3 +611,93 @@ func TestTeardownComponentScope(t *testing.T) {
 		t.Fatalf("teardown should remove both rows, %d left", got)
 	}
 }
+
+// TestTeardownSensitiveVariables: a sensitive variable, and a component
+// input built from it, stay out of the record; teardown needs the value
+// again and refuses a missing, wrong or unrelated --var.
+func TestTeardownSensitiveVariables(t *testing.T) {
+	project := t.TempDir()
+	db := filepath.Join(project, "shop.db")
+	createDB(t, db, "CREATE TABLE merchants (id INTEGER PRIMARY KEY, name TEXT NOT NULL)")
+	writeFile(t, filepath.Join(project, "labelled.hcl"), `component "labelled" {
+  variable "label" {}
+  action "sqlite_query" "row" {
+    query  = "INSERT INTO merchants (name) VALUES (?) RETURNING id"
+    params = [var.label]
+    lifecycle {
+      teardown {
+        query  = "DELETE FROM merchants WHERE name = ?"
+        params = [var.label]
+      }
+    }
+  }
+}
+`)
+	scenario := filepath.Join(project, "shop.hcl")
+	writeFile(t, scenario, `scenario "shop" {
+  variable "path" { sensitive = true }
+  required_providers {
+    db = { source = "builtin/sqlite" }
+  }
+  provider "db" {
+    path = var.path
+  }
+  action "sqlite_insert" "merchant" {
+    table  = "merchants"
+    values = { name = "m" }
+  }
+  component "labelled" "one" {
+    source = "./labelled.hcl"
+    inputs = { label = "x-${var.path}" }
+  }
+}
+`)
+	rec := runRecorded(t, scenario, "--var", "path="+db)
+	if got := countRows(t, db); got != 2 {
+		t.Fatalf("run should insert 2 rows, got %d", got)
+	}
+	raw, err := os.ReadFile(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), db) {
+		t.Fatalf("record should not hold the sensitive value:\n%s", raw)
+	}
+	loaded, err := record.Load(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.SensitiveVariables["path"] == "" {
+		t.Errorf("record should note the sensitive variable: %v", loaded.SensitiveVariables)
+	}
+	if got := loaded.SensitiveComponentVariables["labelled.one"]; len(got) != 1 || got[0] != "label" {
+		t.Errorf("record should note the component's sensitive input, got %v", got)
+	}
+	if out, _ := runCLI(t, "inspect", rec, "--no-color"); !strings.Contains(out, "path = (sensitive)") {
+		t.Errorf("inspect should show the variable as sensitive:\n%s", out)
+	}
+
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{nil, "--var path=<value>"},
+		{[]string{"--var", "path=" + db + "x"}, "differ from the value the run used"},
+		{[]string{"--var", "path=" + db, "--var", "other=1"}, "--var only passes sensitive ones"},
+	} {
+		out, err := runCLI(t, append([]string{"teardown", rec, "--no-color"}, tc.args...)...)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("teardown %v: want error containing %q, got %v\n%s", tc.args, tc.want, err, out)
+		}
+	}
+	if got := countRows(t, db); got != 2 {
+		t.Fatalf("refused teardowns should leave the rows, got %d", got)
+	}
+
+	if out, err := runCLI(t, "teardown", rec, "--no-color", "--var", "path="+db); err != nil {
+		t.Fatalf("teardown: %v\n%s", err, out)
+	}
+	if got := countRows(t, db); got != 0 {
+		t.Fatalf("teardown should remove both rows, %d left", got)
+	}
+}

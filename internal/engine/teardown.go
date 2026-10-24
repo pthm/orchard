@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -22,8 +23,9 @@ import (
 // inputs (keyed like ParsedScenario.Components), each succeeded node's
 // outputs, and the undo invocations providers described, keyed by full
 // node ID ("action.sql.create_merchant" etc.). A component missing from
-// compVars (a record from before they were kept) has its inputs
-// evaluated again from vars and recordedOutputs. Nodes in done were torn
+// compVars (a record from before they were kept), or whose entry leaves
+// some variables out (sensitive ones), has its inputs evaluated again
+// from vars and recordedOutputs to fill the gaps. Nodes in done were torn
 // down by an earlier, partly failed teardown and are skipped. completed
 // lists node IDs in the order the run completed them (the record's node
 // order); nodes it doesn't name, or all nodes when it is nil, follow in
@@ -131,12 +133,20 @@ func (e *Engine) Teardown(
 				scopeVars, scopeOutputs := vars, recordedOutputs
 				if key := node.ComponentKey; key != "" {
 					scopeOutputs = scopedComponentResolved(key, recordedOutputs)
-					var ok bool
-					if scopeVars, ok = compVars[key]; !ok {
-						var err error
-						if scopeVars, err = e.resolveComponentInputs(ps.Components[key], vars, recordedOutputs); err != nil {
+					comp := ps.Components[key]
+					recorded, ok := compVars[key]
+					scopeVars = recorded
+					// Evaluate the inputs again when the record has none
+					// (an older record) or left some out (sensitive
+					// ones); recorded values win, since they may come
+					// from the clock.
+					if !ok || len(recorded) < len(comp.Def.Variables) {
+						fresh, err := e.resolveComponentInputs(comp, vars, recordedOutputs)
+						if err != nil {
 							return err
 						}
+						maps.Copy(fresh, recorded)
+						scopeVars = fresh
 					}
 				}
 				return e.teardownAction(ctx, node, scopeVars, selfOutputs, scopeOutputs)

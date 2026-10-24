@@ -105,13 +105,15 @@ func newRunCmd() *cobra.Command {
 			var recRep *record.Reporter
 			if !noRecordFlag {
 				recRep, err = record.NewReporter(record.Options{
-					Inner:           cliRep,
-					Writer:          record.FileWriter{Dir: recordDirFlag},
-					Scenario:        record.ScenarioFromParser(ps, args[0]),
-					Variables:       ps.Variables,
-					Seed:            ps.Seed,
-					ProviderConfigs: ps.ProviderConfigs,
-					LogOutput:       cmd.ErrOrStderr(),
+					Inner:              cliRep,
+					Writer:             record.FileWriter{Dir: recordDirFlag},
+					Scenario:           record.ScenarioFromParser(ps, args[0]),
+					Variables:          ps.Variables,
+					Seed:               ps.Seed,
+					ProviderConfigs:    ps.ProviderConfigs,
+					Sensitive:          ps.Sensitive,
+					ComponentSensitive: componentSensitive(ps),
+					LogOutput:          cmd.ErrOrStderr(),
 				})
 				if err != nil {
 					return fmt.Errorf("preparing record: %w", err)
@@ -143,4 +145,16 @@ func newRunCmd() *cobra.Command {
 		"Run up to N independent actions at once")
 
 	return cmd
+}
+
+// componentSensitive collects each component's sensitive variables
+// for the run record.
+func componentSensitive(ps *parser.ParsedScenario) map[string]map[string]bool {
+	out := map[string]map[string]bool{}
+	for key, comp := range ps.Components {
+		if len(comp.Sensitive) > 0 {
+			out[key] = comp.Sensitive
+		}
+	}
+	return out
 }

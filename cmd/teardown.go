@@ -35,10 +35,10 @@ import (
 // lifecycle { teardown { } } blocks drive the cleanup; actions
 // without a teardown block are silently skipped.
 //
-// Unlike `orchard run`, variable overrides come from the record,
-// not the --var flag — teardown is meant to clean up the state the
-// recorded run produced. Future work may reintroduce overrides for
-// partial / targeted teardown.
+// Unlike `orchard run`, variable values come from the record —
+// teardown is meant to clean up the state the recorded run produced.
+// --var only passes sensitive variables, which the record keeps as
+// hashes; each is checked against its hash.
 //
 // Progress is written back to the record: each node whose teardown
 // succeeded is marked torn_down and skipped by a re-run, and once
@@ -107,7 +107,24 @@ func newTeardownCmd() *cobra.Command {
 			// scenario.path is absolute, so it resolves regardless of
 			// cwd. Use the recorded scenario name so files with
 			// multiple scenarios still pick the right one.
-			var opts []parser.Option
+			// --var supplies the run's sensitive variables, which the
+			// record keeps only as hashes; everything else comes from
+			// the record.
+			for name := range varFlags {
+				if _, ok := rec.SensitiveVariables[name]; !ok {
+					return fmt.Errorf("--var %s: teardown uses the run's recorded variables; --var only passes sensitive ones%s",
+						name, sensitiveHint(rec))
+				}
+			}
+			var missing []string
+			for name := range rec.SensitiveVariables {
+				if _, ok := varFlags[name]; !ok {
+					missing = append(missing, name)
+				}
+			}
+			slices.Sort(missing)
+
+			opts := []parser.Option{parser.WithOverrides(varFlags)}
 			if rec.Seed != nil {
 				// Teardown bodies that call random functions see the
 				// run's streams.
@@ -115,7 +132,17 @@ func newTeardownCmd() *cobra.Command {
 			}
 			ps, err := parser.LoadScenarioValues(rec.Scenario.Path, rec.Scenario.Name, vars, opts...)
 			if err != nil {
+				if len(missing) > 0 {
+					return fmt.Errorf("loading scenario %s: %w\nthe run's sensitive variable(s) %s aren't stored in the record; pass them again with --var %s=<value>",
+						rec.Scenario.Path, err, strings.Join(missing, ", "), missing[0])
+				}
 				return fmt.Errorf("loading scenario %s: %w", rec.Scenario.Path, err)
+			}
+			if drift, err := record.SensitiveDrift(rec, ps.Variables); err != nil {
+				return err
+			} else if len(drift) > 0 && !ignoreDrift {
+				return fmt.Errorf("sensitive variable(s) %s differ from the value the run used; pass the run's value with --var, or --ignore-config-drift if it still targets the same environment",
+					strings.Join(drift, ", "))
 			}
 
 			// Sanity check: the record's scenario name should match
@@ -189,7 +216,7 @@ func newTeardownCmd() *cobra.Command {
 				ForcePlain: noColorFlag,
 			}))
 
-			torn, tdErr := eng.Teardown(ctx, ps, g, vars, compVars, outputs, undos, done, completed)
+			torn, tdErr := eng.Teardown(ctx, ps, g, ps.Variables, compVars, outputs, undos, done, completed)
 			markTornDown(rec, torn, tdErr == nil)
 			if err := record.Save(file.Path, rec); err != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "warning: saving teardown progress: %v\n", err)
@@ -204,7 +231,7 @@ func newTeardownCmd() *cobra.Command {
 	cmd.Flags().StringVar(&scenarioName, "scenario", "",
 		"With --latest, the scenario to pick when the file declares several")
 	cmd.Flags().BoolVar(&ignoreDrift, "ignore-config-drift", false,
-		"Tear down even when a provider config differs from the run's (e.g. a rotated password)")
+		"Tear down even when a provider config or sensitive variable differs from the run's (e.g. a rotated password)")
 	return cmd
 }
 
@@ -286,4 +313,13 @@ func missingNodes(g *graph.Graph, outputs map[string]map[string]cty.Value, undos
 	}
 	slices.Sort(missing)
 	return missing
+}
+
+// sensitiveHint lists the run's sensitive variables for an error
+// message, or says it had none.
+func sensitiveHint(rec *record.Record) string {
+	if len(rec.SensitiveVariables) == 0 {
+		return " (this run had none)"
+	}
+	return " (this run's: " + strings.Join(slices.Sorted(maps.Keys(rec.SensitiveVariables)), ", ") + ")"
 }

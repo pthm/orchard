@@ -9,7 +9,10 @@ provider "exec" {
   notes = <<-MD
     - **Environment construction.** The child process's environment is built by
       starting from `os.Environ()`, layering the provider's `env`, then the action's
-      `env`. Later layers win on conflicts.
+      `env`. Later layers win on conflicts. With `inherit_env = false` it starts
+      empty instead, so a run doesn't depend on the host's environment; `command`
+      is still looked up on orchard's own `PATH`, but pass `PATH` in `env` if the
+      program runs others by name.
     - **Working directory.** Per-action `dir` overrides the provider default. If
       neither is set, the child inherits the parent's cwd.
     - **Shell expansion.** `command` and `args` are passed directly to `exec.Command`
@@ -41,6 +44,11 @@ provider "exec" {
     attribute "env" {
       type        = map(string)
       description = "Default environment variables merged into every action's env."
+    }
+    attribute "inherit_env" {
+      type        = bool
+      default     = true
+      description = "Start each command's environment from orchard's own. Set `false` to pass only `env`."
     }
   }
 

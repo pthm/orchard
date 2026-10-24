@@ -40,6 +40,7 @@ type Provider struct {
 	schema     protocol.ProviderSchema
 	defaultDir string
 	defaultEnv map[string]string
+	noInherit  bool
 }
 
 // New returns an unconfigured cmd provider. Schema is parsed once
@@ -70,6 +71,12 @@ func (p *Provider) Configure(_ context.Context, config map[string]cty.Value) err
 			return fmt.Errorf("exec: env must be a map(string), got %s", v.Type().FriendlyName())
 		}
 		p.defaultEnv = ctyMapToStringMap(v)
+	}
+	if v, ok := config["inherit_env"]; ok && !v.IsNull() {
+		if v.Type() != cty.Bool {
+			return fmt.Errorf("exec: inherit_env must be a bool, got %s", v.Type().FriendlyName())
+		}
+		p.noInherit = v.False()
 	}
 	return nil
 }
@@ -113,10 +120,14 @@ func (p *Provider) runCommand(ctx context.Context, attrs map[string]cty.Value) (
 		cmd.Dir = dir
 	}
 
-	// Environment: start from the host env, layer provider defaults,
-	// then layer per-action env. Duplicates later in cmd.Env win,
-	// which matches Go's documented behaviour.
-	cmd.Env = os.Environ()
+	// Environment: start from the host env (or nothing, with
+	// inherit_env = false: non-nil, since a nil Env inherits), layer
+	// provider defaults, then layer per-action env. Duplicates later
+	// in cmd.Env win, which matches Go's documented behaviour.
+	cmd.Env = []string{}
+	if !p.noInherit {
+		cmd.Env = os.Environ()
+	}
 	for k, v := range p.defaultEnv {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}

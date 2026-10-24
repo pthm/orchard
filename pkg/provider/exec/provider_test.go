@@ -241,3 +241,22 @@ func TestExecUnknownActionRejected(t *testing.T) {
 		t.Fatalf("expected unknown-action, got %v", err)
 	}
 }
+
+func TestExecNoInheritEnv(t *testing.T) {
+	skipIfWindows(t)
+	t.Setenv("ORCHARD_TEST_HOST", "leaked")
+	p := configured(t, map[string]cty.Value{
+		"inherit_env": cty.False,
+		"env":         cty.MapVal(map[string]cty.Value{"ORCHARD_TEST_DEFAULT": cty.StringVal("kept")}),
+	})
+	out, err := p.Execute(context.Background(), "exec_run", map[string]cty.Value{
+		"command": cty.StringVal("env"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.TrimSpace(out["stdout"].AsString())
+	if got != "ORCHARD_TEST_DEFAULT=kept" {
+		t.Errorf("env should hold only the configured variable, got %q", got)
+	}
+}

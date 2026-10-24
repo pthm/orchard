@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/zclconf/go-cty/cty"
+
+	"github.com/pthm/orchard/pkg/protocol"
 )
 
 func TestVariableTypedDefault(t *testing.T) {
@@ -139,5 +141,52 @@ scenario "strings" {
 	}
 	if ps.Variables["implicit"].AsString() != "also raw" {
 		t.Errorf("implicit: got %q", ps.Variables["implicit"].AsString())
+	}
+}
+
+// TestLoadScenarioValues: recorded values, decoded from a run record's
+// JSON, coerce to each declared type; untyped variables keep their
+// shape, and variables without a value fall back to the default.
+func TestLoadScenarioValues(t *testing.T) {
+	path := writeTempScenario(t, `
+scenario "recorded" {
+  variable "path" {}
+  variable "n" {
+    type = number
+  }
+  variable "tags" {
+    type = set(string)
+  }
+  variable "owner" {
+    type = object({ name = string, admin = bool })
+  }
+  variable "loose" {}
+  variable "region" {
+    default = "eu"
+  }
+}`)
+	values := map[string]cty.Value{}
+	for name, raw := range map[string]string{
+		"path":  `"/tmp/x.db"`,
+		"n":     `3`,
+		"tags":  `["a","b"]`,
+		"owner": `{"name":"ada","admin":true}`,
+		"loose": `[1,2]`,
+	} {
+		v, err := protocol.UnmarshalValue([]byte(raw), cty.DynamicPseudoType)
+		if err != nil {
+			t.Fatal(err)
+		}
+		values[name] = v
+	}
+	ps, err := LoadScenarioValues(path, "", values)
+	if err != nil {
+		t.Fatalf("LoadScenarioValues: %v", err)
+	}
+	vars := ps.Variables
+	if vars["path"].AsString() != "/tmp/x.db" || !vars["n"].Equals(cty.NumberIntVal(3)).True() ||
+		!vars["tags"].Type().IsSetType() || !vars["owner"].GetAttr("admin").True() ||
+		!vars["loose"].Type().IsTupleType() || vars["region"].AsString() != "eu" {
+		t.Errorf("unexpected variables: %#v", vars)
 	}
 }

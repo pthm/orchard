@@ -69,6 +69,20 @@ type ParsedComponent struct {
 // scenarios and name is empty, the error lists the available names so
 // the caller can retry with --scenario.
 func LoadScenario(path, name string, vars map[string]string) (*ParsedScenario, error) {
+	return loadScenario(path, name, vars, nil)
+}
+
+// LoadScenarioValues is LoadScenario with typed variable values in
+// place of CLI override strings: the resolved variables a run record
+// holds. Teardown reloads a scenario this way so count / for_each
+// expansion, provider configs and variables without a default all
+// see what the recorded run saw. Variables the scenario declares
+// but values lacks fall back to their defaults.
+func LoadScenarioValues(path, name string, values map[string]cty.Value) (*ParsedScenario, error) {
+	return loadScenario(path, name, nil, values)
+}
+
+func loadScenario(path, name string, vars map[string]string, values map[string]cty.Value) (*ParsedScenario, error) {
 	parser := hclparse.NewParser()
 
 	file, diags := parser.ParseHCLFile(path)
@@ -105,8 +119,8 @@ func LoadScenario(path, name string, vars map[string]string) (*ParsedScenario, e
 		return nil, err
 	}
 
-	// Resolve variables: defaults + CLI overrides.
-	resolved, err := resolveVariables(scenario.Variables, vars)
+	// Resolve variables: defaults + CLI overrides or recorded values.
+	resolved, err := resolveVariables(scenario.Variables, vars, values)
 	if err != nil {
 		return nil, fmt.Errorf("resolving variables: %w", err)
 	}
@@ -272,7 +286,8 @@ func evaluateProviderConfigs(
 		if _, ok := required[block.Name]; !ok {
 			return nil, fmt.Errorf(
 				"provider %q is configured but not declared in required_providers",
-				block.Name)
+				block.Name,
+			)
 		}
 		if seen[block.Name] {
 			return nil, fmt.Errorf("duplicate provider config for %q", block.Name)
@@ -343,7 +358,8 @@ func pickScenario(scenarios []*ScenarioBlock, name, path string) (*ScenarioBlock
 		}
 		return nil, fmt.Errorf(
 			"%s contains multiple scenarios; pass --scenario to pick one of: %s",
-			path, strings.Join(names, ", "))
+			path, strings.Join(names, ", "),
+		)
 	}
 	for _, s := range scenarios {
 		if s.Name == name {
@@ -356,7 +372,8 @@ func pickScenario(scenarios []*ScenarioBlock, name, path string) (*ScenarioBlock
 	}
 	return nil, fmt.Errorf(
 		"%s: no scenario %q found (have: %s)",
-		path, name, strings.Join(names, ", "))
+		path, name, strings.Join(names, ", "),
+	)
 }
 
 func validateScenarioUniqueness(s *ScenarioBlock) error {
@@ -431,7 +448,7 @@ func validateComponentUniqueness(c *ComponentDefBlock) error {
 	return nil
 }
 
-func resolveVariables(blocks []*VariableBlock, overrides map[string]string) (map[string]cty.Value, error) {
+func resolveVariables(blocks []*VariableBlock, overrides map[string]string, values map[string]cty.Value) (map[string]cty.Value, error) {
 	result := make(map[string]cty.Value)
 	ctx := &hcl.EvalContext{Functions: Functions()}
 
@@ -447,6 +464,14 @@ func resolveVariables(blocks []*VariableBlock, overrides map[string]string) (map
 				return nil, fmt.Errorf("variable %q: %w", v.Name, err)
 			}
 			result[v.Name] = val
+			continue
+		}
+		if val, ok := values[v.Name]; ok {
+			coerced, err := coerceToType(val, declaredType)
+			if err != nil {
+				return nil, fmt.Errorf("variable %q: %w", v.Name, err)
+			}
+			result[v.Name] = coerced
 			continue
 		}
 

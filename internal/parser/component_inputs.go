@@ -44,7 +44,8 @@ func ValidateComponentInputs(comp *ParsedComponent) error {
 			if _, declared := decls[k]; !declared {
 				return fmt.Errorf(
 					"component %q: input %q is not a declared variable on component %q",
-					compKey, k, comp.Def.Name)
+					compKey, k, comp.Def.Name,
+				)
 			}
 			providedKeys[k] = true
 		}
@@ -70,7 +71,8 @@ func ValidateComponentInputs(comp *ParsedComponent) error {
 		if defaultExpr == nil {
 			return fmt.Errorf(
 				"component %q: required variable %q has no default and no input",
-				compKey, name)
+				compKey, name,
+			)
 		}
 	}
 	return nil

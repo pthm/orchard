@@ -615,7 +615,7 @@ The file-on-disk shape is deliberately simpler than Terraform's state: no remote
 
 ### Teardown
 
-`orchard teardown <record-file>` reloads the scenario at the record's absolute path, re-configures providers from the current scenario file, and walks the dependency graph in **reverse** topological order. For each action whose original run succeeded AND that declares a `lifecycle { teardown { } }` block, the engine evaluates the teardown body against an eval context composed of:
+`orchard teardown <record-file>` reloads the scenario at the record's absolute path with the record's variables (so `count` / `for_each` expand as they did in the run, and variables without a default resolve), refuses if a recorded node that created something is no longer declared, re-configures providers from the current scenario file, and walks the dependency graph in **reverse** topological order. For each action whose original run succeeded AND that declares a `lifecycle { teardown { } }` block, the engine evaluates the teardown body against an eval context composed of:
 
 - `var.<name>` — the scenario variables from the record.
 - `self.<field>` — the teardown-only namespace pointing at this action's own recorded outputs. Authors write `DELETE FROM t WHERE id = ${self.id}` without restating the node name.
@@ -994,6 +994,7 @@ Make cleanup a first-class operation so that scenarios can be torn down cleanly,
 | `orchard teardown <record-file>` command | Done |
 | Reverse-order cleanup driven by the dependency graph | Done |
 | Best-effort teardown with joined error reporting | Done |
+| Teardown reloads the scenario with the recorded variables; refuses records whose created nodes the scenario no longer declares | Done |
 | End-to-end integration test over Postgres (FK-bound merchant+product) | Done |
 | Managed cleanup for `<p>_insert` (undo recorded at run time; `managed_teardown = false` opts out) | Done |
 | Managed cleanup for `<p>_update`: restore previous values of rows inserted this run by default; `managed_teardown = true` for other rows | Done |

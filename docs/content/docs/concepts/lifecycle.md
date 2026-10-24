@@ -138,6 +138,13 @@ For a scenario that inserted a merchant and then a product (FK → merchants),
 teardown runs the product `DELETE` first and the merchant `DELETE` second.
 Forward order would fail on the FK constraint.
 
+Teardown reloads the scenario with the variables the recorded run used, not
+their current defaults, and `--var` doesn't apply. A scenario run with
+`--var rows=3` against an action with `count = var.rows` tears down all three
+instances, and a variable with no default needs no override. If the scenario
+no longer declares an action the record says created something, teardown
+refuses and names it, so put the action back before tearing down.
+
 Teardown is **best-effort**: if one action's teardown fails, the walk keeps
 going. The joined set of errors is returned at the end. That matches how
 cleanup usually works in practice — you want to unwind as much as possible,

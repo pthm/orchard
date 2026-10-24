@@ -2,14 +2,18 @@ package cmd
 
 import (
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/zclconf/go-cty/cty"
 
 	"github.com/pthm/orchard/internal/cli/reporter"
 	"github.com/pthm/orchard/internal/engine"
 	"github.com/pthm/orchard/internal/graph"
 	"github.com/pthm/orchard/internal/parser"
 	"github.com/pthm/orchard/internal/record"
+	"github.com/pthm/orchard/pkg/provider"
 )
 
 // newTeardownCmd builds the `orchard teardown <record-file>`
@@ -57,11 +61,13 @@ func newTeardownCmd() *cobra.Command {
 				return fmt.Errorf("decoding record undo steps: %w", err)
 			}
 
-			// Reload the scenario. The record's scenario.path is
-			// absolute, so it resolves regardless of cwd. Use the
-			// recorded scenario name so files with multiple
-			// scenarios still pick the right one.
-			ps, err := parser.LoadScenario(rec.Scenario.Path, rec.Scenario.Name, nil)
+			// Reload the scenario with the variables the run used, so
+			// count / for_each expand to the same instances and
+			// provider configs see the same values. The record's
+			// scenario.path is absolute, so it resolves regardless of
+			// cwd. Use the recorded scenario name so files with
+			// multiple scenarios still pick the right one.
+			ps, err := parser.LoadScenarioValues(rec.Scenario.Path, rec.Scenario.Name, vars)
 			if err != nil {
 				return fmt.Errorf("loading scenario %s: %w", rec.Scenario.Path, err)
 			}
@@ -73,12 +79,21 @@ func newTeardownCmd() *cobra.Command {
 			if ps.Scenario.Name != rec.Scenario.Name {
 				return fmt.Errorf(
 					"scenario name mismatch: record has %q, file %s now declares %q",
-					rec.Scenario.Name, rec.Scenario.Path, ps.Scenario.Name)
+					rec.Scenario.Name, rec.Scenario.Path, ps.Scenario.Name,
+				)
 			}
 
 			g, err := graph.Build(ps)
 			if err != nil {
 				return fmt.Errorf("building graph: %w", err)
+			}
+
+			// A recorded node that created something but is gone from
+			// the scenario would be skipped silently, leaving its
+			// state behind while teardown reports success.
+			if missing := missingNodes(g, outputs, undos); len(missing) > 0 {
+				return fmt.Errorf("scenario %s no longer declares recorded node(s) %s; restore them to tear down",
+					rec.Scenario.Path, strings.Join(missing, ", "))
 			}
 
 			reg, err := registerProviders(ps, providerModeRun)
@@ -91,13 +106,10 @@ func newTeardownCmd() *cobra.Command {
 				}
 			}()
 
-			// Teardown uses the scenario's provider configs verbatim.
-			// The record doesn't capture those today — tricky because
-			// they may reference variables whose defaults have
-			// changed. For v1, re-evaluate them from the scenario;
-			// if provider credentials have moved since the original
-			// run, the user fixes them in the scenario (or passes
-			// them via --var when we add that).
+			// Provider configs are re-evaluated from the scenario
+			// against the recorded variables. If provider credentials
+			// have moved since the original run, the user fixes them
+			// in the scenario.
 			if err := reg.Configure(ctx, ps.ProviderConfigs); err != nil {
 				return fmt.Errorf("configuring providers: %w", err)
 			}
@@ -115,4 +127,22 @@ func newTeardownCmd() *cobra.Command {
 			return eng.Teardown(ctx, ps, g, vars, outputs, undos)
 		},
 	}
+}
+
+// missingNodes lists, sorted, the recorded nodes with outputs or an
+// undo step that g no longer contains.
+func missingNodes(g *graph.Graph, outputs map[string]map[string]cty.Value, undos map[string]provider.Invocation) []string {
+	var missing []string
+	for id := range outputs {
+		if _, ok := g.Nodes[graph.NodeID(id)]; !ok {
+			missing = append(missing, id)
+		}
+	}
+	for id := range undos {
+		if _, ok := g.Nodes[graph.NodeID(id)]; !ok && outputs[id] == nil {
+			missing = append(missing, id)
+		}
+	}
+	slices.Sort(missing)
+	return missing
 }

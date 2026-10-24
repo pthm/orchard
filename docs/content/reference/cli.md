@@ -175,10 +175,16 @@ the record, and evaluates each action's `lifecycle { teardown { } }` body in
 **Behavior**
 
 1. Load and decode the record file.
-2. Load the scenario at the absolute path stored in the record.
+2. Load the scenario at the absolute path stored in the record, with the
+   variables the recorded run used (`--var` does not apply), so `count` /
+   `for_each` expand to the same instances and variables without a default
+   resolve.
 3. Verify the scenario name matches the one in the record (reject if the file
-   has been rewritten to declare a different scenario).
-4. Register and configure providers using the scenario's current config blocks.
+   has been rewritten to declare a different scenario), and that every
+   recorded node with outputs or an undo step is still in the scenario (reject
+   and name the missing nodes otherwise).
+4. Register and configure providers using the scenario's current config
+   blocks, evaluated against the recorded variables.
 5. Walk the dependency graph in reverse; for each action that succeeded in the
    recorded run and still routes to a registered provider, run its
    `lifecycle { teardown { } }` body if it has one, or otherwise the undo step

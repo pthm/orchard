@@ -76,6 +76,7 @@ prints declared outputs. Exits non-zero on validation or execution failure.
 | `--record-dir <path>` | string | `.` (cwd) | Directory to write the run record to. Created if missing. |
 | `--no-record` | bool | `false` | Skip writing a run record. |
 | `--scenario <name>` | string | — | Pick a scenario by name when the file defines multiple. Optional for single-scenario files. |
+| `--parallelism <n>` | int | `1` | Run up to `n` independent actions at once. Must be at least 1. Actions that touch the same data without referencing each other should use `depends_on`, or the order they change it in is not guaranteed. |
 
 **Behavior**
 
@@ -84,16 +85,18 @@ prints declared outputs. Exits non-zero on validation or execution failure.
    are launched as subprocesses.
 3. Send `describe` to every provider and validate schemas.
 4. Evaluate provider configuration; send `configure` to every provider.
-5. Build the dependency graph, topologically sort, and send `execute` for each
-   action in order.
+5. Build the dependency graph and send `execute` for each action once the
+   actions it depends on have completed: one at a time in a stable order, or
+   up to `--parallelism` independent actions at once. After a failure no new
+   action starts; actions already running finish and are recorded.
 6. Evaluate scenario outputs and print them.
 7. Send `shutdown` to every provider.
 8. Write a JSON **run record** to `--record-dir` (unless `--no-record` is set),
    capturing variables, per-node outputs, and scenario outputs, and print
    `record: <path>` on stderr. See [run records](#run-records) below.
 
-Ctrl-C or SIGTERM cancels the run: the action in flight fails, and the
-record is still written with everything that finished before it, ready for
+Ctrl-C or SIGTERM cancels the run: actions in flight fail, and the
+record is still written with everything that finished, ready for
 `orchard teardown <scenario> --latest`. A second Ctrl-C exits immediately.
 
 **Exit codes**
@@ -193,7 +196,8 @@ orchard teardown <scenario-file> --latest [--record-dir <path>] [--scenario <nam
 Tear down the state created by a recorded scenario run. Reads the JSON record
 produced by a prior `orchard run`, reloads the scenario at the path stored in
 the record, and evaluates each action's `lifecycle { teardown { } }` body in
-**reverse** topological order.
+**reverse** of the order the run completed its actions (a reverse topological
+order).
 
 | Argument | Description |
 |----------|-------------|
@@ -222,7 +226,9 @@ the record, and evaluates each action's `lifecycle { teardown { } }` body in
    in the scenario (reject and name the missing nodes otherwise).
 4. Register and configure providers using the scenario's current config
    blocks, evaluated against the recorded variables.
-5. Walk the dependency graph in reverse; for each action that succeeded in the
+5. Walk the recorded actions in reverse of the order they completed (so after
+   a `--parallelism` run, independent actions are undone in the reverse of the
+   order they really ran); for each action that succeeded in the
    recorded run and still routes to a registered provider, run its
    `lifecycle { teardown { } }` body if it has one, or otherwise the undo step
    its provider recorded (a typed insert's delete by primary key, or a typed

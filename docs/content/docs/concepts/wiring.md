@@ -97,8 +97,14 @@ Teardown blocks can use `count.index` / `each.*` too.
 ## Dependency resolution
 
 Orchard builds a directed acyclic graph of all actions and components in the
-scenario, topologically sorts it, and executes nodes in order. Independent
-branches run sequentially today; parallel execution is a future addition.
+scenario and runs each node once everything it depends on has completed. By
+default one action runs at a time, in a stable order. `orchard run
+--parallelism N` runs up to N independent actions at once; an action still
+never starts before the actions it references or lists in `depends_on`. If an
+action fails, nothing new starts, but actions already running finish and are
+recorded, so `orchard teardown` can undo them. Actions that touch the same
+data without referencing each other should use `depends_on` when run in
+parallel; otherwise the order they change it in is not guaranteed.
 
 Cycles are detected at plan time and reported as errors — you cannot have two
 actions that depend on each other.

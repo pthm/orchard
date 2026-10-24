@@ -454,3 +454,52 @@ func TestTeardownRunTag(t *testing.T) {
 		t.Fatalf("teardown should delete the pinned row, %d left", got)
 	}
 }
+
+// TestRunParallelism: --parallelism rejects values below 1; at 4 the
+// record still holds every node with its undo, so teardown empties
+// the table.
+func TestRunParallelism(t *testing.T) {
+	project := t.TempDir()
+	db := filepath.Join(project, "shop.db")
+	createDB(t, db, "CREATE TABLE merchants (id INTEGER PRIMARY KEY, name TEXT NOT NULL)")
+	scenario := filepath.Join(project, "shop.hcl")
+	writeFile(t, scenario, `scenario "shop" {
+  required_providers {
+    db = { source = "builtin/sqlite" }
+  }
+  provider "db" {
+    path = "./shop.db"
+  }
+  action "sqlite_insert" "merchant" {
+    count  = 8
+    table  = "merchants"
+    values = { name = "m${count.index}" }
+  }
+}
+`)
+	if out, err := runCLI(t, "run", scenario, "--no-record", "--parallelism", "0"); err == nil || !strings.Contains(err.Error(), "--parallelism") {
+		t.Fatalf("--parallelism 0 should fail, got %v\n%s", err, out)
+	}
+	rec := runRecorded(t, scenario, "--parallelism", "4")
+	r, err := record.Load(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Nodes) != 8 {
+		t.Fatalf("want 8 recorded nodes, got %d", len(r.Nodes))
+	}
+	for _, n := range r.Nodes {
+		if n.Status != record.StatusSucceeded || n.Undo == nil {
+			t.Errorf("node %s: status %s, undo %v", n.ID, n.Status, n.Undo)
+		}
+	}
+	if got := countRows(t, db); got != 8 {
+		t.Fatalf("run should insert 8 rows, got %d", got)
+	}
+	if out, err := runCLI(t, "teardown", rec, "--no-color"); err != nil {
+		t.Fatalf("teardown: %v\n%s", err, out)
+	}
+	if got := countRows(t, db); got != 0 {
+		t.Fatalf("teardown should remove every row, %d left", got)
+	}
+}

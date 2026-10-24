@@ -104,7 +104,7 @@ func TestScenarioRunAndTeardown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := eng.Teardown(context.Background(), ps, g, recVars, recOutputs, undos, nil); err != nil {
+	if _, err := eng.Teardown(context.Background(), ps, g, recVars, recOutputs, undos, nil, nil); err != nil {
 		t.Fatalf("teardown: %v", err)
 	}
 	assertCount(t, db, "products", 0)
@@ -334,7 +334,7 @@ func teardown(t *testing.T, scenario string, vars map[string]string, rec *record
 		t.Fatal(err)
 	}
 	ps, g, eng := load(t, scenario, vars)
-	if _, err := eng.Teardown(context.Background(), ps, g, recVars, outputs, undos, nil); err != nil {
+	if _, err := eng.Teardown(context.Background(), ps, g, recVars, outputs, undos, nil, nil); err != nil {
 		t.Fatalf("teardown: %v", err)
 	}
 }

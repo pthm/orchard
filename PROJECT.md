@@ -577,7 +577,7 @@ The engine wraps `provider.Execute` in `context.WithTimeout`. On breach the erro
 
 1. **Parse** — Load HCL files, structurally decode scenarios and components, resolve component source paths, merge variable defaults with CLI overrides, extract `required_providers` and evaluate each `provider` block against the variable context.
 2. **Plan** — Build the dependency graph from expression references. Topologically sort nodes. Detect cycles. Register providers for schemas only (no `Configure`). Run `Engine.ValidateGraph` (structural: unknown attributes, missing required fields, unrouted action types) and `Engine.ValidateReferences` (typed eval context: reference typos, bad attribute access on primitives, mismatched types). Both passes attach HCL source coordinates to errors.
-3. **Execute** — Configure every provider with its resolved config. Walk the topological order. For each node: build an `EvalContext` from resolved upstream outputs, evaluate the node's deferred expressions, coerce attrs to their declared types, dispatch to the appropriate provider, capture outputs.
+3. **Execute** — Configure every provider with its resolved config. Run each node once its dependencies have completed, up to `--parallelism` at a time (default 1, in topological order). For each node: build an `EvalContext` from resolved upstream outputs, evaluate the node's deferred expressions, coerce attrs to their declared types, dispatch to the appropriate provider, capture outputs.
 4. **Output** — Evaluate and display scenario-level outputs.
 5. **Close** — Close providers in reverse registration order. External subprocesses receive `shutdown` and are waited on (force-killed after a timeout if unresponsive).
 
@@ -585,7 +585,7 @@ The engine wraps `provider.Execute` in `context.WithTimeout`. On breach the erro
 
 Orchard aims for reproducible runs:
 
-- **Deterministic execution order.** Kahn's topological sort emits siblings in lexicographic order of their node IDs, so same graph → same walk, run after run. Provider registration iterates `required_providers` in sorted order; scenario outputs and variables print alphabetically.
+- **Deterministic execution order.** Kahn's topological sort emits siblings in lexicographic order of their node IDs, so same graph → same walk, run after run, at the default parallelism 1; with `--parallelism N`, independent siblings may finish in any order. Provider registration iterates `required_providers` in sorted order; scenario outputs and variables print alphabetically.
 - **Deterministic close order.** Providers close in reverse registration order. Subprocess shutdown is bounded by a single deadline across the graceful RPC and the process wait — a hung provider cannot wedge orchard's exit.
 - **Fail-fast on authoring collisions.** Duplicate variable names, action `(type, name)` pairs, component instance keys, output names, and provider blocks are rejected at parse time rather than silently overwriting.
 - **Seeded random generators** for data generation (planned; individual providers responsible).
@@ -644,7 +644,7 @@ action "postgres_query" "create_merchant" {
 
 ### Reverse-Order Cleanup
 
-Teardown walks the graph in reverse of the execute order. For `merchant → product` (FK in products.merchant_id), that means the product delete runs first and the merchant delete second — otherwise the FK constraint fires on the merchant delete. The dependency graph that drives execution also drives cleanup.
+Teardown walks the run's actions in reverse of the order they completed — a reverse topological order, and after a `--parallelism` run the reverse of the order independent actions really changed shared data in. For `merchant → product` (FK in products.merchant_id), that means the product delete runs first and the merchant delete second — otherwise the FK constraint fires on the merchant delete. The dependency graph that drives execution also drives cleanup.
 
 ### Best-Effort Semantics
 
@@ -1057,7 +1057,7 @@ Harden the tool for real-world use and improve the authoring experience.
 | `count` / `for_each` on scenario actions and components (`count.index`, `each.key/value`, `x[0]` / `x["k"]` / `x[*]` references) | Done |
 | Dry-run mode (plan with expression evaluation but no execution) | Done: `orchard plan --show-values` lists each action's evaluated attributes, `(known after run)` for values from other actions |
 | Execution logging with structured output | Deferred: the run record is the structured log of every action, its inputs and outputs |
-| Parallel execution of independent nodes | In progress: providers return each action's undo from the call that runs it (`provider.Undoer`), so typed SQL, Redis and S3 actions keep no state between calls and are safe to run concurrently |
+| Parallel execution of independent nodes | Done: `orchard run --parallelism N` (default 1) runs up to N actions whose dependencies have completed; after a failure nothing new starts and in-flight actions finish into the record. Teardown stays sequential, in reverse completion order |
 | Transaction wrapping for atomic scenario execution | Won't do: atomicity across providers is impossible; uncommitted rows would be invisible to `http`, `grpc` and `exec` actions; the run record plus `orchard teardown` covers cleanup; a multi-statement `postgres_query` (or `BEGIN; ... COMMIT;` in one query) is atomic within one action |
 | Configuration file (`.orchard/config.hcl` or similar) | Deferred: flags and `--var` cover configuration for now |
 

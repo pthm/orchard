@@ -20,8 +20,9 @@ provider "sqlite" {
     - Each `sqlite_query` runs on its own, outside any transaction spanning actions.
       If you need several statements to apply atomically, wrap them in one `query`
       with `BEGIN; ... COMMIT;`.
-    - Actions run one at a time over a single connection. That keeps a `:memory:`
-      database shared by every action in the run.
+    - Actions run one at a time over a single connection, even with
+      `orchard run --parallelism`. That keeps a `:memory:` database shared by
+      every action in the run.
     - A `:memory:` database disappears when the run ends, so `orchard teardown` has
       nothing to clean up. Use a file path for state you want to tear down later.
     - SQL injection: values interpolated via `$${var.name}` are HCL-evaluated to

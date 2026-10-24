@@ -30,6 +30,7 @@ var (
 	recordDirFlag   string
 	noRecordFlag    bool
 	runScenarioFlag string
+	parallelismFlag int
 )
 
 func newRunCmd() *cobra.Command {
@@ -39,6 +40,9 @@ func newRunCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
+			if parallelismFlag < 1 {
+				return fmt.Errorf("--parallelism must be at least 1, got %d", parallelismFlag)
+			}
 
 			ps, err := parser.LoadScenario(args[0], runScenarioFlag, varFlags)
 			if err != nil {
@@ -113,6 +117,7 @@ func newRunCmd() *cobra.Command {
 				finalReporter = recRep
 			}
 			eng.SetReporter(finalReporter)
+			eng.SetParallelism(parallelismFlag)
 
 			_, execErr := eng.Execute(ctx, ps, g)
 			if recRep != nil && recRep.Path() != "" {
@@ -130,6 +135,8 @@ func newRunCmd() *cobra.Command {
 		"Skip writing a run record")
 	cmd.Flags().StringVar(&runScenarioFlag, "scenario", "",
 		"Pick a scenario by name when the file defines multiple")
+	cmd.Flags().IntVar(&parallelismFlag, "parallelism", 1,
+		"Run up to N independent actions at once")
 
 	return cmd
 }

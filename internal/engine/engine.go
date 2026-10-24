@@ -66,6 +66,10 @@ type Engine struct {
 	// attributes as ValidateReferences evaluated them, by node.
 	keepPlanned bool
 	planned     map[graph.NodeID]map[string]cty.Value
+
+	// parallelism caps how many actions Execute runs at once; below 1
+	// means 1.
+	parallelism int
 }
 
 // UndoReporter is implemented by reporters that keep run records.
@@ -86,9 +90,8 @@ type UndoReporter interface {
 //
 // All methods are best-effort. The engine never checks return
 // values; Reporter implementations must not block or fail the
-// run. A Reporter implementation should handle concurrent calls
-// only if the caller wires one into a concurrent engine — today
-// the engine is single-threaded and emits events serially.
+// run. The engine makes every call from one goroutine, even when
+// actions run in parallel, so implementations need no locking.
 type Reporter interface {
 	// RunStarted fires once, before any node executes. scenario is
 	// the name from the top-level scenario block.
@@ -233,6 +236,10 @@ func (e *Engine) SetReporter(r Reporter) {
 	e.reporter = r
 }
 
+// SetParallelism sets how many independent actions Execute runs at
+// once. The default, 1, runs them one at a time in g.Order.
+func (e *Engine) SetParallelism(n int) { e.parallelism = n }
+
 // SetKeepPlannedAttrs makes ValidateReferences evaluate every
 // action's attributes, not only those a provider plans, and keep them
 // for PlannedAttrs. `orchard plan --show-values` turns it on.
@@ -316,7 +323,16 @@ func (e *Engine) resolveRoute(actionType, providerAlias string) (actionRoute, er
 	return candidates[0], nil
 }
 
-// Execute runs all nodes in topological order and returns scenario outputs.
+// Execute runs every node once its dependencies have completed, up to
+// SetParallelism actions at a time, and returns scenario outputs.
+//
+// The calling goroutine is the coordinator: it owns resolved outputs,
+// component inputs and counters, builds each action's eval context
+// before handing it to a goroutine, and makes every reporter call, so
+// reporters need no locking. Ready nodes are dispatched in g.Order
+// order, so parallelism 1 runs exactly g.Order. After the first
+// failure nothing new starts, but ctx isn't cancelled: actions in
+// flight finish, so their side effects and undos reach the record.
 func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *graph.Graph) (*Result, error) {
 	e.scenarioDir = ps.ScenarioDir
 	resolved := make(map[string]map[string]cty.Value)
@@ -331,80 +347,140 @@ func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *grap
 	runStart := time.Now()
 	e.reporter.RunStarted(ps.Scenario.Name)
 	succeeded := 0
+	var errs []error
 
-	reportFailure := func(nodeID string, err error) error {
+	fail := func(nodeID string, err error) {
 		e.reporter.NodeFailed(nodeID, err)
-		e.reporter.RunCompleted(RunSummary{
-			Scenario:  ps.Scenario.Name,
-			Duration:  time.Since(runStart),
-			Succeeded: succeeded,
-			Failed:    1,
-			OK:        false,
-			Err:       err,
-		})
-		return err
+		errs = append(errs, err)
 	}
 
-	for _, nodeID := range g.Order {
-		node := g.Nodes[nodeID]
-		// An interrupted run stops before the next node rather than
-		// relying on every provider to notice the cancelled ctx.
-		if err := ctx.Err(); err != nil {
-			return nil, reportFailure(string(nodeID), err)
+	// waiting counts each node's incomplete dependencies; ready holds
+	// the g.Order indexes of nodes with none left, smallest first.
+	index := make(map[graph.NodeID]int, len(g.Order))
+	waiting := make(map[graph.NodeID]int, len(g.Order))
+	dependents := make(map[graph.NodeID][]graph.NodeID)
+	var ready []int
+	for i, id := range g.Order {
+		index[id] = i
+		deps := g.Nodes[id].Dependencies
+		waiting[id] = len(deps)
+		for _, dep := range deps {
+			dependents[dep] = append(dependents[dep], id)
 		}
+		if len(deps) == 0 {
+			ready = append(ready, i)
+		}
+	}
+	complete := func(nodeID graph.NodeID, outputs map[string]cty.Value, d time.Duration) {
+		resolved[string(nodeID)] = outputs
+		e.reporter.NodeCompleted(string(nodeID), outputs, d)
+		succeeded++
+		for _, dep := range dependents[nodeID] {
+			waiting[dep]--
+			if waiting[dep] == 0 {
+				ready = append(ready, index[dep])
+			}
+		}
+		sort.Ints(ready)
+	}
 
-		switch node.Kind {
-		case graph.ActionNode:
+	type result struct {
+		node     *graph.Node
+		outputs  map[string]cty.Value
+		undo     *provider.Invocation
+		err      error
+		duration time.Duration
+	}
+	results := make(chan result)
+	inFlight := 0
+	parallelism := max(e.parallelism, 1)
+
+	for {
+		for len(errs) == 0 && len(ready) > 0 && inFlight < parallelism {
+			nodeID := g.Order[ready[0]]
+			ready = ready[1:]
+			node := g.Nodes[nodeID]
+			// An interrupted run stops before the next node rather than
+			// relying on every provider to notice the cancelled ctx.
+			if err := ctx.Err(); err != nil {
+				fail(string(nodeID), err)
+				break
+			}
+
+			if node.Kind == graph.ComponentNode {
+				// Resolving outputs is pure evaluation: do it here.
+				e.reporter.NodeStarted(string(nodeID))
+				start := time.Now()
+				outputs, err := e.resolveComponentOutputs(node, ps, compVars, resolved)
+				if err != nil {
+					fail(string(nodeID), fmt.Errorf("resolving outputs for %s%s: %w", nodeID, formatSourceLoc(node.SourceRange), err))
+					break
+				}
+				complete(nodeID, outputs, time.Since(start))
+				continue
+			}
+
 			if node.ComponentKey != "" {
 				if _, ok := compVars[node.ComponentKey]; !ok {
 					vars, err := e.resolveComponentInputs(ps.Components[node.ComponentKey], ps.Variables, resolved)
 					if err != nil {
-						return nil, reportFailure(string(nodeID),
-							fmt.Errorf("resolving inputs for component %q%s: %w", node.ComponentKey, formatSourceLoc(node.SourceRange), err))
+						fail(string(nodeID), fmt.Errorf("resolving inputs for component %q%s: %w", node.ComponentKey, formatSourceLoc(node.SourceRange), err))
+						break
 					}
 					compVars[node.ComponentKey] = vars
 				}
 			}
+			evalCtx := e.buildNodeEvalContext(node, ps.Variables, compVars, resolved)
 			e.reporter.NodeStarted(string(nodeID))
-			start := time.Now()
-			outputs, undo, err := e.executeAction(ctx, node, ps.Variables, compVars, resolved)
-			if err != nil {
-				return nil, reportFailure(string(nodeID),
-					fmt.Errorf("executing %s%s: %w", nodeID, formatSourceLoc(node.SourceRange), err))
-			}
-			resolved[string(nodeID)] = outputs
-			e.reporter.NodeCompleted(string(nodeID), outputs, time.Since(start))
-			if undo != nil {
-				if ur, ok := e.reporter.(UndoReporter); ok {
-					ur.NodeUndo(string(nodeID), *undo)
-				}
-			}
-			succeeded++
+			inFlight++
+			go func() {
+				start := time.Now()
+				outputs, undo, err := e.executeAction(ctx, node, evalCtx)
+				results <- result{node, outputs, undo, err, time.Since(start)}
+			}()
+		}
+		if inFlight == 0 {
+			break
+		}
 
-		case graph.ComponentNode:
-			e.reporter.NodeStarted(string(nodeID))
-			start := time.Now()
-			outputs, err := e.resolveComponentOutputs(node, ps, compVars, resolved)
-			if err != nil {
-				return nil, reportFailure(string(nodeID),
-					fmt.Errorf("resolving outputs for %s%s: %w", nodeID, formatSourceLoc(node.SourceRange), err))
+		r := <-results
+		inFlight--
+		if r.err != nil {
+			fail(string(r.node.ID), fmt.Errorf("executing %s%s: %w", r.node.ID, formatSourceLoc(r.node.SourceRange), r.err))
+			continue
+		}
+		complete(r.node.ID, r.outputs, r.duration)
+		if r.undo != nil {
+			if ur, ok := e.reporter.(UndoReporter); ok {
+				ur.NodeUndo(string(r.node.ID), *r.undo)
 			}
-			resolved[string(nodeID)] = outputs
-			e.reporter.NodeCompleted(string(nodeID), outputs, time.Since(start))
-			succeeded++
 		}
 	}
 
 	scenarioOutputs := make(map[string]cty.Value)
-	evalCtx := buildEvalContext(ps.Variables, resolved)
-
-	for _, output := range ps.Scenario.Outputs {
-		val, diags := output.Value.Value(evalCtx)
-		if diags.HasErrors() {
-			err := fmt.Errorf("evaluating output %q: %s", output.Name, diags.Error())
-			return nil, reportFailure("output."+output.Name, err)
+	if len(errs) == 0 {
+		evalCtx := buildEvalContext(ps.Variables, resolved)
+		for _, output := range ps.Scenario.Outputs {
+			val, diags := output.Value.Value(evalCtx)
+			if diags.HasErrors() {
+				fail("output."+output.Name, fmt.Errorf("evaluating output %q: %s", output.Name, diags.Error()))
+				break
+			}
+			scenarioOutputs[output.Name] = val
 		}
-		scenarioOutputs[output.Name] = val
+	}
+
+	if len(errs) > 0 {
+		err := errors.Join(errs...)
+		e.reporter.RunCompleted(RunSummary{
+			Scenario:  ps.Scenario.Name,
+			Duration:  time.Since(runStart),
+			Succeeded: succeeded,
+			Failed:    len(errs),
+			OK:        false,
+			Err:       err,
+		})
+		return nil, err
 	}
 
 	e.reporter.RunCompleted(RunSummary{
@@ -418,15 +494,16 @@ func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *grap
 	return &Result{Outputs: scenarioOutputs}, nil
 }
 
+// executeAction runs an action against its provider with evalCtx,
+// retrying as its retry block says. It runs on a worker goroutine, so
+// it reads nothing Execute's coordinator writes.
 func (e *Engine) executeAction(
 	ctx context.Context,
 	node *graph.Node,
-	vars map[string]cty.Value,
-	compVars map[string]map[string]cty.Value,
-	resolved map[string]map[string]cty.Value,
+	evalCtx *hcl.EvalContext,
 ) (map[string]cty.Value, *provider.Invocation, error) {
 	if node.Retry == nil {
-		return e.executeActionOnce(ctx, node, vars, compVars, resolved)
+		return e.executeActionOnce(ctx, node, evalCtx)
 	}
 
 	// Retry loop. Each attempt runs with its own per-action
@@ -438,7 +515,7 @@ func (e *Engine) executeAction(
 		if err := ctx.Err(); err != nil {
 			return nil, nil, err
 		}
-		outputs, undo, err := e.executeActionOnce(ctx, node, vars, compVars, resolved)
+		outputs, undo, err := e.executeActionOnce(ctx, node, evalCtx)
 		if err == nil {
 			return outputs, undo, nil
 		}
@@ -464,9 +541,7 @@ func (e *Engine) executeAction(
 func (e *Engine) executeActionOnce(
 	ctx context.Context,
 	node *graph.Node,
-	vars map[string]cty.Value,
-	compVars map[string]map[string]cty.Value,
-	resolved map[string]map[string]cty.Value,
+	evalCtx *hcl.EvalContext,
 ) (map[string]cty.Value, *provider.Invocation, error) {
 	route, err := e.resolveRoute(node.ActionType, node.ProviderAlias)
 	if err != nil {
@@ -476,8 +551,6 @@ func (e *Engine) executeActionOnce(
 	if err != nil {
 		return nil, nil, err
 	}
-
-	evalCtx := e.buildNodeEvalContext(node, vars, compVars, resolved)
 
 	attrs, err := evalAttrs(node.Body, route.schema, evalCtx)
 	if err != nil {

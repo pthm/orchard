@@ -69,6 +69,14 @@ func runScenarioWithRecord(
 	t *testing.T, path string, vars map[string]string, recordDir string,
 ) (outputs map[string]cty.Value, rec *record.Record) {
 	t.Helper()
+	return runScenarioParallel(t, path, vars, recordDir, 1)
+}
+
+// runScenarioParallel is runScenarioWithRecord at parallelism n.
+func runScenarioParallel(
+	t *testing.T, path string, vars map[string]string, recordDir string, n int,
+) (outputs map[string]cty.Value, rec *record.Record) {
+	t.Helper()
 
 	ps, err := parser.LoadScenario(path, "", vars)
 	require.NoError(t, err)
@@ -94,6 +102,7 @@ func runScenarioWithRecord(
 	})
 	require.NoError(t, err)
 	eng.SetReporter(rep)
+	eng.SetParallelism(n)
 
 	result, err := eng.Execute(context.Background(), ps, g)
 	require.NoError(t, err, "run failed")
@@ -151,7 +160,7 @@ func runTeardown(t *testing.T, scenarioPath string, vars map[string]string, rec 
 
 	undos, err := record.IndexUndos(rec)
 	require.NoError(t, err)
-	_, err = eng.Teardown(context.Background(), ps, g, recVars, outputs, undos, nil)
+	_, err = eng.Teardown(context.Background(), ps, g, recVars, outputs, undos, nil, nil)
 	require.NoError(t, err, "teardown reported errors")
 }
 

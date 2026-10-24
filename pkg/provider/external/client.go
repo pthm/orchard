@@ -35,11 +35,11 @@ var ErrClientPoisoned = errors.New("external: client abandoned a prior call; can
 // response pairs.
 //
 // Roundtrip holds a mutex for the duration of the exchange, making
-// the client safe for concurrent callers but serial on the wire.
-// That matches today's engine (which executes one action at a time
-// per provider) and the JSON Lines framing (which has no way to
-// interleave partial responses). When parallel execution lands,
-// the upgrade is to a background reader goroutine dispatching to a
+// the client safe for concurrent callers but serial on the wire,
+// so parallel actions on one external provider queue here. That
+// matches the JSON Lines framing (which has no way to interleave
+// partial responses). The upgrade, if one provider becomes the
+// bottleneck, is a background reader goroutine dispatching to a
 // pending-request map — a local change that does not affect
 // callers.
 type Client struct {

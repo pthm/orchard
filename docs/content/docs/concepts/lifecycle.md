@@ -37,8 +37,8 @@ The record captures:
 - Teardown progress, once you've run `orchard teardown` on it.
 
 A run that's interrupted with Ctrl-C (or SIGTERM) still writes its record:
-the action in flight is cancelled and recorded as failed, and everything that
-finished before it keeps its outputs and undo. Tear it down like any other run:
+any action in flight is cancelled and recorded as failed, and everything that
+finished keeps its outputs and undo. Tear it down like any other run:
 
 ```sh
 orchard teardown scenarios/dev.hcl --latest
@@ -189,7 +189,8 @@ variable error, even when the scenario passes the tag in through `inputs`.
 ## `orchard teardown <record>`
 
 Hand the record file, or just its run ID, to `orchard teardown` and Orchard
-walks the scenario in **reverse** topological order, running each action's
+walks the scenario in **reverse** of the order the run completed its actions
+(a reverse topological order), running each action's
 teardown body:
 
 ```sh

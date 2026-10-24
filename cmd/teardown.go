@@ -124,7 +124,9 @@ func newTeardownCmd() *cobra.Command {
 			}
 
 			done := map[string]bool{}
+			completed := make([]string, 0, len(rec.Nodes))
 			for _, n := range rec.Nodes {
+				completed = append(completed, n.ID)
 				if n.TornDown {
 					done[n.ID] = true
 				}
@@ -167,7 +169,7 @@ func newTeardownCmd() *cobra.Command {
 				ForcePlain: noColorFlag,
 			}))
 
-			torn, tdErr := eng.Teardown(ctx, ps, g, vars, outputs, undos, done)
+			torn, tdErr := eng.Teardown(ctx, ps, g, vars, outputs, undos, done, completed)
 			markTornDown(rec, torn, tdErr == nil)
 			if err := record.Save(file.Path, rec); err != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "warning: saving teardown progress: %v\n", err)

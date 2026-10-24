@@ -15,13 +15,16 @@ import (
 	"github.com/pthm/orchard/pkg/provider"
 )
 
-// Teardown walks the scenario graph in reverse topological order and
-// undoes each action that succeeded in a prior `orchard run`. vars,
+// Teardown undoes each action that succeeded in a prior `orchard run`,
+// in the reverse of the order that run completed them. vars,
 // recordedOutputs and undos are the state that run captured in its
 // record: the scenario's resolved variables, each succeeded node's
 // outputs, and the undo invocations providers described, keyed by full
 // node ID ("action.sql.create_merchant" etc.). Nodes in done were torn
-// down by an earlier, partly failed teardown and are skipped.
+// down by an earlier, partly failed teardown and are skipped. completed
+// lists node IDs in the order the run completed them (the record's node
+// order); nodes it doesn't name, or all nodes when it is nil, follow in
+// reverse topological order.
 //
 // For each action, in order of precedence:
 //  1. its `lifecycle { teardown { } }` body, evaluated and run against
@@ -63,6 +66,7 @@ func (e *Engine) Teardown(
 	recordedOutputs map[string]map[string]cty.Value,
 	undos map[string]provider.Invocation,
 	done map[string]bool,
+	completed []string,
 ) ([]string, error) {
 	e.reporter.RunStarted(ps.Scenario.Name)
 	start := time.Now()
@@ -72,12 +76,33 @@ func (e *Engine) Teardown(
 	succeeded := 0
 	failed := 0
 
+	// ponytail: teardown is sequential even after a parallel run;
+	// walk reverse dependencies with Execute's ready set if large
+	// teardowns get slow.
+	//
 	// Walk in reverse so resources created later are torn down
 	// first. For the merchant→product FK case this removes the
 	// product before the merchant, avoiding the constraint error
-	// the opposite order would produce.
+	// the opposite order would produce. Completion order, not
+	// g.Order: a node completes only after its dependencies, and
+	// after a parallel run it is the order independent actions
+	// really changed shared data in, so each undo restores what the
+	// one before it saw.
+	walk := make([]graph.NodeID, 0, len(g.Order))
+	seen := map[graph.NodeID]bool{}
+	for i := len(completed) - 1; i >= 0; i-- {
+		id := graph.NodeID(completed[i])
+		if g.Nodes[id] != nil && !seen[id] {
+			seen[id] = true
+			walk = append(walk, id)
+		}
+	}
 	for i := len(g.Order) - 1; i >= 0; i-- {
-		nodeID := g.Order[i]
+		if !seen[g.Order[i]] {
+			walk = append(walk, g.Order[i])
+		}
+	}
+	for _, nodeID := range walk {
 		node := g.Nodes[nodeID]
 
 		if node.Kind != graph.ActionNode || done[string(nodeID)] {

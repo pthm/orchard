@@ -246,7 +246,8 @@ components.
 3. **Evaluate provider configs** — with variables in scope.
 4. **Build graph** — derive edges from `expr.Variables()` traversals plus
    `depends_on` lists.
-5. **Topological sort**, then execute each node:
+5. **Topological sort**, then execute each node once its dependencies have
+   completed (up to `orchard run --parallelism` at a time):
    - For an action: evaluate its body, call provider `Execute`, record outputs.
    - For a component: resolve inputs, execute internal actions, resolve outputs.
 6. **Evaluate scenario outputs** with all node results in scope.

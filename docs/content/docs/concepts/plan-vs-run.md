@@ -36,7 +36,8 @@ production without touching production.
 
 1. Does everything `plan` does.
 2. Calls `Configure` on each provider with its evaluated configuration.
-3. Executes each action in topological order, passing evaluated attributes and
+3. Executes each action once its dependencies have completed (up to
+   `--parallelism` at a time, default 1), passing evaluated attributes and
    capturing outputs.
 4. Resolves scenario outputs and prints them.
 5. Calls `Shutdown` on each provider.

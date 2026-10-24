@@ -104,9 +104,10 @@ The provider runs the action and returns outputs:
 {"id":3,"result":{"outputs":{"id":"42","name":"\"Acme\""}}}
 ```
 
-Executes are sequential today (one action finishes before the next starts).
-Parallel execution across independent branches of the dependency graph is
-future work; providers should not assume it.
+Orchard sends one request at a time to each provider process. With
+`orchard run --parallelism N`, independent actions run concurrently across
+providers, but actions routed to the same external provider queue and are
+sent one after another.
 
 ### 5. Shutdown
 
@@ -147,10 +148,11 @@ See [writing a provider](../writing-a-provider/) for a worked example.
 
 ## Concurrency within a provider
 
-Orchard calls one method at a time per provider process. You don't need to
-handle concurrent requests. That said, the protocol is async-capable (responses
-are id-matched) — if a future Orchard version issues parallel executes to the
-same provider, your dispatch loop should be prepared.
+Orchard calls one method at a time per provider process, even with
+`--parallelism`. You don't need to handle concurrent requests. That said, the
+protocol is async-capable (responses are id-matched) — if a future Orchard
+version issues parallel executes to the same provider, your dispatch loop
+should be prepared.
 
 A simple, safe implementation: single-threaded read-request → dispatch →
 write-response loop. That's what the reference implementations do.

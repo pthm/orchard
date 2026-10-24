@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+	"github.com/zclconf/go-cty/cty"
 
 	"github.com/pthm/orchard/internal/cli/planview"
 	"github.com/pthm/orchard/internal/engine"
@@ -13,7 +14,10 @@ import (
 	"github.com/pthm/orchard/pkg/snapshot"
 )
 
-var planScenarioFlag string
+var (
+	planScenarioFlag   string
+	planShowValuesFlag bool
+)
 
 func newPlanCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -51,6 +55,7 @@ func newPlanCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("building engine: %w", err)
 			}
+			eng.SetKeepPlannedAttrs(planShowValuesFlag)
 
 			// Surface provider-config typos at plan time — run catches
 			// these too, but only after Configure has already opened
@@ -83,8 +88,13 @@ func newPlanCmd() *cobra.Command {
 				return alias
 			}
 
+			var valuesOf planview.ValuesOf
+			if planShowValuesFlag {
+				valuesOf = func(n *graph.Node) map[string]cty.Value { return eng.PlannedAttrs(n.ID) }
+			}
+
 			out := cmd.OutOrStdout()
-			planview.Render(out, ps, g, providerOf)
+			planview.Render(out, ps, g, providerOf, valuesOf)
 			planview.RenderSuccess(out)
 			for _, h := range eng.Hints() {
 				fmt.Fprintf(cmd.ErrOrStderr(), "hint: %s\n", h)
@@ -99,6 +109,8 @@ func newPlanCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&planScenarioFlag, "scenario", "",
 		"Pick a scenario by name when the file defines multiple")
+	cmd.Flags().BoolVar(&planShowValuesFlag, "show-values", false,
+		"List each action's evaluated attributes; values from other actions show as (known after run)")
 	return cmd
 }
 

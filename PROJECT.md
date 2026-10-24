@@ -1055,7 +1055,7 @@ Harden the tool for real-world use and improve the authoring experience.
 | FlexSearch-powered docs search with heading-level indexing, breadcrumbs, keyboard nav | Done |
 | Function naming convention: lowercase compound words matching cty (`formatdate`, `timesub`) | Done |
 | `count` / `for_each` on scenario actions and components (`count.index`, `each.key/value`, `x[0]` / `x["k"]` / `x[*]` references) | Done |
-| Dry-run mode (plan with expression evaluation but no execution) | Not started |
+| Dry-run mode (plan with expression evaluation but no execution) | Done: `orchard plan --show-values` lists each action's evaluated attributes, `(known after run)` for values from other actions |
 | Execution logging with structured output | Deferred: the run record is the structured log of every action, its inputs and outputs |
 | Parallel execution of independent nodes | Not started |
 | Transaction wrapping for atomic scenario execution | Won't do: atomicity across providers is impossible; uncommitted rows would be invisible to `http`, `grpc` and `exec` actions; the run record plus `orchard teardown` covers cleanup; a multi-statement `postgres_query` (or `BEGIN; ... COMMIT;` in one query) is atomic within one action |

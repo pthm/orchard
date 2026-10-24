@@ -50,6 +50,10 @@ func (e *Engine) ValidateReferences(runCtx context.Context, ps *parser.ParsedSce
 	e.planTypes = map[graph.NodeID]cty.Type{}
 	e.unchecked = map[string]bool{}
 	e.hints = nil
+	e.planned = nil
+	if e.keepPlanned {
+		e.planned = map[graph.NodeID]map[string]cty.Value{}
+	}
 
 	// Typed contexts are rebuilt only when a planner adds a type.
 	var ctx *hcl.EvalContext
@@ -143,7 +147,8 @@ func (e *Engine) ValidateReferences(runCtx context.Context, ps *parser.ParsedSce
 // planAction hands an action's evaluated attributes to its provider's
 // ActionPlanner, if it has one, and returns the output type it
 // reports. Attributes that depend on other actions are typed unknowns.
-// A planner with no schema to check against marks its provider
+// With SetKeepPlannedAttrs on, every action's attributes are evaluated
+// and kept, planner or not. A planner with no schema to check against marks its provider
 // unchecked rather than failing.
 func (e *Engine) planAction(runCtx context.Context, evalCtx *hcl.EvalContext, node *graph.Node) (cty.Type, error) {
 	route, err := e.resolveRoute(node.ActionType, node.ProviderAlias)
@@ -155,12 +160,20 @@ func (e *Engine) planAction(runCtx context.Context, evalCtx *hcl.EvalContext, no
 		return cty.DynamicPseudoType, nil
 	}
 	planner, ok := p.(provider.ActionPlanner)
-	if !ok {
+	if !ok && e.planned == nil {
 		return cty.DynamicPseudoType, nil
 	}
+	// ponytail: impure functions (uuid, now, env) run here too,
+	// so kept values can differ from what the run later evaluates.
 	attrs, err := evalAttrs(node.Body, route.schema, evalCtx)
 	if err != nil {
 		return cty.DynamicPseudoType, err
+	}
+	if e.planned != nil {
+		e.planned[node.ID] = attrs
+	}
+	if !ok {
+		return cty.DynamicPseudoType, nil
 	}
 	plan, err := planner.PlanAction(runCtx, route.actionName, attrs)
 	if errors.Is(err, provider.ErrNoSchema) {

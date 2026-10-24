@@ -17,6 +17,9 @@ construction but diverge on how they deal with providers and side effects.
 4. Builds and sorts the dependency graph.
 5. Prints the plan — what will run, in what order, with what inputs.
 
+`orchard plan --show-values` also lists each action's evaluated attributes;
+values that come from other actions show as `(known after run)`.
+
 `plan` **never configures a provider and never executes an action.** It cannot
 open database connections, make HTTP requests, or spawn subprocesses. For
 built-in providers, plan skips `Configure` entirely. For external providers,

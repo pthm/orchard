@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/hashicorp/hcl/v2"
+	"github.com/zclconf/go-cty/cty"
 
 	"github.com/pthm/orchard/internal/cli/render"
 	"github.com/pthm/orchard/internal/graph"
@@ -33,10 +34,17 @@ import (
 // Pass nil to render without provider annotations.
 type ProviderOf func(*graph.Node) string
 
+// ValuesOf returns an action node's evaluated attributes, which the
+// plan lists under the action. Pass nil to render without them.
+type ValuesOf func(*graph.Node) map[string]cty.Value
+
 // Render writes the plan to w.
-func Render(w io.Writer, ps *parser.ParsedScenario, g *graph.Graph, providerOf ProviderOf) {
+func Render(w io.Writer, ps *parser.ParsedScenario, g *graph.Graph, providerOf ProviderOf, valuesOf ValuesOf) {
 	if providerOf == nil {
 		providerOf = func(*graph.Node) string { return "" }
+	}
+	if valuesOf == nil {
+		valuesOf = func(*graph.Node) map[string]cty.Value { return nil }
 	}
 
 	_, _ = fmt.Fprintf(w, "%s %s\n",
@@ -51,7 +59,7 @@ func Render(w io.Writer, ps *parser.ParsedScenario, g *graph.Graph, providerOf P
 		if i > 0 {
 			_, _ = fmt.Fprintln(w)
 		}
-		renderNode(w, ps, g, providerOf, root, 0)
+		renderNode(w, ps, g, providerOf, valuesOf, root, 0)
 	}
 
 	renderOutputs(w, ps)
@@ -205,6 +213,7 @@ func renderNode(
 	ps *parser.ParsedScenario,
 	g *graph.Graph,
 	providerOf ProviderOf,
+	valuesOf ValuesOf,
 	dn *displayNode,
 	depth int,
 ) {
@@ -213,9 +222,10 @@ func renderNode(
 	switch dn.node.Kind {
 	case graph.ActionNode:
 		renderActionHeader(w, indent, dn.node, providerOf)
+		renderValues(w, indent+indentUnit, valuesOf(dn.node))
 		renderSecondaryParents(w, indent+indentUnit, dn.secondaryParents)
 	case graph.ComponentNode:
-		renderComponentBlock(w, ps, g, providerOf, indent, dn)
+		renderComponentBlock(w, ps, g, providerOf, valuesOf, indent, dn)
 		renderSecondaryParents(w, indent+indentUnit, dn.secondaryParents)
 		// Blank line between a component's interior (above) and its
 		// dependent children (below). The ↳ glyph and the blank
@@ -227,7 +237,7 @@ func renderNode(
 	}
 
 	for _, child := range dn.children {
-		renderNode(w, ps, g, providerOf, child, depth+1)
+		renderNode(w, ps, g, providerOf, valuesOf, child, depth+1)
 	}
 }
 
@@ -246,6 +256,7 @@ func renderComponentBlock(
 	ps *parser.ParsedScenario,
 	g *graph.Graph,
 	providerOf ProviderOf,
+	valuesOf ValuesOf,
 	indent string,
 	dn *displayNode,
 ) {
@@ -289,6 +300,8 @@ func renderComponentBlock(
 			render.Muted.Render("↳"),
 			formatActionHeader(typ, name),
 			suffix)
+		// Past the "↳ " glyph, in line with the action keyword.
+		renderValues(w, interior+indentUnit+indentUnit, valuesOf(child))
 	}
 }
 

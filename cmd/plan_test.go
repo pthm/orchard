@@ -160,3 +160,45 @@ func TestPlanForeignKeyHint(t *testing.T) {
 		t.Fatalf("expected a foreign-key hint:\n%s", out)
 	}
 }
+
+// TestPlanShowValues: --show-values lists each action's evaluated
+// attributes, with references to other actions' outputs unknown;
+// without the flag none are shown.
+func TestPlanShowValues(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shop.hcl")
+	writeFile(t, path, `scenario "shop" {
+  required_providers {
+    db = { source = "builtin/sqlite" }
+  }
+  provider "db" {
+    path = "./shop.db"
+  }
+  variable "name" { default = "Acme" }
+  action "sqlite_insert" "merchant" {
+    table  = "merchants"
+    values = { name = var.name }
+  }
+  action "sqlite_insert" "product" {
+    table  = "products"
+    values = { merchant_id = action.sqlite_insert.merchant.id, name = "Widget" }
+  }
+}
+`)
+	out, err := runCLI(t, "plan", path, "--show-values", "--no-color")
+	if err != nil {
+		t.Fatalf("plan --show-values: %v\n%s", err, out)
+	}
+	for _, want := range []string{`name = "Acme"`, `merchant_id = (known after run)`, `on_conflict = "error"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in:\n%s", want, out)
+		}
+	}
+
+	out, err = runCLI(t, "plan", path, "--no-color")
+	if err != nil {
+		t.Fatalf("plan: %v\n%s", err, out)
+	}
+	if strings.Contains(out, `name = "Acme"`) || strings.Contains(out, "known after run") {
+		t.Errorf("values shouldn't show without --show-values:\n%s", out)
+	}
+}

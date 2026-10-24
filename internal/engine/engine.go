@@ -62,6 +62,11 @@ type Engine struct {
 	unchecked map[string]bool
 	hints     []string
 
+	// planned holds, when SetKeepPlannedAttrs is on, every action's
+	// attributes as ValidateReferences evaluated them, by node.
+	keepPlanned bool
+	planned     map[graph.NodeID]map[string]cty.Value
+
 	// undos holds, during Execute, the undo invocation each succeeded
 	// action's provider described (see provider.Inverter).
 	undos map[graph.NodeID]*provider.Invocation
@@ -231,6 +236,16 @@ func (e *Engine) SetReporter(r Reporter) {
 	}
 	e.reporter = r
 }
+
+// SetKeepPlannedAttrs makes ValidateReferences evaluate every
+// action's attributes, not only those a provider plans, and keep them
+// for PlannedAttrs. `orchard plan --show-values` turns it on.
+func (e *Engine) SetKeepPlannedAttrs(on bool) { e.keepPlanned = on }
+
+// PlannedAttrs returns an action's attributes as the last
+// ValidateReferences evaluated them: values that depend on other
+// actions are unknown. Nil unless SetKeepPlannedAttrs is on.
+func (e *Engine) PlannedAttrs(id graph.NodeID) map[string]cty.Value { return e.planned[id] }
 
 // ResolveProvider exposes the engine's action-to-provider routing
 // for tooling (the plan renderer, future "orchard describe"

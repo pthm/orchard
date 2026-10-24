@@ -124,6 +124,7 @@ Validate a scenario and print its execution plan without side effects.
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--scenario <name>` | string | — | Pick a scenario by name when the file defines multiple. |
+| `--show-values` | bool | `false` | List each action's evaluated attributes under it. |
 
 **Behavior**
 
@@ -153,6 +154,27 @@ referenced table earlier.
 If a provider has typed actions but no snapshot, plan skips those checks and
 prints a note saying so. `orchard run` always checks typed actions against the
 live database before executing anything.
+
+**Showing values**
+
+With `--show-values`, plan lists each action's attributes as they evaluate,
+schema defaults included:
+
+```
+action "sqlite_insert" "merchant"  via db
+  on_conflict = "error"
+  table       = "merchants"
+  values      = { name = "Acme" }
+  action "sqlite_insert" "product"  via db
+    on_conflict = "error"
+    table       = "products"
+    values      = { merchant_id = (known after run), name = "Widget" }
+```
+
+A value that depends on another action's outputs shows as `(known after run)`,
+as do a component's variables inside the component. Functions such as `uuid()`,
+`now()` and `env()` are evaluated at plan time, so the values `run` uses can
+differ from the ones shown.
 
 **Exit codes**
 

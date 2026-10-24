@@ -215,3 +215,160 @@ func testTeardownProgress(t *testing.T, dropSecond bool) {
 		t.Fatalf("torn-down record should be refused, got %v", err)
 	}
 }
+
+// latestScenario writes a sqlite scenario file into a fresh project
+// whose insert names its row after var.name; with broken a query
+// after the insert fails the run.
+func latestScenario(t *testing.T, broken bool) (scenario, db string) {
+	t.Helper()
+	project := t.TempDir()
+	db = filepath.Join(project, "shop.db")
+	createDB(t, db, "CREATE TABLE merchants (id INTEGER PRIMARY KEY, name TEXT NOT NULL)")
+	src := `scenario "shop" {
+  variable "name" {}
+  required_providers {
+    db = { source = "builtin/sqlite" }
+  }
+  provider "db" {
+    path = "./shop.db"
+  }
+  action "sqlite_insert" "m" {
+    table  = "merchants"
+    values = { name = var.name }
+  }
+`
+	if broken {
+		src += `  action "sqlite_query" "broken" {
+    query      = "NOT VALID SQL"
+    depends_on = [action.sqlite_insert.m]
+  }
+`
+	}
+	scenario = filepath.Join(project, "shop.hcl")
+	writeFile(t, scenario, src+"}\n")
+	return scenario, db
+}
+
+func merchantNames(t *testing.T, path string) string {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var names sql.NullString
+	if err := db.QueryRow("SELECT group_concat(name, ',') FROM (SELECT name FROM merchants ORDER BY id)").Scan(&names); err != nil {
+		t.Fatal(err)
+	}
+	return names.String
+}
+
+// TestTeardownLatest: --latest tears down a scenario file's runs newest
+// first, marking each record, until none are left.
+func TestTeardownLatest(t *testing.T) {
+	scenario, db := latestScenario(t, false)
+	dir := t.TempDir()
+	for _, name := range []string{"old", "new"} {
+		if out, err := runCLI(t, "run", scenario, "--no-color", "--record-dir", dir, "--var", "name="+name); err != nil {
+			t.Fatalf("run %s: %v\n%s", name, err, out)
+		}
+	}
+	files, err := record.List(dir, t.Output())
+	if err != nil || len(files) != 2 {
+		t.Fatalf("records: %v %v", files, err)
+	}
+
+	out, err := runCLI(t, "teardown", scenario, "--latest", "--record-dir", dir, "--no-color")
+	if err != nil {
+		t.Fatalf("first teardown: %v\n%s", err, out)
+	}
+	if want := "tearing down run " + files[0].Record.ID + " (" + files[0].Path + ")"; !strings.Contains(out, want) {
+		t.Fatalf("missing %q:\n%s", want, out)
+	}
+	if got := merchantNames(t, db); got != "old" {
+		t.Fatalf("first teardown should remove only the newer row, left %q", got)
+	}
+	if rec, err := record.Load(files[0].Path); err != nil || rec.TornDownAt == nil {
+		t.Fatalf("newer record should be marked torn down: %+v %v", rec, err)
+	}
+
+	if out, err := runCLI(t, "teardown", scenario, "--latest", "--record-dir", dir, "--no-color"); err != nil {
+		t.Fatalf("second teardown: %v\n%s", err, out)
+	}
+	if got := merchantNames(t, db); got != "" {
+		t.Fatalf("second teardown should remove the older row, left %q", got)
+	}
+
+	_, err = runCLI(t, "teardown", scenario, "--latest", "--record-dir", dir, "--no-color")
+	if want := "no runs left to tear down for " + scenario + " in " + dir; err == nil || err.Error() != want {
+		t.Fatalf("want %q, got %v", want, err)
+	}
+}
+
+// TestTeardownLatestFailedRun: a failed run is still picked, and its
+// successful insert undone.
+func TestTeardownLatestFailedRun(t *testing.T) {
+	scenario, db := latestScenario(t, true)
+	dir := t.TempDir()
+	if out, err := runCLI(t, "run", scenario, "--no-color", "--record-dir", dir, "--var", "name=x"); err == nil {
+		t.Fatalf("run should fail:\n%s", out)
+	}
+	if got := merchantNames(t, db); got != "x" {
+		t.Fatalf("failed run should have inserted, got %q", got)
+	}
+	// The broken query has no teardown, so teardown itself succeeds.
+	if out, err := runCLI(t, "teardown", scenario, "--latest", "--record-dir", dir, "--no-color"); err != nil {
+		t.Fatalf("teardown: %v\n%s", err, out)
+	}
+	if got := merchantNames(t, db); got != "" {
+		t.Fatalf("teardown should remove the inserted row, left %q", got)
+	}
+}
+
+// TestTeardownLatestMatching: runs of another scenario file in the same
+// dir are ignored, a path through a symlinked directory still matches,
+// and a file with runs of two scenarios needs --scenario.
+func TestTeardownLatestMatching(t *testing.T) {
+	scenario, db := latestScenario(t, false)
+	other, otherDB := latestScenario(t, false)
+	dir := t.TempDir()
+	if out, err := runCLI(t, "run", scenario, "--no-color", "--record-dir", dir, "--var", "name=mine"); err != nil {
+		t.Fatalf("run: %v\n%s", err, out)
+	}
+	if out, err := runCLI(t, "run", other, "--no-color", "--record-dir", dir, "--var", "name=other"); err != nil {
+		t.Fatalf("run other: %v\n%s", err, out)
+	}
+
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(filepath.Dir(scenario), link); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := runCLI(t, "teardown", filepath.Join(link, "shop.hcl"), "--latest", "--record-dir", dir, "--no-color"); err != nil {
+		t.Fatalf("teardown through symlink: %v\n%s", err, out)
+	}
+	if got, gotOther := merchantNames(t, db), merchantNames(t, otherDB); got != "" || gotOther != "other" {
+		t.Fatalf("teardown should undo only this file's run: mine %q, other %q", got, gotOther)
+	}
+
+	// A second scenario in the same file.
+	src, err := os.ReadFile(scenario)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, scenario, string(src)+strings.Replace(string(src), `scenario "shop"`, `scenario "shop2"`, 1))
+	for _, name := range []string{"shop", "shop2"} {
+		if out, err := runCLI(t, "run", scenario, "--scenario", name, "--no-color", "--record-dir", dir, "--var", "name="+name); err != nil {
+			t.Fatalf("run %s: %v\n%s", name, err, out)
+		}
+	}
+	_, err = runCLI(t, "teardown", scenario, "--latest", "--record-dir", dir, "--no-color")
+	if err == nil || !strings.Contains(err.Error(), "scenarios shop, shop2; pick one with --scenario") {
+		t.Fatalf("want a --scenario error, got %v", err)
+	}
+	if out, err := runCLI(t, "teardown", scenario, "--latest", "--scenario", "shop", "--record-dir", dir, "--no-color"); err != nil {
+		t.Fatalf("teardown --scenario shop: %v\n%s", err, out)
+	}
+	if got := merchantNames(t, db); got != "shop2" {
+		t.Fatalf("--scenario shop should undo only shop's run, left %q", got)
+	}
+}

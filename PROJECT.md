@@ -624,6 +624,8 @@ The file-on-disk shape is deliberately simpler than Terraform's state: no remote
 
 Progress is saved back to the record: each node whose teardown succeeded is marked `torn_down` and skipped by a re-run, and a teardown with no failures stamps `torn_down_at`, after which the record is refused.
 
+`orchard teardown <scenario-file> --latest` picks the newest record in `--record-dir` for that file (matched with `os.SameFile`, so symlinked paths agree) that isn't fully torn down, failed runs included; repeating it unwinds runs newest first. When the file declares several scenarios with runs, `--scenario` picks one.
+
 The teardown body uses the **same schema as the outer action's provider**. A sql action's teardown declares `query`; an http action's declares `method` + `url`; an exec action's declares `command` + `args`. No teardown-specific provider surface — the provider's existing `Execute` is what runs.
 
 Example:
@@ -747,6 +749,9 @@ orchard docs exec:./providers/stripe
 # Teardown a specific run by its record file or run ID
 orchard teardown orchard_dev_run_20260415T000000Z_abc.json
 orchard teardown 20260415T000000Z_abc --record-dir .orchard/runs
+
+# Teardown the newest run of a scenario not yet torn down (repeat to unwind)
+orchard teardown scenarios/dev.hcl --latest
 
 # Control where records land, or skip them entirely
 orchard run scenarios/dev.hcl --record-dir .orchard/runs
@@ -1008,7 +1013,7 @@ Make cleanup a first-class operation so that scenarios can be torn down cleanly,
 | Rollback on partial failure | Not started |
 | `orchard list runs` — list past runs (status, teardown progress, node counts) | Done |
 | `orchard inspect <run-id>` — show run details (nodes, errors, undo steps, teardown marks, outputs) | Done |
-| `orchard teardown <scenario> --latest` convenience | Not started |
+| `orchard teardown <scenario> --latest` — newest run of the file not fully torn down; `--scenario` picks among several | Done |
 | Run metadata tagging on created resources | Not started |
 | Record format migrations / version negotiation | Version check done; migrations when a format 2 exists |
 

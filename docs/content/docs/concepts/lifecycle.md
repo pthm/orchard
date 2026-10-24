@@ -137,7 +137,14 @@ teardown body:
 orchard teardown orchard_dev_run_20260415T103045Z_a3f29e5b.json
 orchard teardown 20260415T103045Z_a3f29e5b                       # looked up in .
 orchard teardown 20260415T103045Z_a3f29e5b --record-dir .orchard/runs
+orchard teardown scenarios/dev.hcl --latest                      # newest run of the file
 ```
+
+With `--latest` the argument is a scenario file, and Orchard picks the newest
+record in `--record-dir` for that file that isn't fully torn down. Run it
+again to unwind the next one, newest first; failed runs count too. When none
+are left it says `no runs left to tear down`. If the file declares several
+scenarios and more than one has runs, name one with `--scenario`.
 
 For a scenario that inserted a merchant and then a product (FK → merchants),
 teardown runs the product `DELETE` first and the merchant `DELETE` second.
@@ -192,7 +199,7 @@ undo step its provider recorded, and whether it has been torn down.
   test harness, then call the engine's `Teardown` between tests. See the
   [integration testing guide](../../guides/integration-testing/).
 - **Local dev.** Run `scenarios/dev.hcl` to seed the database, poke around,
-  then `orchard teardown orchard_dev_run_*.json` when you're done. Records
+  then `orchard teardown scenarios/dev.hcl --latest` when you're done. Records
   pile up in `.orchard/runs/` if you've configured that directory — clean
   them up with a shell glob.
 

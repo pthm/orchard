@@ -264,10 +264,10 @@ Run builds the state and writes a record of everything it did. Hand that record 
 
 ```sh
 $ orchard run scenarios/checkout.hcl
-$ ls orchard_checkout_run_*.json
-orchard_checkout_run_20261023T103045Z_a3f29e5b.json
+record: orchard_checkout_run_20261023T103045Z_a3f29e5b.json
 
-$ orchard teardown orchard_checkout_run_20261023T103045Z_a3f29e5b.json
+$ orchard teardown scenarios/checkout.hcl --latest
+tearing down run 20261023T103045Z_a3f29e5b (orchard_checkout_run_20261023T103045Z_a3f29e5b.json)
 ```
 
 </div>

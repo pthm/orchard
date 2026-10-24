@@ -161,6 +161,7 @@ See [plan vs run](/docs/concepts/plan-vs-run/) for the rationale behind the spli
 
 ```
 orchard teardown <record-file | run-id> [--record-dir <path>]
+orchard teardown <scenario-file> --latest [--record-dir <path>] [--scenario <name>]
 ```
 
 Tear down the state created by a recorded scenario run. Reads the JSON record
@@ -171,12 +172,15 @@ the record, and evaluates each action's `lifecycle { teardown { } }` body in
 | Argument | Description |
 |----------|-------------|
 | `<record-file \| run-id>` | Path to a record written by `orchard run`, or its run ID (`20260415T103045Z_a3f29e5b`) looked up in `--record-dir`. Required. |
+| `<scenario-file>` | With `--latest`, the scenario file whose runs to tear down. |
 
 **Flags**
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--record-dir <path>` | string | `.` (cwd) | Directory to look a run ID up in. Ignored when the argument is an existing file. |
+| `--record-dir <path>` | string | `.` (cwd) | Directory to look a run ID or `--latest` run up in. Ignored when the argument is an existing record file. |
+| `--latest` | bool | `false` | Treat the argument as a scenario file and tear down the newest record in `--record-dir` for it that isn't fully torn down (failed runs included). Prints `tearing down run <id> (<record path>)` first. Repeat to unwind runs newest first; errors with `no runs left to tear down for <path> in <dir>` when none remain. |
+| `--scenario <name>` | string | — | With `--latest`, which scenario to pick when runs of several scenarios in the file match. Required in that case. |
 
 **Behavior**
 
@@ -440,7 +444,7 @@ Run and tear down in one session:
 ```sh
 orchard run scenarios/uat.hcl --var customer=uat+$(date +%s)@example.com
 # use the created state...
-orchard teardown orchard_uat_run_*.json
+orchard teardown scenarios/uat.hcl --latest
 ```
 
 ## Run records

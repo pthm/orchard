@@ -2,6 +2,10 @@ package cmd
 
 import (
 	"fmt"
+	"io"
+	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -18,7 +22,9 @@ import (
 )
 
 // newTeardownCmd builds the `orchard teardown <record>` subcommand.
-// The record is a file path or a run ID looked up in --record-dir. It
+// The record is a file path or a run ID looked up in --record-dir, or
+// with --latest a scenario file whose newest run not yet fully torn
+// down is picked from --record-dir. It
 // reads a record produced by a prior `orchard run`,
 // reloads the scenario the record points at, and invokes the
 // engine's Teardown pass.
@@ -39,17 +45,34 @@ import (
 // nothing fails the record gets torn_down_at and is refused from then
 // on.
 func newTeardownCmd() *cobra.Command {
-	var recordDir string
+	var (
+		recordDir    string
+		latest       bool
+		scenarioName string
+	)
 	cmd := &cobra.Command{
-		Use:   "teardown <record-file | run-id>",
+		Use:   "teardown <record-file | run-id | scenario-file --latest>",
 		Short: "Tear down the state created by a recorded scenario run",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 
-			file, err := record.Resolve(recordDir, args[0], cmd.ErrOrStderr())
-			if err != nil {
-				return fmt.Errorf("loading record: %w", err)
+			var file record.File
+			var err error
+			switch {
+			case latest:
+				file, err = latestRecord(recordDir, args[0], scenarioName, cmd.ErrOrStderr())
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "tearing down run %s (%s)\n", file.Record.ID, file.Path)
+			case scenarioName != "":
+				return fmt.Errorf("--scenario needs --latest")
+			default:
+				file, err = record.Resolve(recordDir, args[0], cmd.ErrOrStderr())
+				if err != nil {
+					return fmt.Errorf("loading record: %w", err)
+				}
 			}
 			rec := file.Record
 			if rec.TornDownAt != nil {
@@ -153,8 +176,58 @@ func newTeardownCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&recordDir, "record-dir", ".",
-		"Directory to look a run ID up in")
+		"Directory to look a run ID or --latest run up in")
+	cmd.Flags().BoolVar(&latest, "latest", false,
+		"Treat the argument as a scenario file and tear down its newest run not yet fully torn down")
+	cmd.Flags().StringVar(&scenarioName, "scenario", "",
+		"With --latest, the scenario to pick when the file declares several")
 	return cmd
+}
+
+// latestRecord picks the newest record in dir that isn't fully torn
+// down and whose scenario lives in the file at path (and, when name
+// is set, is that scenario). Runs of several scenarios in the file
+// need name to choose between them.
+func latestRecord(dir, path, name string, warn io.Writer) (record.File, error) {
+	files, err := record.List(dir, warn)
+	if err != nil {
+		return record.File{}, err
+	}
+	var match []record.File
+	names := map[string]bool{}
+	for _, f := range files {
+		if f.Record.TornDownAt != nil || !sameFile(path, f.Record.Scenario.Path) {
+			continue
+		}
+		if name != "" && f.Record.Scenario.Name != name {
+			continue
+		}
+		match = append(match, f)
+		names[f.Record.Scenario.Name] = true
+	}
+	if len(match) == 0 {
+		return record.File{}, fmt.Errorf("no runs left to tear down for %s in %s", path, dir)
+	}
+	if len(names) > 1 {
+		sorted := slices.Sorted(maps.Keys(names))
+		return record.File{}, fmt.Errorf("%s has runs of scenarios %s; pick one with --scenario",
+			path, strings.Join(sorted, ", "))
+	}
+	return match[0], nil
+}
+
+// sameFile reports whether a and b name the same file. Stat sees
+// through symlinks (macOS's /var is /private/var); when either can't
+// be stat'd, their absolute paths are compared instead.
+func sameFile(a, b string) bool {
+	sa, errA := os.Stat(a)
+	sb, errB := os.Stat(b)
+	if errA == nil && errB == nil {
+		return os.SameFile(sa, sb)
+	}
+	absA, errA := filepath.Abs(a)
+	absB, errB := filepath.Abs(b)
+	return errA == nil && errB == nil && absA == absB
 }
 
 // markTornDown flags the torn nodes on rec, and stamps the record as

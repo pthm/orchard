@@ -82,9 +82,9 @@ scenario "demo_merchant" {
 ```
 
 ```sh
-orchard plan scenarios/demo.hcl                    # check everything; no side effects
-orchard run scenarios/demo.hcl                     # build it, and write a run record
-orchard teardown orchard_demo_merchant_run_*.json  # undo it
+orchard plan scenarios/demo.hcl               # check everything; no side effects
+orchard run scenarios/demo.hcl                # build it, and write a run record
+orchard teardown scenarios/demo.hcl --latest  # undo it
 ```
 
 ## Install
@@ -126,7 +126,7 @@ orchard version
 | `orchard init` | Scaffold a new project. |
 | `orchard plan <scenario>` | Validate a scenario and print its execution plan. Read-only; safe in CI. |
 | `orchard run <scenario>` | Execute a scenario and write a run record. |
-| `orchard teardown <record>` | Undo a recorded run, in reverse order. |
+| `orchard teardown <record>` | Undo a recorded run, in reverse order (`<scenario> --latest` for the newest run). |
 | `orchard schema pull <scenario>` | Snapshot the schemas of the databases and gRPC services a scenario uses, for plan-time checks. |
 | `orchard list [dir]` | List the scenarios under a directory. |
 | `orchard list runs` | List recorded runs, newest first. |

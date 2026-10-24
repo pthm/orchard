@@ -89,6 +89,8 @@ release:
 
 changelog:
   use: github
+  # Drop the default author suffix (name/email or @handle).
+  format: "{{ .SHA }}: {{ .Message }}"
   sort: asc
   filters:
     exclude:

@@ -92,10 +92,14 @@ prints declared outputs. Exits non-zero on validation or execution failure.
    capturing variables, per-node outputs, and scenario outputs, and print
    `record: <path>` on stderr. See [run records](#run-records) below.
 
+Ctrl-C or SIGTERM cancels the run: the action in flight fails, and the
+record is still written with everything that finished before it, ready for
+`orchard teardown <scenario> --latest`. A second Ctrl-C exits immediately.
+
 **Exit codes**
 
 - `0` — scenario ran to completion.
-- `1` — any parsing, validation, or execution error.
+- `1` — any parsing, validation, or execution error, or an interrupted run.
 
 **Output format**
 
@@ -449,7 +453,7 @@ orchard teardown scenarios/uat.hcl --latest
 
 ## Run records
 
-Every successful or failed `orchard run` writes a JSON record to `--record-dir`
+Every successful, failed or interrupted `orchard run` writes a JSON record to `--record-dir`
 (default `.`). The filename is `orchard_<scenario>_run_<id>.json`, where `<id>`
 is a sortable `YYYYMMDDTHHMMSSZ_<8hex>` string, so lexicographic sort matches
 chronological order.

@@ -292,13 +292,15 @@ func (e *Engine) resolveRoute(actionType, providerAlias string) (actionRoute, er
 		}
 		return actionRoute{}, fmt.Errorf(
 			"provider %q does not expose action %q (providers offering it: %s)",
-			providerAlias, actionType, aliasesOf())
+			providerAlias, actionType, aliasesOf(),
+		)
 	}
 	if len(candidates) > 1 {
 		return actionRoute{}, fmt.Errorf(
 			"action type %q is offered by multiple providers (%s); "+
 				"add `provider = \"<alias>\"` to the action body to disambiguate",
-			actionType, aliasesOf())
+			actionType, aliasesOf(),
+		)
 	}
 	return candidates[0], nil
 }
@@ -335,6 +337,11 @@ func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *grap
 
 	for _, nodeID := range g.Order {
 		node := g.Nodes[nodeID]
+		// An interrupted run stops before the next node rather than
+		// relying on every provider to notice the cancelled ctx.
+		if err := ctx.Err(); err != nil {
+			return nil, reportFailure(string(nodeID), err)
+		}
 
 		switch node.Kind {
 		case graph.ActionNode:
@@ -740,7 +747,8 @@ func (e *Engine) resolveComponentInputs(
 			if !ok {
 				return nil, fmt.Errorf(
 					"component %q: input %q is not a declared variable on component %q",
-					compKey, name, comp.Def.Name)
+					compKey, name, comp.Def.Name,
+				)
 			}
 			declaredType, err := parser.ResolveVariableType(decl)
 			if err != nil {
@@ -766,7 +774,8 @@ func (e *Engine) resolveComponentInputs(
 		if defaultExpr == nil {
 			return nil, fmt.Errorf(
 				"component %q: required variable %q has no default and no input",
-				compKey, name)
+				compKey, name,
+			)
 		}
 	}
 

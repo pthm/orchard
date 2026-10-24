@@ -36,6 +36,16 @@ The record captures:
 - A top-level status: `succeeded` or `failed`.
 - Teardown progress, once you've run `orchard teardown` on it.
 
+A run that's interrupted with Ctrl-C (or SIGTERM) still writes its record:
+the action in flight is cancelled and recorded as failed, and everything that
+finished before it keeps its outputs and undo. Tear it down like any other run:
+
+```sh
+orchard teardown scenarios/dev.hcl --latest
+```
+
+A second Ctrl-C exits at once, without writing a record.
+
 Records land in `.` by default. Override with `--record-dir <path>` or skip
 entirely with `--no-record`.
 
@@ -206,5 +216,7 @@ undo step its provider recorded, and whether it has been torn down.
 ## What doesn't (yet) exist
 
 - **Re-inserting what a typed delete removed.** Not automatic yet.
-- **Scenario-level lifecycle policies** (`on_failure = "rollback"`). Planned;
-  not yet implemented.
+
+There are no scenario-level lifecycle policies (`on_failure = "rollback"`) and
+no in-process rollback, by design: a failed or interrupted run still writes its
+record, so run `orchard teardown <scenario> --latest` to undo it.

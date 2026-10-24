@@ -2,6 +2,7 @@ package exec
 
 import (
 	"context"
+	"errors"
 	"runtime"
 	"strings"
 	"testing"
@@ -182,6 +183,44 @@ func TestExecCtxCancellation(t *testing.T) {
 	}
 	if elapsed > 1*time.Second {
 		t.Fatalf("cancellation should be prompt, took %s", elapsed)
+	}
+}
+
+func TestExecCtxCancellationWithGrandchild(t *testing.T) {
+	// A grandchild holding stdout must not keep Execute waiting after
+	// the shell is killed, and the error names the cancellation.
+	skipIfWindows(t)
+	p := configured(t, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := p.Execute(ctx, "exec_run", map[string]cty.Value{
+		"command": cty.StringVal("sh"),
+		"args":    cty.ListVal([]cty.Value{cty.StringVal("-c"), cty.StringVal("sleep 30; true")}),
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected DeadlineExceeded, got %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("cancellation should not wait for the grandchild, took %s", elapsed)
+	}
+}
+
+func TestExecBackgroundGrandchildWithoutCancelSucceeds(t *testing.T) {
+	// Without cancellation, Execute waits for a backgrounded grandchild
+	// holding stdout instead of failing once the shell exits.
+	skipIfWindows(t)
+	p := configured(t, nil)
+	out, err := p.Execute(context.Background(), "exec_run", map[string]cty.Value{
+		"command": cty.StringVal("sh"),
+		"args":    cty.ListVal([]cty.Value{cty.StringVal("-c"), cty.StringVal("sleep 2 & echo hi")}),
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := strings.TrimSpace(out["stdout"].AsString()); got != "hi" {
+		t.Errorf("stdout: got %q want hi", got)
 	}
 }
 

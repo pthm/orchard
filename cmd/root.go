@@ -1,6 +1,11 @@
 package cmd
 
 import (
+	"context"
+	"os"
+	"os/signal"
+	"syscall"
+
 	"github.com/spf13/cobra"
 )
 
@@ -36,4 +41,23 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newVersionCmd())
 
 	return root
+}
+
+// ExecuteWithSignals runs root with a context that Ctrl-C or SIGTERM
+// cancels, so an interrupted run fails its current node through the
+// normal failure path and still writes its record. Once the first
+// signal lands the handler is removed, so a second Ctrl-C kills the
+// process straight away.
+//
+// ponytail: exec: providers share our process group, so a terminal
+// Ctrl-C reaches them too and they may exit before Orchard asks them
+// to; give them their own process group if that ever matters.
+func ExecuteWithSignals(root *cobra.Command) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
+	return root.ExecuteContext(ctx)
 }

@@ -81,6 +81,11 @@ func (c *Client) Roundtrip(ctx context.Context, method string, params, result an
 	if c.poisoned.Load() {
 		return ErrClientPoisoned
 	}
+	// A call that gave up while queued behind another must not send:
+	// nothing is on the wire for it yet, so the client stays usable.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	id := c.next.Add(1)
 

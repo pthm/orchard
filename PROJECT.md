@@ -657,9 +657,9 @@ Resources are one of:
 - **Managed** — the provider records how to undo the action when it runs (`provider.Inverter`), stored as the node's `undo` in the run record. Typed inserts (`<p>_insert`) are managed: the undo deletes the row by its primary key. `lifecycle { managed_teardown = false }` opts an action out.
 - **Unmanaged** — no automatic cleanup (sending an email, enqueuing a message, HTTP calls without an idempotent delete endpoint, typed updates and deletes).
 
-### Failure Behavior (future)
+### Failure Behavior
 
-Scenario-level lifecycle policies (`on_failure = "rollback"`, `on_success = "retain"`) are a planned addition. Today, a failed run still writes a record describing what succeeded; a user can teardown that partial record to unwind.
+There are no scenario-level lifecycle policies (`on_failure = "rollback"`, `on_success = "retain"`) and no in-process rollback, by design. A failed or interrupted run still writes a record describing what succeeded; `orchard teardown <scenario> --latest` unwinds it.
 
 ### Isolation Strategies
 
@@ -1009,8 +1009,9 @@ Make cleanup a first-class operation so that scenarios can be torn down cleanly,
 | End-to-end integration test over Postgres (FK-bound merchant+product) | Done |
 | Managed cleanup for `<p>_insert` (undo recorded at run time; `managed_teardown = false` opts out) | Done |
 | Managed cleanup for `<p>_update`: restore previous values of rows inserted this run by default; `managed_teardown = true` for other rows | Done |
-| `lifecycle` blocks on scenarios (`on_failure`, `on_success` policies) | Not started |
-| Rollback on partial failure | Not started |
+| `lifecycle` blocks on scenarios (`on_failure`, `on_success` policies) | Won't do: every run, failed or interrupted, writes a record, so run then `orchard teardown <scenario> --latest` |
+| Rollback on partial failure | Won't do: same reason; `orchard teardown <scenario> --latest` undoes a failed run |
+| Interrupted runs (Ctrl-C / SIGTERM) fail the node in flight and still write the record | Done |
 | `orchard list runs` — list past runs (status, teardown progress, node counts) | Done |
 | `orchard inspect <run-id>` — show run details (nodes, errors, undo steps, teardown marks, outputs) | Done |
 | `orchard teardown <scenario> --latest` — newest run of the file not fully torn down; `--scenario` picks among several | Done |
@@ -1019,7 +1020,7 @@ Make cleanup a first-class operation so that scenarios can be torn down cleanly,
 
 **Done summary.** The core records + teardown loop is functional: every `orchard run` writes a JSON record with per-node outputs and resolved variables; `orchard teardown <record-file | run-id>` replays the scenario in reverse topological order and evaluates each action's `lifecycle { teardown { } }` body against a `var.* / self.* / action.*` eval context. Teardown uses the provider's existing `Execute` — no new provider surface — so any action type automatically supports teardown once its author writes a lifecycle block.
 
-**Next up.** Milestone 4 closed the "every teardown is hand-written" gap for typed inserts, which record their own undo. What's left here: restoring previous values on typed-update teardown and scenario-level `lifecycle { on_failure / on_success }` policies.
+**Next up.** Milestone 4 closed the "every teardown is hand-written" gap for typed inserts, which record their own undo. Scenario-level `on_failure` / `on_success` policies and in-process rollback are deliberately out: a failed or interrupted run still writes its record, and `orchard teardown <scenario> --latest` undoes it.
 
 ### Milestone 6: Robustness and Ergonomics
 

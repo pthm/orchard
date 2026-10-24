@@ -250,3 +250,53 @@ func TestClientPoisonedAfterCancellation(t *testing.T) {
 		t.Fatalf("second call: expected ErrClientPoisoned, got %v", err)
 	}
 }
+
+func TestClientQueuedCallTimesOutWithoutPoisoning(t *testing.T) {
+	// A call whose deadline passes while it waits behind another must
+	// give up without sending, leaving the client usable.
+	c, serverIn, serverOut, cleanup := newPipeClient(t)
+	defer cleanup()
+
+	release := make(chan struct{})
+	var methods []string
+	served := make(chan struct{})
+	go func() {
+		defer close(served)
+		for i := 0; i < 2; i++ {
+			handle(t, serverIn, serverOut, func(req protocol.Request) protocol.Response {
+				methods = append(methods, req.Method)
+				if req.Method == "first" {
+					<-release
+				}
+				return protocol.Response{ID: req.ID, Result: json.RawMessage(`{}`)}
+			})
+		}
+	}()
+
+	first := make(chan error, 1)
+	go func() { first <- c.Roundtrip(context.Background(), "first", nil, nil) }()
+	time.Sleep(20 * time.Millisecond) // let the first call take the lock
+
+	second := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		defer cancel()
+		second <- c.Roundtrip(ctx, "second", nil, nil)
+	}()
+	time.Sleep(50 * time.Millisecond) // the second call's deadline passes while it waits
+	close(release)
+
+	if err := <-first; err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if err := <-second; !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("second call: expected DeadlineExceeded, got %v", err)
+	}
+	if err := c.Roundtrip(context.Background(), "third", nil, nil); err != nil {
+		t.Fatalf("third call: %v", err)
+	}
+	<-served
+	if strings.Join(methods, ",") != "first,third" {
+		t.Fatalf("the queued call should not reach the wire, server saw %v", methods)
+	}
+}

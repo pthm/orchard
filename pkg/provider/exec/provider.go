@@ -102,6 +102,7 @@ func (p *Provider) runCommand(ctx context.Context, attrs map[string]cty.Value) (
 	}
 
 	cmd := osexec.CommandContext(ctx, command, args...)
+	killGroupOnCancel(cmd)
 
 	// Working directory: per-action override wins over provider default.
 	dir := p.defaultDir
@@ -134,6 +135,9 @@ func (p *Provider) runCommand(ctx context.Context, attrs map[string]cty.Value) (
 	cmd.Stderr = &stderr
 
 	runErr := cmd.Run()
+	if ctxErr := ctx.Err(); runErr != nil && ctxErr != nil {
+		return nil, fmt.Errorf("exec: run %s: %w", command, ctxErr)
+	}
 
 	exitCode := 0
 	if runErr != nil {

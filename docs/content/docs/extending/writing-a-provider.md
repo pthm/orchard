@@ -4,6 +4,86 @@ linkTitle: Writing a provider
 weight: 40
 ---
 
+## The quick way: `pkg/sdk`
+
+If your provider is Go, and especially if it calls into an existing Go
+codebase (create a user through your web app's own code, seed a tenant),
+`github.com/pthm/orchard/pkg/sdk` turns typed functions into actions. Put a
+small `main` package in the app's repo:
+
+```go
+package main
+
+import (
+	"context"
+	"log"
+
+	"github.com/pthm/orchard/pkg/sdk"
+
+	"example.com/app/users"
+)
+
+type Config struct {
+	DSN string `json:"dsn" doc:"The app's database."`
+}
+
+type CreateUser struct {
+	Email string `json:"email"`
+	Admin bool   `json:"admin,omitempty" doc:"Grant the admin role."`
+}
+
+func main() {
+	var svc *users.Service
+	p := sdk.New("app", "0.1.0")
+	p.Configure(func(ctx context.Context, c Config) (err error) {
+		svc, err = users.Open(ctx, c.DSN)
+		return err
+	})
+	p.Action("app_create_user", "Create a user through the app.",
+		func(ctx context.Context, in CreateUser) (*users.User, error) {
+			return svc.Create(ctx, in.Email, in.Admin)
+		})
+	if err := p.Serve(); err != nil {
+		log.Fatal(err)
+	}
+}
+```
+
+```hcl
+required_providers {
+  app = { source = "exec:./bin/orchard-app" }
+}
+
+provider "app" { dsn = var.dsn }
+
+action "app_create_user" "alice" {
+  email = "alice@example.com"
+}
+```
+
+- **Functions** take a `context.Context` and optionally a struct, and return
+  an `error`, optionally after a struct. The argument's fields are the action's
+  attributes; the result's fields are its outputs
+  (`action.app_create_user.alice.id`).
+- **Names and values follow `encoding/json`**: a field's name is its json tag,
+  so an app type that already has tags works as an output as it is. Types with
+  a `MarshalText` method, such as `time.Time`, are strings.
+- **A field is optional** when it's a pointer or tagged `omitempty`. A
+  `doc:"..."` tag is its description in `orchard docs`.
+- **`Serve`** answers `<binary> schema` for `orchard plan`, so plans
+  type-check against your functions without starting anything. It also points
+  `os.Stdout` at stderr, so stray prints from the app don't break the
+  protocol.
+- **Errors and panics** fail the action with their message; a panic includes
+  its stack trace and leaves the provider running.
+- **Teardown**: a `lifecycle { teardown { } }` block calls the *same* action
+  with new attributes; external providers can't record an automatic undo yet.
+
+The rest of this page builds a provider by hand, which is what the SDK does for
+you, and what a provider in another language does.
+
+## By hand
+
 This page walks through building a small custom provider end-to-end. The
 provider, `echo`, has two actions:
 
@@ -13,7 +93,7 @@ provider, `echo`, has two actions:
 The source is tiny (~120 lines) but covers every part of the protocol: the
 `schema` subcommand, the RPC loop, method dispatch, and error handling.
 
-## Project layout
+### Project layout
 
 ```
 orchard-echo/
@@ -29,7 +109,7 @@ go mod init github.com/you/orchard-echo
 No dependencies — this example talks JSON directly. Providers that want to use
 Orchard's types can import `github.com/pthm/orchard/pkg/protocol`.
 
-## `main.go`
+### `main.go`
 
 ```go
 package main
@@ -180,7 +260,7 @@ Build it:
 go build -o bin/orchard-echo .
 ```
 
-## Test with `orchard plan`
+### Test with `orchard plan`
 
 Create a scenario that uses the provider:
 
@@ -210,7 +290,7 @@ orchard plan scenarios/echo.hcl
 Orchard runs `./bin/orchard-echo schema`, reads the schema, validates the
 scenario against it, and prints the plan. **No subprocess survives past plan.**
 
-## Test with `orchard run`
+### Test with `orchard run`
 
 ```sh
 orchard run scenarios/echo.hcl
@@ -223,7 +303,7 @@ shutdown handshake, and prints:
 value = hello-3f8a2e1b
 ```
 
-## What's missing from this example
+### What's missing from this example
 
 This is the minimum viable provider. Real providers also need:
 

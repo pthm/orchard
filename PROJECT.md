@@ -925,6 +925,7 @@ Rebuild the action layer around a language-agnostic plugin model so third partie
 | Feature | Status |
 |---------|--------|
 | `pkg/protocol` — envelope, schema types, HCL parser, cty↔JSON codec | Done |
+| `pkg/sdk` — typed Go functions served as an external provider | Done |
 | `pkg/provider.Provider` unified interface | Done |
 | Builtin factory registry (`builtin/<name>` sources) | Done |
 | External subprocess adapter (`exec:<path>` sources) | Done |
@@ -1216,6 +1217,10 @@ pkg/ (public SDK surface)
     schema_hcl.go               Authoring-form parser: provider/config/action/attribute/output
                                 blocks plus description/notes strings and `example { }` blocks
     ctyjson.go                  cty.Value ↔ json.RawMessage helpers using go-cty/cty/json
+
+  sdk/
+    sdk.go                      Typed Go functions → external provider: schema from struct
+                                fields (encoding/json names), Serve() runs the stdio loop
 
   snapshot/
     snapshot.go                 Schema snapshot envelope (format, kind, target, provider,

@@ -34,17 +34,43 @@ type ConfigureResult struct{}
 // Attrs values are JSON-encoded cty values. The engine has already
 // evaluated the HCL action body against the scenario's eval context,
 // so attribute values are fully resolved.
+//
+// Undo is set when Orchard will record an undo for this action: it has
+// no `lifecycle { teardown { } }` block and doesn't opt out with
+// `managed_teardown = false`. A provider that knows how to reverse the
+// action returns ExecuteResult.Undo; one that doesn't ignores it.
 type ExecuteParams struct {
 	Action string                     `json:"action"`
 	Attrs  map[string]json.RawMessage `json:"attrs"`
+	Undo   *UndoOptions               `json:"undo,omitempty"`
+}
+
+// UndoOptions carries the scenario's say in automatic teardown.
+type UndoOptions struct {
+	// Requested is true when the action sets
+	// `lifecycle { managed_teardown = true }`: return an undo even where
+	// the provider wouldn't by default.
+	Requested bool `json:"requested,omitempty"`
 }
 
 // ExecuteResult is the payload of an execute response.
 //
 // Outputs values are JSON-encoded cty values. They are made available
 // to downstream nodes as `action.<provider>.<name>.<output>` references.
+//
+// Undo, returned only when the request carried ExecuteParams.Undo, is
+// the call that reverses this action. Orchard stores it in the run
+// record and `orchard teardown` executes it.
 type ExecuteResult struct {
 	Outputs map[string]json.RawMessage `json:"outputs"`
+	Undo    *Invocation                `json:"undo,omitempty"`
+}
+
+// Invocation is an action call to make later: one of the provider's own
+// action types and its attributes, encoded as in ExecuteParams.
+type Invocation struct {
+	Action string                     `json:"action"`
+	Attrs  map[string]json.RawMessage `json:"attrs"`
 }
 
 // ShutdownParams is the payload of a shutdown request. Empty today

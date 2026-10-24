@@ -11,6 +11,7 @@ import (
 
 	"github.com/zclconf/go-cty/cty"
 
+	"github.com/pthm/orchard/pkg/provider"
 	"github.com/pthm/orchard/pkg/provider/external"
 	"github.com/pthm/orchard/pkg/sdk"
 )
@@ -38,6 +39,11 @@ type user struct {
 	Note  string    `json:"note,omitempty"`
 }
 
+type deleteUser struct {
+	ID   int      `json:"id"`
+	Tags []string `json:"tags,omitempty"`
+}
+
 // TestMain runs the test binary as the provider when the test spawns it.
 func TestMain(m *testing.M) {
 	if os.Getenv("SDK_TEST_PROVIDER") == "" {
@@ -52,6 +58,18 @@ func TestMain(m *testing.M) {
 	p.Action("app_create_user", "Create a user.", func(_ context.Context, in createUser) (*user, error) {
 		fmt.Println("stdout is safe") // Serve sends it to stderr
 		return &user{ID: 7, Email: prefix + in.Email, Born: in.Born}, nil
+	})
+	p.Action("app_delete_user", "Delete a user.", func(_ context.Context, in deleteUser) error {
+		if in.ID != 7 || len(in.Tags) != 1 {
+			return fmt.Errorf("unexpected undo input %+v", in)
+		}
+		return nil
+	})
+	p.Undo("app_create_user", "app_delete_user", func(in createUser, out *user) *deleteUser {
+		if in.Email == "keep@example.com" {
+			return nil
+		}
+		return &deleteUser{ID: out.ID, Tags: in.Tags}
 	})
 	p.Action("app_fail", "", func(context.Context) error { return errors.New("no such tenant") })
 	p.Action("app_panic", "", func(context.Context) error { panic("boom") })
@@ -123,6 +141,32 @@ func TestProvider(t *testing.T) {
 		t.Errorf("note = %#v, want null", out["note"])
 	}
 
+	attrs := map[string]cty.Value{
+		"email":   cty.StringVal("a@example.com"),
+		"tags":    cty.ListVal([]cty.Value{cty.StringVal("qa")}),
+		"address": cty.NullVal(cty.Object(map[string]cty.Type{"city": cty.String, "zip": cty.String})),
+		"born":    cty.NullVal(cty.String),
+	}
+	_, undo, err := p.ExecuteUndo(ctx, "app_create_user", attrs, provider.InverseOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if undo == nil || undo.Action != "app_delete_user" {
+		t.Fatalf("undo = %+v", undo)
+	}
+	// The run record hands the attributes back with JSON's implied
+	// types, a tuple for the list.
+	if _, err := p.Execute(ctx, undo.Action, map[string]cty.Value{
+		"id":   cty.NumberIntVal(7),
+		"tags": cty.TupleVal([]cty.Value{cty.StringVal("qa")}),
+	}); err != nil {
+		t.Errorf("running undo: %v", err)
+	}
+	attrs["email"] = cty.StringVal("keep@example.com")
+	if _, undo, err := p.ExecuteUndo(ctx, "app_create_user", attrs, provider.InverseOptions{}); err != nil || undo != nil {
+		t.Errorf("nil undo: got %+v, %v", undo, err)
+	}
+
 	if _, err := p.Execute(ctx, "app_fail", nil); err == nil || !strings.Contains(err.Error(), "no such tenant") {
 		t.Errorf("app_fail error = %v", err)
 	}
@@ -150,6 +194,26 @@ func TestActionRejectsBadShapes(t *testing.T) {
 				}
 			}()
 			sdk.New("x", "1").Action("x_y", "", fn)
+		})
+	}
+}
+
+func TestUndoRejectsBadShapes(t *testing.T) {
+	for name, fn := range map[string]any{
+		"wrong args":   func(user) deleteUser { return deleteUser{} },
+		"wrong result": func(createUser, user) user { return user{} },
+		"no result":    func(createUser, user) {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := sdk.New("x", "1")
+			p.Action("x_create", "", func(context.Context, createUser) (user, error) { return user{}, nil })
+			p.Action("x_delete", "", func(context.Context, deleteUser) error { return nil })
+			defer func() {
+				if recover() == nil {
+					t.Error("no panic")
+				}
+			}()
+			p.Undo("x_create", "x_delete", fn)
 		})
 	}
 }

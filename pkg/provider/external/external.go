@@ -186,29 +186,67 @@ func (p *Provider) Configure(ctx context.Context, config map[string]cty.Value) e
 // how in-process providers return dynamic output maps — and will
 // come in the plan-time reference-typing milestone.
 func (p *Provider) Execute(ctx context.Context, action string, attrs map[string]cty.Value) (map[string]cty.Value, error) {
+	out, _, err := p.execute(ctx, action, attrs, nil)
+	return out, err
+}
+
+var _ provider.Undoer = (*Provider)(nil)
+
+// ExecuteUndo runs the action like Execute and asks the subprocess for
+// the call that undoes it. Providers that don't describe undos return
+// none, and the action gets no automatic teardown.
+func (p *Provider) ExecuteUndo(ctx context.Context, action string, attrs map[string]cty.Value, opts provider.InverseOptions) (map[string]cty.Value, *provider.Invocation, error) {
+	return p.execute(ctx, action, attrs, &protocol.UndoOptions{Requested: opts.Requested})
+}
+
+func (p *Provider) execute(ctx context.Context, action string, attrs map[string]cty.Value, undoOpts *protocol.UndoOptions) (map[string]cty.Value, *provider.Invocation, error) {
 	schema := p.getSchema()
 	actionSchema, ok := schema.Actions[action]
 	if !ok {
-		return nil, fmt.Errorf("external %s: unknown action %q", schema.Name, action)
+		return nil, nil, fmt.Errorf("external %s: unknown action %q", schema.Name, action)
 	}
 	raw, err := encodeAttrs(attrs, actionSchema.Attrs)
 	if err != nil {
-		return nil, fmt.Errorf("external %s.%s: %w", schema.Name, action, err)
+		return nil, nil, fmt.Errorf("external %s.%s: %w", schema.Name, action, err)
 	}
 
 	var result protocol.ExecuteResult
 	err = p.client.Roundtrip(ctx, protocol.MethodExecute, protocol.ExecuteParams{
-		Action: action, Attrs: raw,
+		Action: action, Attrs: raw, Undo: undoOpts,
 	}, &result)
 	if err != nil {
-		return nil, fmt.Errorf("external %s.%s: %w", schema.Name, action, err)
+		return nil, nil, fmt.Errorf("external %s.%s: %w", schema.Name, action, err)
 	}
 
 	outputs, err := protocol.UnmarshalAttrs(result.Outputs, nil)
 	if err != nil {
-		return nil, fmt.Errorf("external %s.%s: decode outputs: %w", schema.Name, action, err)
+		return nil, nil, fmt.Errorf("external %s.%s: decode outputs: %w", schema.Name, action, err)
 	}
-	return outputs, nil
+	if result.Undo == nil {
+		return outputs, nil, nil
+	}
+	// Check the undo now, while the action's failure can still say
+	// why, rather than when teardown runs it.
+	undoSchema, ok := schema.Actions[result.Undo.Action]
+	if !ok {
+		return nil, nil, fmt.Errorf("external %s.%s: undo names unknown action %q", schema.Name, action, result.Undo.Action)
+	}
+	types := make(map[string]cty.Type, len(undoSchema.Attrs))
+	for name, a := range undoSchema.Attrs {
+		if types[name], err = a.CtyType(); err != nil {
+			return nil, nil, fmt.Errorf("external %s.%s: undo: %w", schema.Name, action, err)
+		}
+	}
+	for name := range result.Undo.Attrs {
+		if _, ok := types[name]; !ok {
+			return nil, nil, fmt.Errorf("external %s.%s: undo: %s has no attribute %q", schema.Name, action, result.Undo.Action, name)
+		}
+	}
+	undoAttrs, err := protocol.UnmarshalAttrs(result.Undo.Attrs, types)
+	if err != nil {
+		return nil, nil, fmt.Errorf("external %s.%s: decode undo: %w", schema.Name, action, err)
+	}
+	return outputs, &provider.Invocation{Action: result.Undo.Action, Attrs: undoAttrs}, nil
 }
 
 // Close attempts a graceful shutdown of the subprocess and force-

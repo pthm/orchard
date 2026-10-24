@@ -83,12 +83,14 @@ Inside the teardown body, three reference namespaces are in scope:
 - `action.*` — any other action's recorded outputs, for teardowns that need
   upstream state.
 
-## Automatic teardown for typed actions
+## Automatic teardown
 
 Typed database inserts and updates (`postgres_insert`, `mysql_update`, ...) don't
 need a `lifecycle` block. When one runs, its provider records how to undo it in
 the run record, and `orchard teardown` runs that: an insert's new row is deleted
-by its primary key, and an update's overwritten values are written back.
+by its primary key, and an update's overwritten values are written back. Other
+providers can do the same: a custom provider built with the Go SDK declares the
+undo with [`Provider.Undo`](../../extending/writing-a-provider/).
 
 ```hcl
 action "postgres_insert" "merchant" {

@@ -76,8 +76,21 @@ action "app_create_user" "alice" {
   protocol.
 - **Errors and panics** fail the action with their message; a panic includes
   its stack trace and leaves the provider running.
-- **Teardown**: a `lifecycle { teardown { } }` block calls the *same* action
-  with new attributes; external providers can't record an automatic undo yet.
+- **Teardown**: `Undo` builds the call that reverses an action from its input
+  and output, so scenarios need no `lifecycle` block. Orchard records it with
+  the run and `orchard teardown` runs it:
+
+  ```go
+  p.Action("app_delete_user", "Delete a user.", func(ctx context.Context, in DeleteUser) error {
+  	return svc.Delete(ctx, in.ID)
+  })
+  p.Undo("app_create_user", "app_delete_user", func(in CreateUser, out *users.User) DeleteUser {
+  	return DeleteUser{ID: out.ID}
+  })
+  ```
+
+  Return a pointer and make it nil to record no undo for a run. A scenario's own
+  `teardown` block, or `managed_teardown = false`, takes precedence.
 
 The rest of this page builds a provider by hand, which is what the SDK does for
 you, and what a provider in another language does.

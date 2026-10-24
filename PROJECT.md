@@ -656,7 +656,7 @@ Teardown is best-effort: a per-action failure is surfaced through the reporter b
 
 Resources are one of:
 - **Explicit** — cleanup declared via `lifecycle { teardown { } }`. Always wins.
-- **Managed** — the provider returns how to undo the action from the same call that runs it (`provider.Undoer`), stored as the node's `undo` in the run record. Typed inserts (`<p>_insert`) are managed: the undo deletes the row by its primary key. `lifecycle { managed_teardown = false }` opts an action out.
+- **Managed** — the provider returns how to undo the action from the same call that runs it (`provider.Undoer`), stored as the node's `undo` in the run record. Typed inserts (`<p>_insert`) are managed: the undo deletes the row by its primary key. External providers return one as `undo` in the execute result, which `pkg/sdk` builds from a function registered with `Provider.Undo`. `lifecycle { managed_teardown = false }` opts an action out.
 - **Unmanaged** — no automatic cleanup (sending an email, enqueuing a message, HTTP calls without an idempotent delete endpoint, typed updates and deletes).
 
 ### Failure Behavior
@@ -1011,6 +1011,7 @@ Make cleanup a first-class operation so that scenarios can be torn down cleanly,
 | Teardown reloads the scenario with the recorded variables; refuses records whose created nodes the scenario no longer declares | Done |
 | End-to-end integration test over Postgres (FK-bound merchant+product) | Done |
 | Managed cleanup for `<p>_insert` (undo recorded at run time; `managed_teardown = false` opts out) | Done |
+| Managed cleanup for external providers (`undo` in the execute result) | Done |
 | Managed cleanup for `<p>_update`: restore previous values of rows inserted this run by default; `managed_teardown = true` for other rows | Done |
 | `lifecycle` blocks on scenarios (`on_failure`, `on_success` policies) | Won't do: every run, failed or interrupted, writes a record, so run then `orchard teardown <scenario> --latest` |
 | Rollback on partial failure | Won't do: same reason; `orchard teardown <scenario> --latest` undoes a failed run |
@@ -1220,7 +1221,8 @@ pkg/ (public SDK surface)
 
   sdk/
     sdk.go                      Typed Go functions → external provider: schema from struct
-                                fields (encoding/json names), Serve() runs the stdio loop
+                                fields (encoding/json names), Undo() for managed teardown,
+                                Serve() runs the stdio loop
 
   snapshot/
     snapshot.go                 Schema snapshot envelope (format, kind, target, provider,

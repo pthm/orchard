@@ -27,6 +27,7 @@ import (
 	"os"
 	"reflect"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strings"
 
@@ -52,6 +53,9 @@ type handler struct {
 	// outNames lists the output fields, so ones dropped by omitempty
 	// are still sent, as null.
 	outNames []string
+	// undo, when set, builds the call that reverses this action.
+	undo       reflect.Value
+	undoAction string
 }
 
 // New returns a provider with no actions. name is the provider's name
@@ -127,6 +131,56 @@ func (p *Provider) Action(name, description string, fn any) {
 	p.schema.Actions[name] = as
 }
 
+// Undo gives action an automatic teardown: after it succeeds, fn turns
+// its input and output into the input of undoAction, Orchard records
+// that call, and `orchard teardown` runs it. fn takes action's input
+// struct and then its output struct, leaving out either one action
+// doesn't have, and returns undoAction's input struct:
+//
+//	p.Undo("app_create_user", "app_delete_user",
+//		func(in CreateUser, out User) DeleteUser { return DeleteUser{ID: out.ID} })
+//
+// Returning a nil pointer records no undo for that run. A scenario's
+// `lifecycle { teardown { } }` block or `managed_teardown = false`
+// replaces it. Register both actions first; Undo panics if they're
+// missing or fn doesn't fit them.
+func (p *Provider) Undo(action, undoAction string, fn any) {
+	h, ok := p.actions[action]
+	u, uok := p.actions[undoAction]
+	v := reflect.ValueOf(fn)
+	var err error
+	switch {
+	case !ok:
+		err = fmt.Errorf("unknown action %q", action)
+	case !uok:
+		err = fmt.Errorf("unknown undo action %q", undoAction)
+	case u.in == nil:
+		err = fmt.Errorf("undo action %q takes no input to build", undoAction)
+	case v.Kind() != reflect.Func:
+		err = fmt.Errorf("want a function, got %T", fn)
+	default:
+		var want []reflect.Type
+		for _, t := range []reflect.Type{h.in, h.out} {
+			if t != nil {
+				want = append(want, t)
+			}
+		}
+		t := v.Type()
+		args := make([]reflect.Type, t.NumIn())
+		for i := range args {
+			args[i] = t.In(i)
+		}
+		if !slices.Equal(args, want) || t.NumOut() != 1 ||
+			(t.Out(0) != u.in && t.Out(0) != reflect.PointerTo(u.in)) {
+			err = fmt.Errorf("%s: want func%v returning %s or *%[3]s", t, want, u.in)
+		}
+	}
+	if err != nil {
+		panic(fmt.Sprintf("sdk: Undo %q: %v", action, err))
+	}
+	h.undo, h.undoAction = v, undoAction
+}
+
 // Serve runs the provider. With a `schema` argument, as `orchard plan`
 // runs it, it prints the schema and returns. Otherwise it answers
 // requests on stdin and stdout until Orchard shuts it down.
@@ -188,7 +242,7 @@ func (p *Provider) handle(ctx context.Context, req protocol.Request) (any, *prot
 			return nil, &protocol.Error{Code: protocol.ErrCodeInvalidRequest, Message: err.Error()}
 		}
 		if p.config != nil {
-			if _, perr := p.config.call(ctx, params.Config); perr != nil {
+			if _, _, perr := p.config.call(ctx, params.Config, false); perr != nil {
 				perr.Code = protocol.ErrCodeConfigure
 				return nil, perr
 			}
@@ -203,11 +257,11 @@ func (p *Provider) handle(ctx context.Context, req protocol.Request) (any, *prot
 		if !ok {
 			return nil, &protocol.Error{Code: protocol.ErrCodeUnknownAction, Message: "unknown action " + params.Action}
 		}
-		outputs, perr := h.call(ctx, params.Attrs)
+		outputs, undo, perr := h.call(ctx, params.Attrs, params.Undo != nil)
 		if perr != nil {
 			return nil, perr
 		}
-		return protocol.ExecuteResult{Outputs: outputs}, nil
+		return protocol.ExecuteResult{Outputs: outputs, Undo: undo}, nil
 	case protocol.MethodShutdown:
 		return protocol.ShutdownResult{}, nil
 	}
@@ -250,11 +304,12 @@ func newHandler(fn any) (*handler, error) {
 }
 
 // call decodes attrs into the function's argument, calls it, and encodes
-// its result as outputs. A panic in fn fails the call rather than the
-// process.
-func (h *handler) call(ctx context.Context, attrs map[string]json.RawMessage) (outputs map[string]json.RawMessage, perr *protocol.Error) {
+// its result as outputs, and, when withUndo is set and the action has
+// one, the undo. A panic in fn fails the call rather than the process.
+func (h *handler) call(ctx context.Context, attrs map[string]json.RawMessage, withUndo bool) (outputs map[string]json.RawMessage, undo *protocol.Invocation, perr *protocol.Error) {
 	defer func() {
 		if r := recover(); r != nil {
+			outputs, undo = nil, nil
 			perr = &protocol.Error{Code: protocol.ErrCodeInternal, Message: fmt.Sprint("panic: ", r), Detail: string(debug.Stack())}
 		}
 	}()
@@ -262,37 +317,59 @@ func (h *handler) call(ctx context.Context, attrs map[string]json.RawMessage) (o
 	if h.in != nil {
 		raw, err := json.Marshal(attrs)
 		if err != nil {
-			return nil, &protocol.Error{Code: protocol.ErrCodeInvalidRequest, Message: err.Error()}
+			return nil, nil, &protocol.Error{Code: protocol.ErrCodeInvalidRequest, Message: err.Error()}
 		}
 		in := reflect.New(h.in)
 		if err := json.Unmarshal(raw, in.Interface()); err != nil {
-			return nil, &protocol.Error{Code: protocol.ErrCodeValidation, Message: err.Error()}
+			return nil, nil, &protocol.Error{Code: protocol.ErrCodeValidation, Message: err.Error()}
 		}
 		args = append(args, in.Elem())
 	}
 	res := h.fn.Call(args)
 	if err, _ := res[len(res)-1].Interface().(error); err != nil {
-		return nil, &protocol.Error{Code: protocol.ErrCodeExecute, Message: err.Error()}
+		return nil, nil, &protocol.Error{Code: protocol.ErrCodeExecute, Message: err.Error()}
 	}
 	outputs = map[string]json.RawMessage{}
-	if h.out == nil {
-		return outputs, nil
-	}
-	if out := res[0]; out.Kind() != reflect.Pointer || !out.IsNil() {
-		raw, err := json.Marshal(out.Interface())
-		if err != nil {
-			return nil, &protocol.Error{Code: protocol.ErrCodeExecute, Message: "encoding outputs: " + err.Error()}
+	if h.out != nil {
+		if out := res[0]; out.Kind() != reflect.Pointer || !out.IsNil() {
+			if err := encodeObject(out, &outputs); err != nil {
+				return nil, nil, &protocol.Error{Code: protocol.ErrCodeExecute, Message: "encoding outputs: " + err.Error()}
+			}
 		}
-		if err := json.Unmarshal(raw, &outputs); err != nil {
-			return nil, &protocol.Error{Code: protocol.ErrCodeExecute, Message: "outputs must encode as a JSON object: " + err.Error()}
-		}
-	}
-	for _, n := range h.outNames {
-		if _, ok := outputs[n]; !ok {
-			outputs[n] = json.RawMessage("null")
+		for _, n := range h.outNames {
+			if _, ok := outputs[n]; !ok {
+				outputs[n] = json.RawMessage("null")
+			}
 		}
 	}
-	return outputs, nil
+	if !withUndo || !h.undo.IsValid() {
+		return outputs, nil, nil
+	}
+	var undoArgs []reflect.Value
+	if h.in != nil {
+		undoArgs = append(undoArgs, args[1])
+	}
+	if h.out != nil {
+		undoArgs = append(undoArgs, res[0])
+	}
+	u := h.undo.Call(undoArgs)[0]
+	if u.Kind() == reflect.Pointer && u.IsNil() {
+		return outputs, nil, nil
+	}
+	undo = &protocol.Invocation{Action: h.undoAction}
+	if err := encodeObject(u, &undo.Attrs); err != nil {
+		return nil, nil, &protocol.Error{Code: protocol.ErrCodeExecute, Message: "encoding undo: " + err.Error()}
+	}
+	return outputs, undo, nil
+}
+
+// encodeObject encodes v, a struct, as a JSON object's fields.
+func encodeObject(v reflect.Value, into *map[string]json.RawMessage) error {
+	raw, err := json.Marshal(v.Interface())
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(raw, into)
 }
 
 func isStruct(t reflect.Type) bool {

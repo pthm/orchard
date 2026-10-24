@@ -100,8 +100,34 @@ See [execution model](../execution-model/) for the full lifecycle. In brief:
 |--------|--------|--------|--------|
 | `describe` | `{}` | `{ "schema": ProviderSchema }` | Once, at startup, before anything else. |
 | `configure` | `{ "config": { ... } }` | `{}` | Once, in `run` mode only, before any `execute`. |
-| `execute` | `{ "action": "name", "attrs": { ... } }` | `{ "outputs": { ... } }` | Once per action in the scenario. |
+| `execute` | `{ "action": "name", "attrs": { ... }, "undo": { ... }? }` | `{ "outputs": { ... }, "undo": { ... }? }` | Once per action in the scenario, and once per undo during teardown. |
 | `shutdown` | `{}` | `{}` | Once, at the end of the scenario. |
+
+## Managed teardown
+
+A provider can tell Orchard how to undo an action, so the action needs no
+`lifecycle { teardown { } }` block. When Orchard will record an undo (the action
+has no teardown block and doesn't set `managed_teardown = false`), the
+`execute` params carry `undo`:
+
+```json
+{"action": "app_create_user", "attrs": {"email": "a@example.com"}, "undo": {}}
+```
+
+`undo.requested` is `true` when the action sets `managed_teardown = true`,
+asking for an undo even where the provider wouldn't give one by default. A
+provider that can reverse the action returns the call that does it, naming one
+of its own action types:
+
+```json
+{"outputs": {"id": "u-1"}, "undo": {"action": "app_delete_user", "attrs": {"id": "u-1"}}}
+```
+
+Orchard checks the undo's attributes against that action's schema and fails
+the action if they don't fit. It stores the call in the run record, and
+`orchard teardown` sends it as an ordinary `execute`. Leave `undo` out of the
+result for no automatic teardown. Providers that predate this ignore the
+params field and never return one.
 
 ## Protocol versioning
 

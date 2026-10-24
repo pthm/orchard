@@ -27,6 +27,11 @@ func TestFormatValue(t *testing.T) {
 		{"empty object", cty.EmptyObjectVal, "{}"},
 		{"list", cty.ListVal([]cty.Value{cty.StringVal("a"), cty.UnknownVal(cty.String)}), `["a", (known after run)]`},
 		{"empty tuple", cty.EmptyTupleVal, "[]"},
+		{"sensitive", cty.StringVal("s3cret").Mark("sensitive"), "(sensitive)"},
+		{"object with sensitive field", cty.ObjectVal(map[string]cty.Value{
+			"name":  cty.StringVal("Acme"),
+			"token": cty.StringVal("s3cret").Mark("sensitive"),
+		}), `{ name = "Acme", token = (sensitive) }`},
 		{"multi-line string", cty.StringVal("SELECT 1;\nSELECT 2;\n"), "<<EOT\n    SELECT 1;\n    SELECT 2;\n  EOT"},
 	}
 	for _, c := range cases {

@@ -94,9 +94,11 @@ func (r *Redactor) Error(err error) error {
 	return err
 }
 
-// Value redacts every string inside v.
+// Value redacts every string inside v. A marked value is left as it
+// is: it's already known to be sensitive, and whoever receives it
+// leaves it out.
 func (r *Redactor) Value(v cty.Value) cty.Value {
-	if r == nil {
+	if r == nil || v.ContainsMarked() {
 		return v
 	}
 	return replaceStrings(v, r.redact)

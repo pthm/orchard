@@ -176,7 +176,7 @@ func (e *Engine) planAction(runCtx context.Context, evalCtx *hcl.EvalContext, no
 	if !ok {
 		return cty.DynamicPseudoType, nil
 	}
-	plan, err := planner.PlanAction(runCtx, route.actionName, attrs)
+	plan, err := planner.PlanAction(runCtx, route.actionName, unmarkAll(attrs))
 	if errors.Is(err, provider.ErrNoSchema) {
 		e.unchecked[route.providerAlias] = true
 		return cty.DynamicPseudoType, nil
@@ -266,8 +266,10 @@ func (e *Engine) buildTypedEvalContext(ps *parser.ParsedScenario, g *graph.Graph
 
 	// var.* carries actual resolved values — we have them at plan
 	// time and they're already the right type.
+	// Sensitive ones are marked, so PlannedAttrs shows what's derived
+	// from them; planners get unmarked attributes.
 	if len(ps.Variables) > 0 {
-		variables["var"] = cty.ObjectVal(ps.Variables)
+		variables["var"] = cty.ObjectVal(parser.MarkSensitive(ps.Variables, ps.Sensitive))
 	}
 
 	// action.<type>.<name> → UnknownVal of the action's declared

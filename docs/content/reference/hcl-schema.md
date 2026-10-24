@@ -89,8 +89,10 @@ sensitive variable with a default (`default = env("DB_PASSWORD")`) needs no
 `--var` if the default still gives the run's value.
 
 A component variable counts as sensitive, and is left out of the record too,
-when it is declared `sensitive = true` or its input expression reads a
-sensitive scenario variable (`inputs = { dsn = var.dsn }`).
+when it is declared `sensitive = true` or its input is computed from a
+sensitive scenario variable (`inputs = { dsn = var.dsn }`, or
+`"${var.dsn}&x=1"`, or `upper(var.dsn)`). `orchard plan --show-values` shows
+any attribute computed from a sensitive variable as `(sensitive)`.
 
 Wherever else the value turns up (an action's outputs, such as a command
 echoing it; a typed insert's undo step; a scenario output; an error message),

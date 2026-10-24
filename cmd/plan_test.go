@@ -202,3 +202,33 @@ func TestPlanShowValues(t *testing.T) {
 		t.Errorf("values shouldn't show without --show-values:\n%s", out)
 	}
 }
+
+// TestPlanShowValuesSensitive: values computed from a sensitive
+// variable show as (sensitive), the rest as usual.
+func TestPlanShowValuesSensitive(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shop.hcl")
+	writeFile(t, path, `scenario "shop" {
+  required_providers {
+    sh = { source = "builtin/exec" }
+  }
+  variable "token" { sensitive = true }
+  action "exec_run" "call" {
+    command = "curl"
+    args    = ["-H", "Authorization: Bearer ${var.token}", "https://example.com"]
+    env     = { TOKEN = upper(var.token), REGION = "us" }
+  }
+}
+`)
+	out, err := runCLI(t, "plan", path, "--show-values", "--no-color", "--var", "token=tok-9f3a71")
+	if err != nil {
+		t.Fatalf("plan --show-values: %v\n%s", err, out)
+	}
+	if strings.Contains(strings.ToLower(out), "tok-9f3a71") {
+		t.Errorf("plan should not print the sensitive value:\n%s", out)
+	}
+	for _, want := range []string{`["-H", (sensitive), "https://example.com"]`, `TOKEN = (sensitive)`, `REGION = "us"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in:\n%s", want, out)
+		}
+	}
+}

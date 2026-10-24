@@ -88,7 +88,8 @@ type UndoReporter interface {
 // records. The engine passes it each component's resolved inputs (its
 // var.* namespace, keyed like ParsedScenario.Components) before the
 // component's first action runs, so teardown can evaluate the
-// component's teardown bodies against the same values.
+// component's teardown bodies against the same values. Inputs holding
+// a sensitive value carry parser.SensitiveMark.
 type ComponentVarsReporter interface {
 	ComponentVars(componentKey string, vars map[string]cty.Value)
 }
@@ -356,6 +357,7 @@ func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *grap
 	// already ensures those upstreams have run by the time we need
 	// the inputs.
 	compVars := make(map[string]map[string]cty.Value)
+	markedVars := parser.MarkSensitive(ps.Variables, ps.Sensitive)
 
 	runStart := time.Now()
 	e.reporter.RunStarted(ps.Scenario.Name)
@@ -435,15 +437,17 @@ func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *grap
 
 			if node.ComponentKey != "" {
 				if _, ok := compVars[node.ComponentKey]; !ok {
-					vars, err := e.resolveComponentInputs(ps.Components[node.ComponentKey], ps.Variables, resolved)
+					vars, err := e.resolveComponentInputs(ps.Components[node.ComponentKey], markedVars, resolved)
 					if err != nil {
 						fail(string(nodeID), fmt.Errorf("resolving inputs for component %q%s: %w", node.ComponentKey, formatSourceLoc(node.SourceRange), err))
 						break
 					}
-					compVars[node.ComponentKey] = vars
+					// The reporter sees which inputs are sensitive by
+					// their mark; the actions get plain values.
 					if cr, ok := e.reporter.(ComponentVarsReporter); ok {
 						cr.ComponentVars(node.ComponentKey, vars)
 					}
+					compVars[node.ComponentKey] = unmarkAll(vars)
 				}
 			}
 			evalCtx := e.buildNodeEvalContext(node, ps.Variables, compVars, resolved)
@@ -771,7 +775,7 @@ func (e *Engine) resolveComponentOutputs(
 		if err != nil {
 			return nil, err
 		}
-		vars = v
+		vars = unmarkAll(v)
 	}
 
 	evalCtx := buildEvalContext(vars, scopedResolved)
@@ -790,6 +794,9 @@ func (e *Engine) resolveComponentOutputs(
 
 // resolveComponentInputs evaluates the inputs block of a component reference
 // in the scenario's scope, returning values to use as the component's var.* namespace.
+// Values computed from a scenario variable carrying parser.SensitiveMark,
+// and variables the component declares sensitive, come back marked;
+// callers unmark them before use.
 //
 // Validates three contract properties of the component:
 //   - every input key matches a declared variable (no stray inputs);
@@ -883,7 +890,22 @@ func (e *Engine) resolveComponentInputs(
 		}
 	}
 
+	for name, decl := range declsByName {
+		if ok, _ := parser.VariableSensitive(decl); ok {
+			result[name] = result[name].Mark(parser.SensitiveMark)
+		}
+	}
 	return result, nil
+}
+
+// unmarkAll strips every mark from the values in m, for handing them
+// on to anything but the code that looks for parser.SensitiveMark.
+func unmarkAll(m map[string]cty.Value) map[string]cty.Value {
+	out := make(map[string]cty.Value, len(m))
+	for k, v := range m {
+		out[k], _ = v.UnmarkDeep()
+	}
+	return out
 }
 
 // coerceVar is the engine-side twin of the parser's coerceToType.

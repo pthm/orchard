@@ -128,7 +128,7 @@ Validate a scenario and print its execution plan without side effects.
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--scenario <name>` | string | — | Pick a scenario by name when the file defines multiple. |
-| `--show-values` | bool | `false` | List each action's evaluated attributes under it, and print the seed on stderr. |
+| `--show-values` | bool | `false` | List each action's evaluated attributes under it, and print the seed on stderr. Values computed from a [sensitive variable](../hcl-schema/#variable) show as `(sensitive)`. |
 | `--seed <n>` | uint | random | Seed for random functions. With the same seed, `--show-values` shows the random values `orchard run --seed <n>` will use. |
 
 **Behavior**

@@ -73,10 +73,9 @@ type Reporter struct {
 	configs  map[string]map[string]cty.Value
 	compVars map[string]map[string]json.RawMessage
 	// secret holds the sensitive variables until RunCompleted hashes
-	// them; compRedact and compSecret are the component variables
-	// left out of compVars.
+	// them; compSecret names the component variables left out of
+	// compVars.
 	secret     map[string]cty.Value
-	compRedact map[string]map[string]bool
 	compSecret map[string][]string
 	writer     Writer
 	log        io.Writer
@@ -116,10 +115,7 @@ type Options struct {
 	// Sensitive names the scenario variables recorded as a hash
 	// rather than a value (ParsedScenario.Sensitive).
 	Sensitive map[string]bool
-	// ComponentSensitive names, per component key, the component
-	// variables left out of the record (ParsedComponent.Sensitive).
-	ComponentSensitive map[string]map[string]bool
-	LogOutput          io.Writer // where write failures surface; defaults to os.Stderr
+	LogOutput io.Writer // where write failures surface; defaults to os.Stderr
 }
 
 // NewReporter constructs a Reporter from options. The scenario
@@ -146,16 +142,15 @@ func NewReporter(opts Options) (*Reporter, error) {
 		return nil, fmt.Errorf("encode variables: %w", err)
 	}
 	return &Reporter{
-		inner:      opts.Inner,
-		scenario:   opts.Scenario,
-		vars:       vars,
-		secret:     secret,
-		compRedact: opts.ComponentSensitive,
-		seed:       opts.Seed,
-		configs:    opts.ProviderConfigs,
-		writer:     opts.Writer,
-		log:        opts.LogOutput,
-		pending:    make(map[string]time.Time),
+		inner:    opts.Inner,
+		scenario: opts.Scenario,
+		vars:     vars,
+		secret:   secret,
+		seed:     opts.Seed,
+		configs:  opts.ProviderConfigs,
+		writer:   opts.Writer,
+		log:      opts.LogOutput,
+		pending:  make(map[string]time.Time),
 	}, nil
 }
 
@@ -216,11 +211,13 @@ func (r *Reporter) NodeUndo(nodeID string, undo provider.Invocation) {
 	}
 }
 
-// ComponentVars implements engine.ComponentVarsReporter.
+// ComponentVars implements engine.ComponentVarsReporter. Variables
+// holding a sensitive value (marked parser.SensitiveMark) are named in
+// the record but left out.
 func (r *Reporter) ComponentVars(componentKey string, vars map[string]cty.Value) {
 	plain := map[string]cty.Value{}
 	for name, v := range vars {
-		if r.compRedact[componentKey][name] {
+		if v.ContainsMarked() {
 			if r.compSecret == nil {
 				r.compSecret = map[string][]string{}
 			}

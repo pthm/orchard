@@ -11,10 +11,15 @@ import (
 	"github.com/zclconf/go-cty/cty"
 
 	"github.com/pthm/orchard/internal/cli/render"
+	"github.com/pthm/orchard/internal/parser"
 )
 
 // unknownText stands in for a value that depends on another action.
 const unknownText = "(known after run)"
+
+// sensitiveText stands in for a value computed from a sensitive
+// variable.
+const sensitiveText = "(sensitive)"
 
 // renderValues lists an action's evaluated attributes, one per line
 // with the `=` signs aligned.
@@ -38,11 +43,16 @@ func renderValues(w io.Writer, indent string, attrs map[string]cty.Value) {
 
 // formatValue renders a cty value in HCL-like syntax on one line:
 // objects and lists inline, any unknown (however deeply nested) as
-// "(known after run)". A multi-line string becomes a heredoc whose
-// lines sit one step past indent. ctyjson can't be used: it refuses
-// unknown values.
+// "(known after run)", and anything computed from a sensitive variable
+// as "(sensitive)". A multi-line string becomes a heredoc whose lines
+// sit one step past indent. ctyjson can't be used: it refuses unknown
+// values.
 func formatValue(v cty.Value, indent string) string {
-	v, _ = v.UnmarkDeep()
+	if v.HasMark(parser.SensitiveMark) {
+		return sensitiveText
+	}
+	// Elements keep their own marks for the recursion to find.
+	v, _ = v.Unmark()
 	switch {
 	case !v.IsKnown():
 		return unknownText

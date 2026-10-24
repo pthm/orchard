@@ -145,6 +145,7 @@ func (e *Engine) Teardown(
 						if err != nil {
 							return err
 						}
+						fresh = unmarkAll(fresh)
 						maps.Copy(fresh, recorded)
 						scopeVars = fresh
 					}

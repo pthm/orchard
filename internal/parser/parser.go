@@ -89,11 +89,6 @@ type ParsedComponent struct {
 	// plain single component. Its count.* / each.* namespace is in
 	// scope for the ref's inputs.
 	Instance *Instance
-	// Sensitive names the component variables that hold a sensitive
-	// value: declared `sensitive = true`, or given an input that
-	// references a sensitive scenario variable. Run records leave
-	// them out.
-	Sensitive map[string]bool
 }
 
 // LoadScenario parses a scenario HCL file, picks the scenario block
@@ -228,11 +223,6 @@ func loadScenario(path, name string, vars map[string]string, values map[string]c
 	sensitive, err := sensitiveVariables(scenario.Variables)
 	if err != nil {
 		return nil, err
-	}
-	for _, comp := range components {
-		if comp.Sensitive, err = componentSensitive(comp, sensitive); err != nil {
-			return nil, err
-		}
 	}
 
 	// Validate each component instance's inputs against its declared

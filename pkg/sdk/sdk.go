@@ -332,7 +332,8 @@ func (h *handler) call(ctx context.Context, attrs map[string]json.RawMessage, wi
 	outputs = map[string]json.RawMessage{}
 	if h.out != nil {
 		if out := res[0]; out.Kind() != reflect.Pointer || !out.IsNil() {
-			if err := encodeObject(out, &outputs); err != nil {
+			var err error
+			if outputs, err = encodeObject(out); err != nil {
 				return nil, nil, &protocol.Error{Code: protocol.ErrCodeExecute, Message: "encoding outputs: " + err.Error()}
 			}
 		}
@@ -356,20 +357,22 @@ func (h *handler) call(ctx context.Context, attrs map[string]json.RawMessage, wi
 	if u.Kind() == reflect.Pointer && u.IsNil() {
 		return outputs, nil, nil
 	}
-	undo = &protocol.Invocation{Action: h.undoAction}
-	if err := encodeObject(u, &undo.Attrs); err != nil {
+	undoAttrs, err := encodeObject(u)
+	if err != nil {
 		return nil, nil, &protocol.Error{Code: protocol.ErrCodeExecute, Message: "encoding undo: " + err.Error()}
 	}
-	return outputs, undo, nil
+	return outputs, &protocol.Invocation{Action: h.undoAction, Attrs: undoAttrs}, nil
 }
 
 // encodeObject encodes v, a struct, as a JSON object's fields.
-func encodeObject(v reflect.Value, into *map[string]json.RawMessage) error {
+func encodeObject(v reflect.Value) (map[string]json.RawMessage, error) {
 	raw, err := json.Marshal(v.Interface())
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return json.Unmarshal(raw, into)
+	var fields map[string]json.RawMessage
+	err = json.Unmarshal(raw, &fields)
+	return fields, err
 }
 
 func isStruct(t reflect.Type) bool {
@@ -434,8 +437,9 @@ func jsonFields(t reflect.Type) []field {
 }
 
 func jsonNames(t reflect.Type) []string {
-	var names []string
-	for _, f := range jsonFields(t) {
+	fields := jsonFields(t)
+	names := make([]string, 0, len(fields))
+	for _, f := range fields {
 		names = append(names, f.name)
 	}
 	return names

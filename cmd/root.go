@@ -30,6 +30,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newListCmd())
 	root.AddCommand(newDocsCmd())
 	root.AddCommand(newTeardownCmd())
+	root.AddCommand(newInspectCmd())
 	root.AddCommand(newSchemaCmd())
 	root.AddCommand(newFunctionsCmd())
 	root.AddCommand(newVersionCmd())

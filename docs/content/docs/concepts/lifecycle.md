@@ -163,6 +163,10 @@ repeating the teardowns that already ran. Once a teardown finishes with no
 failures the record gets `torn_down_at`, and a later teardown of it is refused
 ("already torn down at ...") before any provider is touched.
 
+`orchard list runs` lists records with their status and teardown progress, and
+`orchard inspect <run-id>` shows one in full: each node's status, error, the
+undo step its provider recorded, and whether it has been torn down.
+
 ## When teardown isn't the right tool
 
 - **Auto-generated IDs without a record.** Teardown uses the record's captured
@@ -197,6 +201,3 @@ failures the record gets `torn_down_at`, and a later teardown of it is refused
 - **Re-inserting what a typed delete removed.** Not automatic yet.
 - **Scenario-level lifecycle policies** (`on_failure = "rollback"`). Planned;
   not yet implemented.
-- **`orchard inspect <id>`**. Also planned. `orchard list runs` lists
-  records with their status and teardown progress; for detail, records are
-  plain JSON — `jq` and `cat` are your tools.

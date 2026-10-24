@@ -338,6 +338,57 @@ List the run records `orchard run` wrote, newest first, one line per run.
 - `0` — listing succeeded. Output may say no runs were found.
 - `1` — filesystem error.
 
+## `orchard inspect`
+
+```
+orchard inspect <run-id | record-file> [--record-dir .]
+```
+
+Show everything one run record says.
+
+| Argument / flag | Description |
+|-----------------|-------------|
+| `<run-id \| record-file>` | A run ID looked up in `--record-dir`, or a path to a record file. Required. |
+| `--record-dir` | Directory to look a run ID up in. Defaults to `.`. Ignored when the argument is an existing file. |
+
+**Behavior**
+
+- The header shows the run ID, scenario name and path, status, start time
+  (UTC), duration, `Torn down` time once `orchard teardown` has finished,
+  and the run's error if it failed.
+- Variables are listed sorted by name, then nodes in record order with
+  their status, ID and duration, plus their error, the undo step their
+  provider recorded, and a `torn down` marker where they apply.
+- Scenario outputs come last.
+- Values print as their raw record JSON, one line each.
+- A failed run ends its node list with a note that nodes not listed did
+  not run.
+
+**Example output**
+
+```
+  ID          20260415T093001Z_4be03d11
+  Scenario    dev  (/home/me/project/scenarios/dev.hcl)
+  Status      succeeded
+  Started     2026-04-15T09:30:01Z
+  Duration    12ms
+
+  Variables
+    who = "Acme"
+
+  Nodes
+    succeeded  action.sqlite_insert.acme  3ms
+      undo: sqlite_delete {"table":"merchants","where":{"id":1}}
+
+  Outputs
+    id = 1
+```
+
+**Exit codes**
+
+- `0` — the record was found and printed.
+- `1` — no such record file or run ID, or the record could not be loaded.
+
 ## Examples
 
 Scaffold a new project and run it:
@@ -376,10 +427,11 @@ List every scenario in a repo:
 orchard list .
 ```
 
-List past runs and tear down one by its ID:
+List past runs, inspect one and tear it down by its ID:
 
 ```sh
 orchard list runs --record-dir .orchard/runs
+orchard inspect 20260415T093001Z_4be03d11 --record-dir .orchard/runs
 orchard teardown 20260415T093001Z_4be03d11 --record-dir .orchard/runs
 ```
 

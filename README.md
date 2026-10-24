@@ -3,8 +3,9 @@
 </p>
 
 <p align="center">
-  <strong>Define reproducible application state as code.</strong><br>
-  Scenario-based data orchestration driven by HCL.
+  <strong>Seed more than your database.</strong><br>
+  Describe your application state once, in reusable HCL components. Orchard builds it
+  with the tools you already have, and tears it down when you're done.
 </p>
 
 <p align="center">
@@ -19,61 +20,71 @@
 
 ---
 
-## What is Orchard?
+Orchard builds application state from code: a merchant with three failed payments,
+an org with SSO on and a suspended user, a fully seeded local environment. You
+describe it in HCL **scenarios**; Orchard works out the order, runs each step with
+the right tool (SQL, Redis, S3, HTTP and gRPC calls, shell commands), passes outputs
+from one step to the next, and records what it did so it can undo it.
 
-Orchard is a CLI that lets teams describe complex application state — a merchant
-with three failed payments, an org with SSO enabled and a suspended user, a
-fully-seeded local dev database — and builds it by inserting rows, calling APIs,
-and wiring outputs between steps automatically.
+Write it once and use it for demos, integration tests and local development.
 
-Instead of writing ad-hoc seed scripts, you write **scenarios** in HCL. Orchard
-plans them, shows the execution graph, and (when you're ready) runs them through
-a pluggable provider system. Built-in providers cover PostgreSQL, MySQL,
-SQLite, HTTP, and shell execution; custom providers are any binary that speaks Orchard's
-JSON-over-stdio protocol.
-
-### Why
-
-- **Reproducibility.** Same inputs, same state. Scenarios are version-controlled
-  and reviewable; seed scripts usually aren't.
-- **Composition.** Scenarios compose *components* — reusable units of state with
-  typed inputs and outputs.
-- **Plan before run.** `orchard plan` type-checks every reference, resolves the
-  dependency graph, and prints what would execute without touching external
-  systems.
+- **Plan before you run.** `orchard plan` type-checks every reference and, from a
+  committed schema snapshot, every typed insert, update and gRPC call, without
+  touching anything.
+- **Compose.** Components are reusable units of state with typed inputs and
+  outputs. Scenarios assemble them.
+- **Clean up.** `orchard teardown` undoes a run. Rows, keys and objects Orchard
+  created are deleted and values it overwrote are put back automatically; any
+  other step can declare its own teardown.
+- **Bring your own tools.** Any binary that speaks Orchard's JSON-over-stdio
+  protocol can be a provider.
 
 ## A quick look
 
 ```hcl
-scenario "hello" {
+scenario "demo_merchant" {
   required_providers {
     postgres = { source = "builtin/postgres" }
+    redis    = { source = "builtin/redis" }
+    api      = { source = "builtin/http" }
   }
 
-  variable "dsn" {
-    default = "postgres://localhost:5432/orchard_dev?sslmode=disable"
+  variable "name" { default = "Acme" }
+
+  provider "postgres" { dsn = "postgres://localhost:5432/shop?sslmode=disable" }
+  provider "redis"    { url = "redis://localhost:6379/0" }
+  provider "api"      { base_url = "http://localhost:3000" }
+
+  # Schema-checked inserts: a typo'd column fails before anything runs.
+  action "postgres_insert" "merchant" {
+    table  = "merchants"
+    values = { name = var.name, region = "eu" }
   }
 
-  provider "postgres" {
-    dsn = var.dsn
+  action "postgres_insert" "product" {
+    table  = "products"
+    values = { merchant_id = action.postgres_insert.merchant.id, name = "Widget", price = 9.99 }
   }
 
-  action "postgres_query" "create_merchant" {
-    query = "INSERT INTO merchants (name, region) VALUES ('Acme', 'us') RETURNING id, name"
+  # Outputs flow between steps, across tools.
+  action "redis_hset" "flags" {
+    key    = "flags:${action.postgres_insert.merchant.id}"
+    fields = { new_checkout = true }
   }
 
-  action "postgres_query" "create_product" {
-    query = "INSERT INTO products (merchant_id, name, price) VALUES (${action.postgres_query.create_merchant.id}, 'Widget', 9.99) RETURNING id"
+  action "http_request" "reindex" {
+    method = "POST"
+    url    = "/admin/merchants/${action.postgres_insert.merchant.id}/reindex"
   }
 
-  output "merchant_id" { value = action.postgres_query.create_merchant.id }
-  output "product_id"  { value = action.postgres_query.create_product.id }
+  output "merchant_id" { value = action.postgres_insert.merchant.id }
 }
 ```
 
 ```sh
-orchard plan scenarios/hello.hcl    # dry-run; no side effects
-orchard run  scenarios/hello.hcl    # executes and prints outputs
+orchard plan scenarios/demo.hcl                    # check everything; no side effects
+orchard run scenarios/demo.hcl                     # build it, and write a run record
+orchard teardown orchard_demo_merchant_run_*.json  # undo it
 ```
 
 ## Install
@@ -91,7 +102,7 @@ scoop bucket add pthm https://github.com/pthm/scoop-bucket
 scoop install pthm/orchard
 ```
 
-With Go (requires Go 1.25+):
+With Go (requires Go 1.26+):
 
 ```sh
 go install github.com/pthm/orchard@latest
@@ -112,19 +123,17 @@ orchard version
 
 | Command | Purpose |
 |---------|---------|
-| `orchard run <scenario>` | Execute a scenario end-to-end. |
-| `orchard plan <scenario>` | Validate and print the execution plan. Read-only; safe in CI. |
-| `orchard list [dir]` | List every `scenario` block found under a directory. |
-| `orchard schema pull <scenario>` | Snapshot each database's schema to `.orchard/schema/` for plan-time checks. |
-| `orchard docs <source>` | Render provider reference docs from a provider's schema. Works on `builtin/*` and `exec:<path>`. |
-| `orchard version` | Print the version, commit, and build date. |
+| `orchard init` | Scaffold a new project. |
+| `orchard plan <scenario>` | Validate a scenario and print its execution plan. Read-only; safe in CI. |
+| `orchard run <scenario>` | Execute a scenario and write a run record. |
+| `orchard teardown <record>` | Undo a recorded run, in reverse order. |
+| `orchard schema pull <scenario>` | Snapshot the schemas of the databases and gRPC services a scenario uses, for plan-time checks. |
+| `orchard list [dir]` | List the scenarios under a directory. |
+| `orchard functions` | List the HCL functions available in scenarios. |
+| `orchard docs <source>` | Render a provider's reference docs. |
 
-Global flags:
-
-- `--var key=value` — override a scenario variable (repeatable).
-- `--no-color` — disable coloured output (honours `NO_COLOR`).
-
-Full reference at [orchard.pthm.dev/reference/cli/](https://orchard.pthm.dev/reference/cli/).
+Pass `--var key=value` to set scenario variables, and `--no-color` (or `NO_COLOR`)
+for plain output. Full reference at [orchard.pthm.dev/reference/cli/](https://orchard.pthm.dev/reference/cli/).
 
 ## Built-in providers
 
@@ -133,9 +142,9 @@ Full reference at [orchard.pthm.dev/reference/cli/](https://orchard.pthm.dev/ref
 | `builtin/postgres` | `postgres_query`, `postgres_copy`, `postgres_insert`, `postgres_update`, `postgres_delete` | Execute SQL, bulk-load CSV via COPY, or run schema-checked inserts, updates and deletes. |
 | `builtin/mysql` | `mysql_query`, `mysql_insert`, `mysql_update`, `mysql_delete` | Execute SQL against MySQL or MariaDB, or run schema-checked inserts, updates and deletes. |
 | `builtin/sqlite` | `sqlite_query`, `sqlite_insert`, `sqlite_update`, `sqlite_delete` | Execute SQL against a database file, or run schema-checked inserts, updates and deletes. |
-| `builtin/redis` | `redis_command`, `redis_set`, `redis_hset` | Run commands against Redis or Valkey, or set keys and hashes with exact created / new-field outputs. |
+| `builtin/redis` | `redis_command`, `redis_set`, `redis_hset` | Set keys and hashes, or run any command, on Redis, Valkey and compatible stores. |
 | `builtin/s3` | `s3_create_bucket`, `s3_put_object`, `s3_delete_object`, `s3_delete_bucket` | Create buckets and upload objects on S3, S3-compatible stores and Google Cloud Storage. |
-| `builtin/grpc` | `grpc_call` | Call unary gRPC methods with no generated code, checked against reflection or a descriptor set. |
+| `builtin/grpc` | `grpc_call` | Call gRPC methods with no generated code, using server reflection or a descriptor set. |
 | `builtin/http` | `http_request` | Issue HTTP requests; capture status, body, and headers. |
 | `builtin/exec` | `exec_run` | Run a shell command; capture stdout, stderr, and exit code. |
 
@@ -143,68 +152,11 @@ Custom providers are any binary that implements the provider protocol. See
 [Extending Orchard](https://orchard.pthm.dev/docs/extending/) for the wire
 format, lifecycle, and a worked tutorial.
 
-## Repo layout
-
-```
-cmd/               Cobra subcommands (run, plan, list, docs)
-internal/
-  parser/          HCL decode, variable resolution, provider/component bindings
-  graph/           Dependency graph construction and topological sort
-  engine/          Runtime: evaluation, provider dispatch, outputs
-  docs/            Markdown renderer for the `orchard docs` subcommand
-pkg/
-  protocol/        Wire protocol types (ProviderSchema, envelopes, cty helpers)
-  provider/        Provider interface, builtin registry, external (stdio) client
-    postgres/      Built-in PostgreSQL provider
-    http/          Built-in HTTP provider
-    exec/          Built-in shell provider
-docs/              Hugo source for https://orchard.pthm.dev
-test/integration/  Full-stack scenarios against a real postgres + echo provider
-```
-
-## Development
-
-This project uses [`just`](https://github.com/casey/just) as its task runner.
-
-```sh
-just                   # list recipes
-just test              # run the Go tests
-just test-all          # Go tests + integration suite
-just docs              # regenerate provider docs + build the Hugo site
-just docs-watch        # live-reload docs site
-just docs-provider p   # regenerate one provider's reference page
-```
-
-The Hugo site pulls generated provider reference pages from
-`docs/content-generated/`, which is gitignored — run `just docs-generate` after
-editing any `pkg/provider/*/schema.hcl`.
-
-### Releasing
-
-Push a `vX.Y.Z` tag (prereleases like `v1.2.3-rc.1` are allowed) and the
-`release` workflow runs GoReleaser to publish archives, packages, the
-Homebrew cask, and the Scoop manifest. It needs these repository secrets:
-
-- `HOMEBREW_TAP_GITHUB_TOKEN` — push access to `pthm/homebrew-tap` (the cask
-  is skipped if unset).
-- `SCOOP_BUCKET_GITHUB_TOKEN` — push access to `pthm/scoop-bucket` (the
-  manifest is skipped if unset).
-- `QUILL_SIGN_P12`, `QUILL_SIGN_PASSWORD`, `QUILL_NOTARY_KEY`,
-  `QUILL_NOTARY_KEY_ID`, `QUILL_NOTARY_ISSUER` — macOS signing and
-  notarization.
-
-Run the workflow manually with `dry_run` to build a snapshot without publishing.
-
 ## Contributing
 
-Issues and pull requests welcome. Before proposing a change:
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for
+the development setup.
 
-1. `just test` passes.
-2. `go vet ./...` is clean.
-3. New behaviour has a test. User-visible changes update the docs under
-   `docs/content/docs/`.
+## License
 
-Provider authors — both built-in and external — should read
-[Extending Orchard](https://orchard.pthm.dev/docs/extending/) first: it covers
-the wire protocol, lifecycle, schema model, and publishing conventions that
-downstream tooling (plan, docs generator, external clients) assumes.
+[MIT](LICENSE)

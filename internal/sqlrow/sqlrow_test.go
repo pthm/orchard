@@ -31,6 +31,7 @@ func TestToCty(t *testing.T) {
 		{"float64", 3.14, cty.NumberFloatVal(3.14)},
 		{"big.Float", big.NewFloat(2.5), cty.NumberFloatVal(2.5)},
 		{"time", ts, cty.StringVal("2026-10-23T10:30:00Z")},
+		{"time in another zone", ts.In(time.FixedZone("", -7*3600)), cty.StringVal("2026-10-23T10:30:00Z")},
 		{"fallback", struct{ X int }{5}, cty.StringVal("{5}")},
 	}
 	for _, c := range cases {

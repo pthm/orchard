@@ -12,9 +12,15 @@ provider "postgres" {
       values are bound as parameters, and each action is checked against the live
       schema before the run starts. A table that doesn't exist yet (because an
       earlier action creates it) is checked when the action runs instead.
-    - Each `sql` action runs in its own transaction. There is no cross-action
-      transactional scope today — if you need atomicity across multiple statements,
-      bundle them into one `query` with a `BEGIN;...COMMIT;` block, or use a CTE.
+    - Each action commits on its own; there is no transaction spanning actions. A
+      `postgres_query` can hold several statements separated by `;`, and Postgres runs
+      them as one transaction: if any fails, none take effect, unless the query
+      issues its own `COMMIT` or `ROLLBACK` partway. Wrapping them in
+      `BEGIN; ... COMMIT;` does the same explicitly; a `BEGIN` left without its
+      `COMMIT` is rolled back and fails the action. Statements that refuse to run in
+      a transaction block (`VACUUM`, `CREATE DATABASE`, `CREATE INDEX CONCURRENTLY`)
+      need a `postgres_query` of their own. Outputs come from the first statement's
+      result, so are empty when it is `BEGIN`.
     - SQL injection: values interpolated via `$${var.name}` are HCL-evaluated to
       strings and substituted as text. Use scenario variables for known-safe values;
       never pass untrusted input through the `query` attribute.
@@ -33,14 +39,15 @@ provider "postgres" {
 
   action "postgres_query" {
     description = <<-MD
-      Execute a SQL statement. The first row returned (typically from a `RETURNING`
-      clause) is exposed as outputs keyed by column name.
+      Execute SQL: one statement, or several separated by `;` that run as one
+      transaction. The first row returned (typically from a `RETURNING` clause) is
+      exposed as outputs keyed by column name.
     MD
 
     attribute "query" {
       type        = string
       required    = true
-      description = "The SQL statement to execute."
+      description = "The SQL to execute. Several statements run as one transaction."
     }
 
     output {
@@ -53,7 +60,7 @@ provider "postgres" {
 
         | PostgreSQL type | cty type |
         |-----------------|----------|
-        | `text`, `varchar`, `uuid`, `timestamp*`, `date` | `string` |
+        | `text`, `varchar`, `uuid`, `timestamp*`, `date` | `string` (times as RFC 3339 in UTC) |
         | `int2`, `int4`, `int8`, `numeric`, `float4`, `float8` | `number` |
         | `bool` | `bool` |
         | `NULL` | `null` |

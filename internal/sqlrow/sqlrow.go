@@ -114,7 +114,7 @@ func isNumericType(name string) bool {
 // ToCty converts a Go value from a database driver into a cty.Value
 // for the engine's eval context. Drivers return their native types
 // (strings, sized ints, floats, bool, []byte, time.Time, nil); those
-// map directly, times become RFC 3339 strings, and anything else falls
+// map directly, times become RFC 3339 strings in UTC, and anything else falls
 // back to its string form.
 //
 // This is deliberately permissive rather than strict: a best-effort
@@ -151,7 +151,9 @@ func ToCty(v any) cty.Value {
 		f, _ := val.Float64()
 		return cty.NumberFloatVal(f)
 	case time.Time:
-		return cty.StringVal(val.Format(time.RFC3339Nano))
+		// UTC, so the text doesn't depend on the client's or the
+		// server session's time zone.
+		return cty.StringVal(val.UTC().Format(time.RFC3339Nano))
 	default:
 		return cty.StringVal(fmt.Sprintf("%v", val))
 	}

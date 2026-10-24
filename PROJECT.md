@@ -375,7 +375,7 @@ The system supports multiple action types, each implemented by a provider. Actio
 
 ### postgres_query (builtin/postgres)
 
-Execute arbitrary SQL against the configured PostgreSQL connection. Results from `RETURNING` clauses are captured as outputs.
+Execute arbitrary SQL against the configured PostgreSQL connection. Results from `RETURNING` clauses are captured as outputs. Several statements separated by `;` run as one transaction, and outputs come from the first statement.
 
 ```hcl
 action "postgres_query" "create_merchant" {
@@ -1056,10 +1056,10 @@ Harden the tool for real-world use and improve the authoring experience.
 | Function naming convention: lowercase compound words matching cty (`formatdate`, `timesub`) | Done |
 | `count` / `for_each` on scenario actions and components (`count.index`, `each.key/value`, `x[0]` / `x["k"]` / `x[*]` references) | Done |
 | Dry-run mode (plan with expression evaluation but no execution) | Not started |
-| Execution logging with structured output | Not started |
+| Execution logging with structured output | Deferred: the run record is the structured log of every action, its inputs and outputs |
 | Parallel execution of independent nodes | Not started |
-| Transaction wrapping for atomic scenario execution | Not started |
-| Configuration file (`.orchard/config.hcl` or similar) | Not started |
+| Transaction wrapping for atomic scenario execution | Won't do: atomicity across providers is impossible; uncommitted rows would be invisible to `http`, `grpc` and `exec` actions; the run record plus `orchard teardown` covers cleanup; a multi-statement `postgres_query` (or `BEGIN; ... COMMIT;` in one query) is atomic within one action |
+| Configuration file (`.orchard/config.hcl` or similar) | Deferred: flags and `--var` cover configuration for now |
 
 ### Milestone 7: Advanced Features (Future)
 

@@ -260,7 +260,7 @@ to it, and come back typed:
 |---|---|---|
 | integer, decimal, float | numbers, or strings that parse as numbers | number (decimals keep full precision) |
 | boolean | `true` / `false` (MySQL `tinyint(1)` included) | bool |
-| text, uuid, enum, date, time, timestamp | strings (numbers and bools convert) | string; timestamps as RFC 3339 |
+| text, uuid, enum, date, time, timestamp | strings (numbers and bools convert) | string; timestamps as RFC 3339 in UTC |
 | json | anything; objects and lists are JSON-encoded | the decoded value |
 | binary | strings | string |
 | anything else (arrays, intervals, geometry) | anything, unchecked | string |

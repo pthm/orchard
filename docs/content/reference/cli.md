@@ -192,8 +192,8 @@ the record, and evaluates each action's `lifecycle { teardown { } }` body in
    already fully torn down (`already torn down at <time>`).
 2. Load the scenario at the absolute path stored in the record, with the
    variables the recorded run used (`--var` does not apply), so `count` /
-   `for_each` expand to the same instances and variables without a default
-   resolve.
+   `for_each` expand to the same instances, variables without a default
+   resolve, and a default such as `uuid()` keeps the value the run recorded.
 3. Verify the scenario name matches the one in the record (reject if the file
    has been rewritten to declare a different scenario), and that every
    recorded node with outputs or an undo step, and not yet torn down, is still

@@ -1015,7 +1015,7 @@ Make cleanup a first-class operation so that scenarios can be torn down cleanly,
 | `orchard list runs` — list past runs (status, teardown progress, node counts) | Done |
 | `orchard inspect <run-id>` — show run details (nodes, errors, undo steps, teardown marks, outputs) | Done |
 | `orchard teardown <scenario> --latest` — newest run of the file not fully torn down; `--scenario` picks among several | Done |
-| Run metadata tagging on created resources | Not started |
+| Run metadata tagging on created resources | Done (via variables): a `variable "run_tag" { default = uuid() }` is evaluated once per run and recorded, and teardown reuses the recorded value; `--var run_tag=...` pins it. Scenario-level only: component variables aren't recorded and `var.*` in a component's teardown body doesn't resolve yet |
 | Record format migrations / version negotiation | Version check done; migrations when a format 2 exists |
 
 **Done summary.** The core records + teardown loop is functional: every `orchard run` writes a JSON record with per-node outputs and resolved variables; `orchard teardown <record-file | run-id>` replays the scenario in reverse topological order and evaluates each action's `lifecycle { teardown { } }` body against a `var.* / self.* / action.*` eval context. Teardown uses the provider's existing `Execute` — no new provider surface — so any action type automatically supports teardown once its author writes a lifecycle block.

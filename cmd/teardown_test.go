@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -370,5 +371,86 @@ func TestTeardownLatestMatching(t *testing.T) {
 	}
 	if got := merchantNames(t, db); got != "shop2" {
 		t.Fatalf("--scenario shop should undo only shop's run, left %q", got)
+	}
+}
+
+// TestTeardownRunTag: a uuid() variable default is evaluated once per
+// run and recorded, so teardown matches the rows that run tagged.
+func TestTeardownRunTag(t *testing.T) {
+	project := t.TempDir()
+	db := filepath.Join(project, "shop.db")
+	createDB(t, db, "CREATE TABLE merchants (id INTEGER PRIMARY KEY, name TEXT NOT NULL, tag TEXT NOT NULL)")
+	scenario := filepath.Join(project, "shop.hcl")
+	writeFile(t, scenario, `scenario "shop" {
+  variable "path" {}
+  variable "tag" { default = uuid() }
+  required_providers {
+    db = { source = "builtin/sqlite" }
+  }
+  provider "db" {
+    path = var.path
+  }
+  action "sqlite_query" "merchant" {
+    query = "INSERT INTO merchants (name, tag) VALUES ('m', '${var.tag}')"
+    lifecycle {
+      teardown {
+        query = "DELETE FROM merchants WHERE tag = '${var.tag}'"
+      }
+    }
+  }
+}
+`)
+	recTag := func(rec string) string {
+		t.Helper()
+		r, err := record.Load(rec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var tag string
+		if err := json.Unmarshal(r.Variables["tag"], &tag); err != nil {
+			t.Fatal(err)
+		}
+		return tag
+	}
+
+	rec := runRecorded(t, scenario, "--var", "path="+db)
+	tag := recTag(rec)
+	if len(tag) != 36 || strings.Count(tag, "-") != 4 {
+		t.Fatalf("recorded tag should be a uuid, got %q", tag)
+	}
+	conn, err := sql.Open("sqlite", db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	var rowTag string
+	if err := conn.QueryRow("SELECT tag FROM merchants").Scan(&rowTag); err != nil {
+		t.Fatal(err)
+	}
+	if rowTag != tag {
+		t.Fatalf("row tag %q, recorded %q", rowTag, tag)
+	}
+	if out, err := runCLI(t, "teardown", rec, "--no-color"); err != nil {
+		t.Fatalf("teardown: %v\n%s", err, out)
+	}
+	if got := countRows(t, db); got != 0 {
+		t.Fatalf("teardown should delete the tagged row, %d left", got)
+	}
+
+	rec = runRecorded(t, scenario, "--var", "path="+db, "--var", "tag=fixed")
+	if got := recTag(rec); got != "fixed" {
+		t.Fatalf("--var tag=fixed should be recorded, got %q", got)
+	}
+	if err := conn.QueryRow("SELECT tag FROM merchants").Scan(&rowTag); err != nil {
+		t.Fatal(err)
+	}
+	if rowTag != "fixed" {
+		t.Fatalf("pinned row tag %q, want fixed", rowTag)
+	}
+	if out, err := runCLI(t, "teardown", rec, "--no-color"); err != nil {
+		t.Fatalf("teardown: %v\n%s", err, out)
+	}
+	if got := countRows(t, db); got != 0 {
+		t.Fatalf("teardown should delete the pinned row, %d left", got)
 	}
 }

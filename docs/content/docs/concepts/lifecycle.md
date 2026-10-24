@@ -137,6 +137,55 @@ objects are deleted, and before overwriting an object `s3_put_object` copies it 
 `.orchard-backup/<run>/<key>` in the same bucket. Teardown copies it back under the
 same rules as above, and removes the backup either way.
 
+## Tagging a run's resources
+
+A scenario variable's default is evaluated once, when the scenario loads, and
+the run record stores the value. Teardown reloads the scenario with that value rather
+than evaluating the default again, so a `uuid()` default gives every run its
+own stable tag:
+
+```hcl
+variable "run_tag" {
+  default = uuid()
+}
+
+action "postgres_query" "seed_merchants" {
+  query = "INSERT INTO merchants (name, tag) SELECT 'm' || n, '${var.run_tag}' FROM generate_series(1, 50) n"
+
+  lifecycle {
+    teardown {
+      query = "DELETE FROM merchants WHERE tag = '${var.run_tag}'"
+    }
+  }
+}
+```
+
+The same tag works anywhere you name what you create. Prefix Redis keys with
+it, or put it in S3 object metadata so the run's objects can be found later:
+
+```hcl
+action "redis_set" "session" {
+  key   = "${var.run_tag}:session:alice"
+  value = "active"
+}
+
+action "s3_put_object" "report" {
+  bucket   = "fixtures"
+  key      = "reports/daily.csv"
+  content  = "id,total\n1,10\n"
+  metadata = { orchard-run = var.run_tag }
+}
+```
+
+`orchard inspect <run-id>` shows the run's variables, tag included. To choose
+the tag yourself, say to match a CI job, pin it with
+`--var run_tag=ci-1234`; the record stores that value instead.
+
+Declare the tag on the scenario and use it in the scenario's own actions. Inside
+a component, `var.*` does not resolve in a `lifecycle { teardown { } }` body yet:
+the record doesn't store component variables, so teardown fails with an unknown
+variable error, even when the scenario passes the tag in through `inputs`.
+
 ## `orchard teardown <record>`
 
 Hand the record file, or just its run ID, to `orchard teardown` and Orchard
@@ -189,7 +238,8 @@ undo step its provider recorded, and whether it has been torn down.
 - **Auto-generated IDs without a record.** Teardown uses the record's captured
   outputs via `self.*`. If you lose the record, the IDs are gone — but the DB
   rows aren't. Pair teardown with a recognisable natural key (a timestamped
-  email, a run tag) if you may need to clean up from a lost record.
+  email, a [run tag](#tagging-a-runs-resources)) if you may need to clean up
+  from a lost record.
 - **Non-reversible actions.** Sending an email, enqueuing a message, firing a
   webhook — these don't have an inverse. Leave them without a `lifecycle`
   block; teardown skips actions that declare none and have no automatic undo.

@@ -56,6 +56,11 @@ provider "sqlite" {
       description = "The SQL statement to execute."
     }
 
+    attribute "params" {
+      type        = any
+      description = "Values for the query's `?` (or `?1`, `?2`, ...) placeholders, in order. They're sent separately from the SQL, so they need no quoting or escaping, and null binds as NULL. A list or object goes as JSON text, for `json_each(?)`."
+    }
+
     output {
       type        = any
       description = <<-MD
@@ -103,6 +108,16 @@ provider "sqlite" {
 
         action "sqlite_query" "create_product" {
           query = "INSERT INTO products (merchant_id, name) VALUES ($${action.sqlite_query.create_merchant.last_insert_id}, 'Widget')"
+        }
+      HCL
+    }
+
+    example {
+      description = "Bind values to `?` placeholders with `params` instead of interpolating them into the SQL."
+      code        = <<-HCL
+        action "sqlite_query" "merchant" {
+          query  = "INSERT INTO merchants (name, region) VALUES (?, ?) RETURNING id"
+          params = [var.merchant_name, "eu"]
         }
       HCL
     }

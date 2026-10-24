@@ -51,6 +51,11 @@ provider "mysql" {
       description = "The SQL statement to execute."
     }
 
+    attribute "params" {
+      type        = any
+      description = "Values for the query's `?` placeholders, in order. They're sent separately from the SQL, so they need no quoting or escaping, and null binds as NULL. A list or object goes as JSON text. A query with params is prepared on the server and must be a single statement."
+    }
+
     output {
       type        = any
       description = <<-MD
@@ -93,6 +98,16 @@ provider "mysql" {
       code        = <<-HCL
         action "mysql_query" "merchant" {
           query = "SELECT id, name FROM merchants WHERE id = $${action.mysql_query.create_merchant.last_insert_id}"
+        }
+      HCL
+    }
+
+    example {
+      description = "Bind values to `?` placeholders with `params` instead of interpolating them into the SQL."
+      code        = <<-HCL
+        action "mysql_query" "merchant" {
+          query  = "INSERT INTO merchants (name, region) VALUES (?, ?)"
+          params = [var.merchant_name, "eu"]
         }
       HCL
     }

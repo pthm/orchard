@@ -50,6 +50,11 @@ provider "postgres" {
       description = "The SQL to execute. Several statements run as one transaction."
     }
 
+    attribute "params" {
+      type        = any
+      description = "Values for the query's `$1`, `$2`, ... placeholders, in order. They're sent separately from the SQL, so they need no quoting or escaping, and null binds as NULL. A list goes as a Postgres array, for `= ANY($1)` and array columns; an object as JSON text. A query with params is prepared on the server and must be a single statement."
+    }
+
     output {
       type        = any
       description = <<-MD
@@ -60,7 +65,9 @@ provider "postgres" {
 
         | PostgreSQL type | cty type |
         |-----------------|----------|
-        | `text`, `varchar`, `uuid`, `timestamp*`, `date` | `string` (times as RFC 3339 in UTC) |
+        | `text`, `varchar`, `uuid`, `interval`, `timestamp*`, `date` | `string` (times as RFC 3339 in UTC) |
+        | `json`, `jsonb` | `string` (the JSON text; decode with `jsondecode`) |
+        | arrays | `list` of the element type |
         | `int2`, `int4`, `int8`, `numeric`, `float4`, `float8` | `number` |
         | `bool` | `bool` |
         | `NULL` | `null` |
@@ -79,6 +86,21 @@ provider "postgres" {
 
         action "postgres_query" "create_product" {
           query = "INSERT INTO products (merchant_id, name) VALUES ($${action.postgres_query.create_merchant.id}, 'Widget') RETURNING id, name"
+        }
+      HCL
+    }
+
+    example {
+      description = "Bind values to placeholders with `params` instead of interpolating them into the SQL."
+      code        = <<-HCL
+        action "postgres_query" "merchant" {
+          query  = "INSERT INTO merchants (name, region) VALUES ($1, $2) RETURNING id"
+          params = [var.merchant_name, "eu"]
+        }
+
+        action "postgres_query" "eu_products" {
+          query  = "SELECT count(*) AS n FROM products WHERE merchant_id = ANY($1)"
+          params = [[action.postgres_query.merchant.id]]
         }
       HCL
     }

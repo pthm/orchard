@@ -27,13 +27,18 @@ func (p *Provider) executeQuery(ctx context.Context, attrs map[string]cty.Value)
 		return nil, fmt.Errorf("sqlite_query: query must be a string, got %s", query.Type().FriendlyName())
 	}
 
+	args, err := sqlrow.Params(attrs, sqlrow.Arg)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite_query: %w", err)
+	}
+
 	conn, err := p.db.Conn(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("sqlite_query: connect: %w", err)
 	}
 	defer func() { _ = conn.Close() }()
 
-	outputs, err := sqlrow.Query(ctx, conn, query.AsString(), statusQuery)
+	outputs, err := sqlrow.Query(ctx, conn, query.AsString(), statusQuery, args...)
 	if err != nil {
 		return nil, fmt.Errorf("sqlite_query: %w", err)
 	}

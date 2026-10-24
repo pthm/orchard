@@ -19,7 +19,8 @@ import (
 	"github.com/zclconf/go-cty/cty"
 )
 
-// Query runs query on conn and returns its outputs:
+// Query runs query on conn, with args bound to its placeholders, and
+// returns its outputs:
 //
 //   - If the statement returns columns (a SELECT, or a write with
 //     RETURNING), the first row keyed by column name. No rows → empty.
@@ -31,8 +32,8 @@ import (
 // Only the first row is read. Callers' databases must apply a
 // statement's writes before its first row is returned, which SQLite
 // and MySQL both do.
-func Query(ctx context.Context, conn *sql.Conn, query, statusQuery string) (map[string]cty.Value, error) {
-	rows, err := conn.QueryContext(ctx, query)
+func Query(ctx context.Context, conn *sql.Conn, query, statusQuery string, args ...any) (map[string]cty.Value, error) {
+	rows, err := conn.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("execute: %w", err)
 	}

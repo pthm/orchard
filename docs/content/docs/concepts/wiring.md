@@ -129,6 +129,25 @@ action "postgres_query" "next" {
 See the [provider reference](/providers/) for each provider's exact output
 shape.
 
+### Passing values into SQL
+
+Interpolating a value into a query works for IDs and other trusted values,
+but a string with a quote in it breaks the SQL. To pass any value safely,
+bind it with `params`: the `_query` actions send each value separately
+from the SQL, to the database's own placeholders (`$1`, `$2` on Postgres,
+`?` on MySQL and SQLite):
+
+```hcl
+action "postgres_query" "customer" {
+  query  = "INSERT INTO customers (name, notes) VALUES ($1, $2) RETURNING id"
+  params = [fake("name"), var.notes] # null binds as NULL
+}
+```
+
+A query with `params` must be a single statement. For inserts, updates and
+deletes, the [typed actions](../../guides/typed-database-actions/) bind
+values for you and check them against the schema at plan time.
+
 ## Advanced action attributes
 
 Actions support a few attributes that are handled by the engine rather than passed

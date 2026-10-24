@@ -294,3 +294,38 @@ func TestConcurrentInsertDuringSchemaRefresh(t *testing.T) {
 		t.Fatal("deadlocked")
 	}
 }
+
+func TestQueryParams(t *testing.T) {
+	p := open(t, ":memory:")
+	exec(t, p, schemaSQL)
+	run := func(q string, params ...cty.Value) (map[string]cty.Value, error) {
+		return p.Execute(context.Background(), "sqlite_query", map[string]cty.Value{
+			"query": cty.StringVal(q), "params": cty.TupleVal(params),
+		})
+	}
+
+	awkward := `O'Brien'); DROP TABLE merchants; --`
+	out, err := run("INSERT INTO merchants (name, region) VALUES (?, ?) RETURNING id, name, region", cty.StringVal(awkward), cty.StringVal("eu"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out["name"].AsString() != awkward || out["region"].AsString() != "eu" {
+		t.Fatalf("outputs: %#v", out)
+	}
+
+	out, err = run("SELECT ?1 + 1 AS n, ?2 AS missing, (SELECT count(*) FROM json_each(?3)) AS items",
+		cty.NumberIntVal(41), cty.NullVal(cty.String), cty.TupleVal([]cty.Value{cty.StringVal("a"), cty.StringVal("b")}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out["n"].RawEquals(cty.NumberIntVal(42)) || !out["missing"].IsNull() || !out["items"].RawEquals(cty.NumberIntVal(2)) {
+		t.Fatalf("outputs: %#v", out)
+	}
+
+	_, err = p.Execute(context.Background(), "sqlite_query", map[string]cty.Value{
+		"query": cty.StringVal("SELECT ?"), "params": cty.StringVal("x"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "params must be a list") {
+		t.Fatalf("a non-list params should fail: %v", err)
+	}
+}

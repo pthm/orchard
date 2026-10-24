@@ -229,3 +229,21 @@ func TestResolve(t *testing.T) {
 		t.Errorf("bad file should be reported, warn: %q", warn.String())
 	}
 }
+
+// TestIndexOutputsKeepsOutputlessNodes: a succeeded node without
+// outputs (a DDL query) is still indexed, so its teardown runs.
+func TestIndexOutputsKeepsOutputlessNodes(t *testing.T) {
+	got, err := IndexOutputs(&Record{Nodes: []Node{
+		{ID: "action.pg.ddl", Status: StatusSucceeded},
+		{ID: "action.pg.broken", Status: StatusFailed},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got["action.pg.ddl"]; !ok {
+		t.Error("succeeded node without outputs should be indexed")
+	}
+	if _, ok := got["action.pg.broken"]; ok {
+		t.Error("failed node should not be indexed")
+	}
+}

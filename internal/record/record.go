@@ -160,14 +160,15 @@ func DecodeCty(raw map[string]json.RawMessage) (map[string]cty.Value, error) {
 }
 
 // IndexOutputs decodes each succeeded node's outputs into a map
-// keyed by full node ID ("action.sql.create_merchant" etc.). Failed
-// or output-less nodes are omitted — callers treat their absence as
-// "nothing to tear down". Designed as the canonical way to hand a
-// record off to engine.Teardown.
+// keyed by full node ID ("action.sql.create_merchant" etc.). Every
+// succeeded node is present, with an empty map when it had no outputs
+// (a DDL statement), since callers treat absence as "nothing to tear
+// down". Failed and skipped nodes are omitted. Designed as the
+// canonical way to hand a record off to engine.Teardown.
 func IndexOutputs(r *Record) (map[string]map[string]cty.Value, error) {
 	out := make(map[string]map[string]cty.Value, len(r.Nodes))
 	for _, n := range r.Nodes {
-		if n.Status != StatusSucceeded || len(n.Outputs) == 0 {
+		if n.Status != StatusSucceeded {
 			continue
 		}
 		m, err := DecodeCty(n.Outputs)

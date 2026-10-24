@@ -1036,6 +1036,7 @@ Harden the tool for real-world use and improve the authoring experience.
 | Custom time functions (`now`, `timesub`, `timeseries`, `timesequence`, `timerandom`, `timeunix`) | Done |
 | `uuid()` and `env()` functions | Done |
 | ID generators (`uuidv7`, `ulid`, `ksuid`, `xid`, `objectid`, `typeid`, `snowflake`, `nanoid`, `cuid2`) | Done |
+| Fake data (`fake(kind, params)` over gofakeit's 364 generators, `faketemplate`) | Done |
 | Seeded randomness (`--seed`, scenario `seed`, seed in the run record) | Done |
 | Random functions (`randint`, `randfloat`, `randnormal`, `randbool`, `randchoice`, `randweighted`, `randsample`, `randshuffle`, `randstring`, `randhex`) | Done |
 | Unified function registry (`internal/language`) with metadata for docs/LSP/grammars | Done |

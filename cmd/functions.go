@@ -3,6 +3,8 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -129,7 +131,46 @@ func printFunctionsMarkdown(cmd *cobra.Command, hugo bool) error {
 			fmt.Fprintln(out)
 		}
 	}
+	if hugo {
+		printFakeKinds(out)
+	}
 	return nil
+}
+
+// printFakeKinds lists fake()'s kinds by category, from gofakeit's
+// own catalogue.
+func printFakeKinds(out io.Writer) {
+	kinds := language.FakeKinds()
+	byCat := map[string][]language.FakeKind{}
+	var cats []string
+	for _, k := range kinds {
+		if byCat[k.Category] == nil {
+			cats = append(cats, k.Category)
+		}
+		byCat[k.Category] = append(byCat[k.Category], k)
+	}
+	sort.Strings(cats)
+	fmt.Fprintln(out, "## Fake data kinds")
+	fmt.Fprintln(out)
+	fmt.Fprintf(out, "The %d kinds `fake()` accepts, by category. Parameters with a default are optional.\n\n", len(kinds))
+	for _, cat := range cats {
+		fmt.Fprintf(out, "### %s\n\n", capitalise(cat))
+		fmt.Fprintln(out, "| Kind | Description | Parameters |")
+		fmt.Fprintln(out, "|------|-------------|------------|")
+		for _, k := range byCat[cat] {
+			var params []string
+			for _, p := range k.Params {
+				s := fmt.Sprintf("%#q (%s", p.Field, p.Type)
+				if p.Default != "" {
+					s += ", default `" + p.Default + "`"
+				}
+				params = append(params, s+")")
+			}
+			desc := strings.ReplaceAll(k.Description, "|", "\\|")
+			fmt.Fprintf(out, "| `%s` | %s | %s |\n", k.Name, desc, strings.Join(params, ", "))
+		}
+		fmt.Fprintln(out)
+	}
 }
 
 func capitalise(s string) string {

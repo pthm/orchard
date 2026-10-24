@@ -73,6 +73,49 @@ scenario "demo_enterprise" {
 The scenario reads like a description: *"Acme Corp with a 120-SKU catalog and 90
 days of order history."* The components underneath generate rows.
 
+## Generating believable data
+
+Fake data and random functions fill in the detail, and a pinned `seed`
+makes every run of the demo produce the same customers, so the story
+doesn't change between rehearsal and the real thing:
+
+```hcl
+scenario "demo_smb" {
+  seed = 2026
+
+  required_providers {
+    postgres = { source = "builtin/postgres" }
+  }
+
+  variable "dsn" {}
+
+  provider "postgres" {
+    dsn = var.dsn
+  }
+
+  action "postgres_insert" "customer" {
+    count  = 50
+    table  = "customers"
+    values = {
+      id      = uuidv7(timerandom(timesub(now(), "180d"), now()))
+      name    = fake("name")
+      email   = fake("email")
+      company = fake("company")
+      plan    = randweighted({ free = 70, pro = 25, enterprise = 5 })
+      seats   = randint(1, 40)
+      ref     = faketemplate("CUS-####-??")
+    }
+  }
+}
+```
+
+`fake()` covers 364 kinds of data, from `name` and `address` to
+`creditcard` and `productname`; see the
+[functions reference](../../../reference/functions/#fake-data-kinds) for the
+list. Drop the `seed` line, or pass `--seed`, for a different set of
+customers; every run prints its seed, and `orchard run --seed <n>` repeats
+it.
+
 ## Running a demo setup
 
 ```sh

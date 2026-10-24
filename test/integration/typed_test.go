@@ -207,7 +207,7 @@ func TestManagedTeardown(t *testing.T) {
 		assertMerchantExists(t, ctyInt(t, out["merchant_id"]), true)
 		assertProductExists(t, ctyInt(t, out["product_id"]), true)
 
-		runTeardown(t, scenario, vars, rec)
+		runTeardown(t, scenario, rec)
 		assertMerchantExists(t, ctyInt(t, out["merchant_id"]), false)
 		assertProductExists(t, ctyInt(t, out["product_id"]), false)
 	})
@@ -231,7 +231,7 @@ func TestManagedTeardown(t *testing.T) {
 		scenario := "testdata/scenarios/typed_teardown_mysql.hcl"
 		vars := map[string]string{"dsn": fmt.Sprintf("mysql://root:orchard@%s:%s/teardown_test", host, port)}
 		_, rec := runScenarioWithRecord(t, scenario, vars, t.TempDir())
-		runTeardown(t, scenario, vars, rec)
+		runTeardown(t, scenario, rec)
 
 		for _, table := range []string{"products", "merchants"} {
 			var n int
@@ -254,7 +254,7 @@ func TestUpdateRestore(t *testing.T) {
 		scenario := "testdata/scenarios/typed_restore_postgres.hcl"
 		vars := map[string]string{"dsn": testDSN}
 		_, rec := runScenarioWithRecord(t, scenario, vars, t.TempDir())
-		runTeardown(t, scenario, vars, rec)
+		runTeardown(t, scenario, rec)
 
 		var names []string
 		rows, err := testPool.Query(ctx, "SELECT name FROM merchants ORDER BY name")
@@ -284,7 +284,7 @@ func TestUpdateRestore(t *testing.T) {
 		scenario := "testdata/scenarios/typed_restore_mysql.hcl"
 		vars := map[string]string{"dsn": fmt.Sprintf("mysql://root:orchard@%s:%s/restore_test", host, port)}
 		_, rec := runScenarioWithRecord(t, scenario, vars, t.TempDir())
-		runTeardown(t, scenario, vars, rec)
+		runTeardown(t, scenario, rec)
 
 		var n int
 		var name string
@@ -313,7 +313,7 @@ func TestUpsert(t *testing.T) {
 		assert.Equal(t, "Legacy Ltd", name)
 		assertMerchantExists(t, 101, true)
 
-		runTeardown(t, scenario, vars, rec)
+		runTeardown(t, scenario, rec)
 		require.NoError(t, testPool.QueryRow(ctx, "SELECT name FROM merchants WHERE id = 100").Scan(&name))
 		assert.Equal(t, "Legacy", name, "the existing row is restored, not deleted")
 		assertMerchantExists(t, 101, false)
@@ -337,7 +337,7 @@ func TestUpsert(t *testing.T) {
 		out, rec := runScenarioWithRecord(t, scenario, vars, t.TempDir())
 		assert.Equal(t, int64(1), ctyInt(t, out["existing_id"]), "the existing row's id comes back")
 
-		runTeardown(t, scenario, vars, rec)
+		runTeardown(t, scenario, rec)
 		var n int
 		var name string
 		require.NoError(t, root.QueryRowContext(ctx, "SELECT COUNT(*), MIN(name) FROM upsert_test.accounts").Scan(&n, &name))

@@ -257,8 +257,7 @@ undo step its provider recorded, and whether it has been torn down.
 - **Bulk isolation-based cleanup.** For heavy scenarios, a cleaner pattern is
   to create resources inside a dedicated isolation boundary (a Postgres
   schema-per-run, a tenant tag) and drop the whole boundary rather than
-  deleting rows one by one. Pass the run id through a variable and let each
-  action teardown match on it.
+  deleting rows one by one. See [Isolating runs](../../guides/isolation/).
 
 ## Patterns
 

@@ -670,7 +670,7 @@ The cleanest teardown is often destroying an isolation boundary rather than dele
 - **Tenant/namespace per run** — tag everything with a run ID, teardown removes the namespace.
 - **Individual resource cleanup** — delete rows/files/resources one by one (the current fallback; appropriate when lifecycle blocks give you precise control).
 
-These are scenario-author patterns, not engine features — pass a run id through `var.run_id` and let `lifecycle { teardown { } }` blocks drop the schema / delete by tag.
+These are scenario-author patterns, not engine features: a variable defaulting to `uuid()` is recorded and reused at teardown, so one `lifecycle { teardown { } }` block drops the schema or deletes by tag. The [Isolating runs](docs/content/docs/guides/isolation.md) guide has both, exercised by `test/integration/isolation_test.go`.
 
 ---
 
@@ -1081,7 +1081,7 @@ Harden the tool for real-world use and improve the authoring experience.
 | Visual execution graph rendering | Not started |
 | Test/assertion integration (`assert.sql`, `assert.http`) | Not started |
 | Embedded scripting (Starlark or Lua) for custom generators | Not started |
-| Isolation strategies (per-run schema, namespace tagging) | Not started |
+| Isolation strategies (per-run schema, namespace tagging) | Done as documented patterns ([guide](docs/content/docs/guides/isolation.md), integration-tested); no engine feature needed |
 | Clock freezing / deterministic timestamp control | Not started |
 | SQLite support (`builtin/sqlite`, `sqlite_query`) | Done |
 | MySQL support (`builtin/mysql`, `mysql_query`) | Done |

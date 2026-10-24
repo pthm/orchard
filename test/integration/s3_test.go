@@ -100,7 +100,7 @@ func TestS3_RunAndTeardown(t *testing.T) {
 	require.NoError(t, testPool.QueryRow(ctx, "SELECT region FROM merchants WHERE id = $1", id).Scan(&region))
 	assert.Equal(t, importKey, region, "the key was wired into Postgres")
 
-	runTeardown(t, scenario, vars, rec)
+	runTeardown(t, scenario, rec)
 
 	_, err = client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String("uploads")})
 	assert.Error(t, err, "created bucket should be deleted")

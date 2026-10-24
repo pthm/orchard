@@ -76,7 +76,7 @@ func TestRedis_Teardown(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "v2", got)
 
-	runTeardown(t, scenario, vars, rec)
+	runTeardown(t, scenario, rec)
 
 	n, err := rdb.Exists(ctx, "created").Result()
 	require.NoError(t, err)

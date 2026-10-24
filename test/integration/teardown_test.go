@@ -53,7 +53,7 @@ func TestTeardown_EndToEnd(t *testing.T) {
 	assertProductExists(t, productID, true)
 
 	// --- Run teardown against the recorded state ---
-	runTeardown(t, scenarioPath, map[string]string{"dsn": testDSN}, rec)
+	runTeardown(t, scenarioPath, rec)
 
 	// --- DB should reflect the torn-down state ---
 	assertMerchantExists(t, merchantID, false)
@@ -98,6 +98,7 @@ func runScenarioParallel(
 		Writer:    record.FileWriter{Dir: recordDir},
 		Scenario:  record.ScenarioFromParser(ps, path),
 		Variables: ps.Variables,
+		Seed:      ps.Seed,
 		LogOutput: os.Stderr,
 	})
 	require.NoError(t, err)
@@ -137,10 +138,16 @@ func runScenarioParallel(
 // test already produced. Mirrors what `orchard teardown` does but
 // calls the engine directly so the integration harness doesn't have
 // to shell out to the binary.
-func runTeardown(t *testing.T, scenarioPath string, vars map[string]string, rec *record.Record) {
+//
+// Like the CLI, the scenario is reloaded with the record's variables
+// and seed, so defaults such as `run_tag = uuid()` keep the run's value.
+func runTeardown(t *testing.T, scenarioPath string, rec *record.Record) {
 	t.Helper()
 
-	ps, err := parser.LoadScenario(scenarioPath, "", vars)
+	recVars, err := record.DecodeCty(rec.Variables)
+	require.NoError(t, err)
+	require.NotNil(t, rec.Seed)
+	ps, err := parser.LoadScenarioValues(scenarioPath, rec.Scenario.Name, recVars, parser.WithSeed(*rec.Seed))
 	require.NoError(t, err)
 
 	g, err := graph.Build(ps)
@@ -153,14 +160,14 @@ func runTeardown(t *testing.T, scenarioPath string, vars map[string]string, rec 
 	eng, err := engine.New(reg)
 	require.NoError(t, err)
 
-	recVars, err := record.DecodeCty(rec.Variables)
+	compVars, err := record.IndexComponentVars(rec)
 	require.NoError(t, err)
 	outputs, err := record.IndexOutputs(rec)
 	require.NoError(t, err)
 
 	undos, err := record.IndexUndos(rec)
 	require.NoError(t, err)
-	_, err = eng.Teardown(context.Background(), ps, g, recVars, nil, outputs, undos, nil, nil)
+	_, err = eng.Teardown(context.Background(), ps, g, recVars, compVars, outputs, undos, nil, nil)
 	require.NoError(t, err, "teardown reported errors")
 }
 

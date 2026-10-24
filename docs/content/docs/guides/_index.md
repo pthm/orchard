@@ -19,6 +19,8 @@ choices.
   down into reusable parts.
 - [Typed database actions](typed-database-actions/) — schema-checked inserts,
   updates and deletes, snapshots for plan, and automatic teardown.
+- [Isolating runs](isolation/) — a schema or a tag per run, so one teardown
+  removes everything the run made.
 
 These assume you've read the [Getting started](../getting-started/) section and
 understand [concepts](../concepts/).

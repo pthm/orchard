@@ -43,7 +43,7 @@ func TestParallelTypedActions(t *testing.T) {
 	require.NoError(t, testPool.QueryRow(context.Background(), "SELECT COUNT(*) FROM merchants WHERE name LIKE '% Ltd'").Scan(&n))
 	assert.Equal(t, 20, n)
 
-	runTeardown(t, scenario, vars, rec)
+	runTeardown(t, scenario, rec)
 	require.NoError(t, testPool.QueryRow(context.Background(), "SELECT COUNT(*) FROM merchants").Scan(&n))
 	assert.Equal(t, 0, n, "teardown should leave merchants empty")
 }

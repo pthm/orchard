@@ -70,7 +70,7 @@ func TestMySQL_RunAndTeardown(t *testing.T) {
 	require.NoError(t, db.QueryRowContext(ctx, "SELECT region FROM merchants WHERE id = ?", merchantID).Scan(&region))
 	assert.Equal(t, "eu", region, "the multi-statement transaction should have committed")
 
-	runTeardown(t, scenario, vars, rec)
+	runTeardown(t, scenario, rec)
 
 	for _, table := range []string{"products", "merchants"} {
 		var n int

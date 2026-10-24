@@ -123,7 +123,7 @@ homebrew_casks:
     repository:
       owner: pthm
       name: homebrew-tap
-      token: '{{ index .Env "HOMEBREW_TAP_GITHUB_TOKEN" }}'
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     # Actions sets a missing secret to "", so test for a value, not presence.
     # Skips the push until the secret exists instead of failing mid-publish.
     skip_upload: '{{ if index .Env "HOMEBREW_TAP_GITHUB_TOKEN" }}false{{ else }}true{{ end }}'
@@ -139,7 +139,7 @@ scoops:
     repository:
       owner: pthm
       name: scoop-bucket
-      token: '{{ index .Env "SCOOP_BUCKET_GITHUB_TOKEN" }}'
+      token: "{{ .Env.SCOOP_BUCKET_GITHUB_TOKEN }}"
     skip_upload: '{{ if index .Env "SCOOP_BUCKET_GITHUB_TOKEN" }}false{{ else }}true{{ end }}'
     homepage: "https://github.com/pthm/orchard"
     description: "Define reproducible application state as code"

@@ -76,6 +76,7 @@ prints declared outputs. Exits non-zero on validation or execution failure.
 | `--record-dir <path>` | string | `.` (cwd) | Directory to write the run record to. Created if missing. |
 | `--no-record` | bool | `false` | Skip writing a run record. |
 | `--scenario <name>` | string | — | Pick a scenario by name when the file defines multiple. Optional for single-scenario files. |
+| `--seed <n>` | uint | random | Seed for random functions. Overrides the scenario's `seed`. See [random values and seeds](../expressions/#random-values-and-seeds). |
 | `--parallelism <n>` | int | `1` | Run up to `n` independent actions at once. Must be at least 1. Actions that touch the same data without referencing each other should use `depends_on`, or the order they change it in is not guaranteed. |
 
 **Behavior**
@@ -92,8 +93,8 @@ prints declared outputs. Exits non-zero on validation or execution failure.
 6. Evaluate scenario outputs and print them.
 7. Send `shutdown` to every provider.
 8. Write a JSON **run record** to `--record-dir` (unless `--no-record` is set),
-   capturing variables, per-node outputs, and scenario outputs, and print
-   `record: <path>` on stderr. See [run records](#run-records) below.
+   capturing variables, the seed, per-node outputs, and scenario outputs, and
+   print `seed: <n>` and `record: <path>` on stderr. See [run records](#run-records) below.
 
 Ctrl-C or SIGTERM cancels the run: actions in flight fail, and the
 record is still written with everything that finished, ready for
@@ -127,7 +128,8 @@ Validate a scenario and print its execution plan without side effects.
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--scenario <name>` | string | — | Pick a scenario by name when the file defines multiple. |
-| `--show-values` | bool | `false` | List each action's evaluated attributes under it. |
+| `--show-values` | bool | `false` | List each action's evaluated attributes under it, and print the seed on stderr. |
+| `--seed <n>` | uint | random | Seed for random functions. With the same seed, `--show-values` shows the random values `orchard run --seed <n>` will use. |
 
 **Behavior**
 
@@ -390,7 +392,7 @@ Show everything one run record says.
 **Behavior**
 
 - The header shows the run ID, scenario name and path, status, start time
-  (UTC), duration, `Torn down` time once `orchard teardown` has finished,
+  (UTC), duration, seed, `Torn down` time once `orchard teardown` has finished,
   and the run's error if it failed.
 - Variables are listed sorted by name, then nodes in record order with
   their status, ID and duration, plus their error, the undo step their
@@ -493,6 +495,9 @@ Records are written atomically (temp + rename) and contain:
 - `started_at`, `finished_at`, `status` (`succeeded` / `failed`) — when and how
   it went.
 - `variables` — the resolved variables the scenario ran with.
+- `seed` — the seed random functions drew from. `orchard run --seed <seed>`
+  draws the same values again; `orchard teardown` reuses it for teardown
+  bodies. Absent in records written before seeds existed.
 - `nodes` — per-node entries: id, kind, status, timing, and outputs (or error).
 - `outputs` — scenario-level outputs.
 - `error` — top-level error if the run aborted.

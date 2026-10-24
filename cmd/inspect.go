@@ -49,6 +49,9 @@ func newInspectCmd() *cobra.Command {
 			fmt.Fprintf(out, "  Status      %s\n", status(rec.Status))
 			fmt.Fprintf(out, "  Started     %s\n", rec.StartedAt.UTC().Format(time.RFC3339))
 			fmt.Fprintf(out, "  Duration    %s\n", rec.FinishedAt.Sub(rec.StartedAt).Round(time.Millisecond))
+			if rec.Seed != nil {
+				fmt.Fprintf(out, "  Seed        %d\n", *rec.Seed)
+			}
 			if rec.TornDownAt != nil {
 				fmt.Fprintf(out, "  Torn down   %s\n", rec.TornDownAt.UTC().Format(time.RFC3339))
 			}

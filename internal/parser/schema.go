@@ -25,6 +25,7 @@ type ScenarioBlock struct {
 	Name              string                  `hcl:"name,label"`
 	Description       string                  `hcl:"description,optional"`
 	Tags              []string                `hcl:"tags,optional"`
+	Seed              *uint64                 `hcl:"seed,optional"`
 	RequiredProviders *RequiredProvidersBlock `hcl:"required_providers,block"`
 	Providers         []*ProviderConfigBlock  `hcl:"provider,block"`
 	Variables         []*VariableBlock        `hcl:"variable,block"`

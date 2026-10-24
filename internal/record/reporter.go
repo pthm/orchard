@@ -68,6 +68,7 @@ type Reporter struct {
 	inner    engine.Reporter
 	scenario Scenario
 	vars     map[string]json.RawMessage
+	seed     uint64
 	writer   Writer
 	log      io.Writer
 
@@ -99,6 +100,7 @@ type Options struct {
 	Writer    Writer
 	Scenario  Scenario
 	Variables map[string]cty.Value // resolved scenario variables
+	Seed      uint64               // the run's random seed
 	LogOutput io.Writer            // where write failures surface; defaults to os.Stderr
 }
 
@@ -120,6 +122,7 @@ func NewReporter(opts Options) (*Reporter, error) {
 		inner:    opts.Inner,
 		scenario: opts.Scenario,
 		vars:     vars,
+		seed:     opts.Seed,
 		writer:   opts.Writer,
 		log:      opts.LogOutput,
 		pending:  make(map[string]time.Time),
@@ -227,6 +230,7 @@ func (r *Reporter) RunCompleted(summary engine.RunSummary) {
 		FinishedAt: finished,
 		Status:     status,
 		Variables:  r.vars,
+		Seed:       &r.seed,
 		Nodes:      r.nodes,
 		Outputs:    outputs,
 	}

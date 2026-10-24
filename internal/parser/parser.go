@@ -12,6 +12,8 @@ import (
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/zclconf/go-cty/cty"
 	"github.com/zclconf/go-cty/cty/convert"
+
+	"github.com/pthm/orchard/internal/language"
 )
 
 // ParsedScenario holds the structurally-decoded scenario with deferred expressions.
@@ -40,6 +42,21 @@ type ParsedScenario struct {
 	// exec: provider sources, extended to any action that reads a
 	// file.
 	ScenarioDir string
+
+	// Seed drives every random function in the run: --seed, else the
+	// scenario's seed attribute, else a fresh random one. The run
+	// record keeps it so a run can be repeated.
+	Seed uint64
+}
+
+// Option changes how a scenario loads.
+type Option func(*loadConfig)
+
+type loadConfig struct{ seed *uint64 }
+
+// WithSeed sets the run's seed, overriding the scenario's own.
+func WithSeed(seed uint64) Option {
+	return func(c *loadConfig) { c.seed = &seed }
 }
 
 // RequiredProviderSpec captures the declared source of a provider.
@@ -68,8 +85,8 @@ type ParsedComponent struct {
 // ergonomic for the single-scenario case. When a file has multiple
 // scenarios and name is empty, the error lists the available names so
 // the caller can retry with --scenario.
-func LoadScenario(path, name string, vars map[string]string) (*ParsedScenario, error) {
-	return loadScenario(path, name, vars, nil)
+func LoadScenario(path, name string, vars map[string]string, opts ...Option) (*ParsedScenario, error) {
+	return loadScenario(path, name, vars, nil, opts)
 }
 
 // LoadScenarioValues is LoadScenario with typed variable values in
@@ -78,11 +95,15 @@ func LoadScenario(path, name string, vars map[string]string) (*ParsedScenario, e
 // expansion, provider configs and variables without a default all
 // see what the recorded run saw. Variables the scenario declares
 // but values lacks fall back to their defaults.
-func LoadScenarioValues(path, name string, values map[string]cty.Value) (*ParsedScenario, error) {
-	return loadScenario(path, name, nil, values)
+func LoadScenarioValues(path, name string, values map[string]cty.Value, opts ...Option) (*ParsedScenario, error) {
+	return loadScenario(path, name, nil, values, opts)
 }
 
-func loadScenario(path, name string, vars map[string]string, values map[string]cty.Value) (*ParsedScenario, error) {
+func loadScenario(path, name string, vars map[string]string, values map[string]cty.Value, opts []Option) (*ParsedScenario, error) {
+	var cfg loadConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
 	parser := hclparse.NewParser()
 
 	file, diags := parser.ParseHCLFile(path)
@@ -119,8 +140,16 @@ func loadScenario(path, name string, vars map[string]string, values map[string]c
 		return nil, err
 	}
 
+	seed := language.RandomSeed()
+	switch {
+	case cfg.seed != nil:
+		seed = *cfg.seed
+	case scenario.Seed != nil:
+		seed = *scenario.Seed
+	}
+
 	// Resolve variables: defaults + CLI overrides or recorded values.
-	resolved, err := resolveVariables(scenario.Variables, vars, values)
+	resolved, err := resolveVariables(scenario.Variables, vars, values, seed)
 	if err != nil {
 		return nil, fmt.Errorf("resolving variables: %w", err)
 	}
@@ -144,7 +173,7 @@ func loadScenario(path, name string, vars map[string]string, values map[string]c
 		return nil, err
 	}
 
-	providerConfigs, err := evaluateProviderConfigs(scenario.Providers, required, resolved)
+	providerConfigs, err := evaluateProviderConfigs(scenario.Providers, required, resolved, seed)
 	if err != nil {
 		return nil, fmt.Errorf("provider config: %w", err)
 	}
@@ -158,7 +187,7 @@ func loadScenario(path, name string, vars map[string]string, values map[string]c
 		if err != nil {
 			return nil, fmt.Errorf("loading component %s.%s: %w", ref.Type, ref.Name, err)
 		}
-		instances, inputs, err := ExpandInstances(ref.Inputs, resolved)
+		instances, inputs, err := ExpandInstances(ref.Inputs, resolved, seed, "component."+ref.Type+"."+ref.Name)
 		if err != nil {
 			return nil, fmt.Errorf("component %s.%s: %w", ref.Type, ref.Name, err)
 		}
@@ -190,6 +219,7 @@ func loadScenario(path, name string, vars map[string]string, values map[string]c
 		RequiredProviders: required,
 		ProviderConfigs:   providerConfigs,
 		ScenarioDir:       absDir,
+		Seed:              seed,
 	}, nil
 }
 
@@ -267,6 +297,7 @@ func evaluateProviderConfigs(
 	blocks []*ProviderConfigBlock,
 	required map[string]RequiredProviderSpec,
 	vars map[string]cty.Value,
+	seed uint64,
 ) (map[string]map[string]cty.Value, error) {
 	result := make(map[string]map[string]cty.Value)
 	for name := range required {
@@ -300,7 +331,7 @@ func evaluateProviderConfigs(
 		}
 		config := make(map[string]cty.Value, len(attrs))
 		for attrName, attr := range attrs {
-			val, diags := attr.Expr.Value(evalCtx)
+			val, diags := attr.Expr.Value(language.Scoped(evalCtx, seed, "provider."+block.Name+"."+attrName))
 			if diags.HasErrors() {
 				return nil, fmt.Errorf("%s.%s: %s", block.Name, attrName, diags.Error())
 			}
@@ -448,7 +479,7 @@ func validateComponentUniqueness(c *ComponentDefBlock) error {
 	return nil
 }
 
-func resolveVariables(blocks []*VariableBlock, overrides map[string]string, values map[string]cty.Value) (map[string]cty.Value, error) {
+func resolveVariables(blocks []*VariableBlock, overrides map[string]string, values map[string]cty.Value, seed uint64) (map[string]cty.Value, error) {
 	result := make(map[string]cty.Value)
 	ctx := &hcl.EvalContext{Functions: Functions()}
 
@@ -480,7 +511,7 @@ func resolveVariables(blocks []*VariableBlock, overrides map[string]string, valu
 			return nil, err
 		}
 		if defaultExpr != nil {
-			val, diags := defaultExpr.Value(ctx)
+			val, diags := defaultExpr.Value(language.Scoped(ctx, seed, "var."+v.Name))
 			if diags.HasErrors() {
 				return nil, fmt.Errorf("evaluating default for %q: %s", v.Name, diags.Error())
 			}

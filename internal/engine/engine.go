@@ -15,6 +15,7 @@ import (
 	"github.com/zclconf/go-cty/cty/convert"
 
 	"github.com/pthm/orchard/internal/graph"
+	"github.com/pthm/orchard/internal/language"
 	"github.com/pthm/orchard/internal/parser"
 	"github.com/pthm/orchard/pkg/protocol"
 	"github.com/pthm/orchard/pkg/provider"
@@ -53,6 +54,8 @@ type Engine struct {
 	// Used to resolve `file` attributes on actions to absolute
 	// paths before dispatching to providers.
 	scenarioDir string
+	// seed is the run's random seed (ParsedScenario.Seed).
+	seed uint64
 
 	// planTypes holds output types that ActionPlanners reported during
 	// ValidateReferences, by node; they take precedence over the static
@@ -335,6 +338,7 @@ func (e *Engine) resolveRoute(actionType, providerAlias string) (actionRoute, er
 // flight finish, so their side effects and undos reach the record.
 func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *graph.Graph) (*Result, error) {
 	e.scenarioDir = ps.ScenarioDir
+	e.seed = ps.Seed
 	resolved := make(map[string]map[string]cty.Value)
 	// compVars holds each component's resolved inputs, indexed by
 	// component key. Populated lazily on first access so components
@@ -461,7 +465,7 @@ func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *grap
 	if len(errs) == 0 {
 		evalCtx := buildEvalContext(ps.Variables, resolved)
 		for _, output := range ps.Scenario.Outputs {
-			val, diags := output.Value.Value(evalCtx)
+			val, diags := output.Value.Value(language.Scoped(evalCtx, e.seed, "output."+output.Name))
 			if diags.HasErrors() {
 				fail("output."+output.Name, fmt.Errorf("evaluating output %q: %s", output.Name, diags.Error()))
 				break
@@ -552,7 +556,7 @@ func (e *Engine) executeActionOnce(
 		return nil, nil, err
 	}
 
-	attrs, err := evalAttrs(node.Body, route.schema, evalCtx)
+	attrs, err := evalAttrs(node.Body, route.schema, evalCtx, e.seed, string(node.ID))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -762,7 +766,7 @@ func (e *Engine) resolveComponentOutputs(
 
 	outputs := make(map[string]cty.Value)
 	for _, output := range comp.Def.Outputs {
-		val, diags := output.Value.Value(evalCtx)
+		val, diags := output.Value.Value(language.Scoped(evalCtx, e.seed, node.ComponentKey+".output."+output.Name))
 		if diags.HasErrors() {
 			return nil, fmt.Errorf("evaluating component output %q: %s", output.Name, diags.Error())
 		}
@@ -808,7 +812,7 @@ func (e *Engine) resolveComponentInputs(
 		if defaultExpr == nil {
 			continue
 		}
-		val, diags := defaultExpr.Value(&hcl.EvalContext{Functions: parser.Functions()})
+		val, diags := defaultExpr.Value(language.Scoped(nil, e.seed, compKey+".var."+v.Name))
 		if diags.HasErrors() {
 			return nil, fmt.Errorf("component %q variable %q default: %s",
 				compKey, v.Name, diags.Error())
@@ -826,7 +830,7 @@ func (e *Engine) resolveComponentInputs(
 		}
 		scenarioCtx := withInstance(buildEvalContext(scenarioVars, resolved), comp.Instance)
 		var wrapper inputsWrapper
-		diags := gohcl.DecodeBody(comp.Ref.Inputs, scenarioCtx, &wrapper)
+		diags := gohcl.DecodeBody(comp.Ref.Inputs, language.Scoped(scenarioCtx, e.seed, compKey+".inputs"), &wrapper)
 		if diags.HasErrors() {
 			return nil, fmt.Errorf("component %q inputs: %s", compKey, diags.Error())
 		}

@@ -25,7 +25,7 @@ func newPlanCmd() *cobra.Command {
 		Short: "Validate a scenario and show its execution plan",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ps, err := parser.LoadScenario(args[0], planScenarioFlag, varFlags)
+			ps, err := parser.LoadScenario(args[0], planScenarioFlag, varFlags, seedOption(cmd)...)
 			if err != nil {
 				return fmt.Errorf("loading scenario: %w", err)
 			}
@@ -96,6 +96,11 @@ func newPlanCmd() *cobra.Command {
 			out := cmd.OutOrStdout()
 			planview.Render(out, ps, g, providerOf, valuesOf)
 			planview.RenderSuccess(out)
+			if planShowValuesFlag {
+				// Random values shown above come from this seed; run
+				// with it to get the same ones.
+				fmt.Fprintf(cmd.ErrOrStderr(), "seed: %d\n", ps.Seed)
+			}
 			for _, h := range eng.Hints() {
 				fmt.Fprintf(cmd.ErrOrStderr(), "hint: %s\n", h)
 			}
@@ -109,6 +114,7 @@ func newPlanCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&planScenarioFlag, "scenario", "",
 		"Pick a scenario by name when the file defines multiple")
+	addSeedFlag(cmd)
 	cmd.Flags().BoolVar(&planShowValuesFlag, "show-values", false,
 		"List each action's evaluated attributes; values from other actions show as (known after run)")
 	return cmd

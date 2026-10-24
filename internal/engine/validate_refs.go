@@ -47,6 +47,7 @@ import (
 // as at scenario level, so each action sees the output types of the
 // ones before it.
 func (e *Engine) ValidateReferences(runCtx context.Context, ps *parser.ParsedScenario, g *graph.Graph) error {
+	e.seed = ps.Seed
 	e.planTypes = map[graph.NodeID]cty.Type{}
 	e.unchecked = map[string]bool{}
 	e.hints = nil
@@ -163,9 +164,9 @@ func (e *Engine) planAction(runCtx context.Context, evalCtx *hcl.EvalContext, no
 	if !ok && e.planned == nil {
 		return cty.DynamicPseudoType, nil
 	}
-	// ponytail: impure functions (uuid, now, env) run here too,
-	// so kept values can differ from what the run later evaluates.
-	attrs, err := evalAttrs(node.Body, route.schema, evalCtx)
+	// Random functions draw from the same seeded streams as the run;
+	// now() and env() can still differ by the time the run evaluates.
+	attrs, err := evalAttrs(node.Body, route.schema, evalCtx, e.seed, string(node.ID))
 	if err != nil {
 		return cty.DynamicPseudoType, err
 	}

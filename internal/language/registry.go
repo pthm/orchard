@@ -72,6 +72,12 @@ type FunctionDef struct {
 	// directly; external consumers (grammars, docs) only need the
 	// metadata.
 	Func function.Function `json:"-"`
+
+	// Random builds the implementation of a function that draws
+	// random values, bound to one stream. Set it instead of Func;
+	// register fills Func from an unseeded stream, and Scoped binds
+	// a run's seeded one.
+	Random func(r *Rand) function.Function `json:"-"`
 }
 
 // ParamDef describes one parameter.
@@ -94,7 +100,12 @@ var registry []FunctionDef
 // register appends defs to the global registry. Called from init()
 // in each registry_*.go file so functions are grouped by category.
 func register(defs ...FunctionDef) {
-	registry = append(registry, defs...)
+	for _, d := range defs {
+		if d.Random != nil {
+			d.Func = d.Random(unscoped)
+		}
+		registry = append(registry, d)
+	}
 }
 
 // All returns every registered function, sorted by name.

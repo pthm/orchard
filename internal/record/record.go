@@ -60,8 +60,11 @@ type Record struct {
 	Status     string                     `json:"status"`
 	Error      string                     `json:"error,omitempty"`
 	Variables  map[string]json.RawMessage `json:"variables,omitempty"`
-	Nodes      []Node                     `json:"nodes"`
-	Outputs    map[string]json.RawMessage `json:"outputs,omitempty"`
+	// Seed is the run's random seed; `orchard run --seed` with it
+	// draws the same random values again. Absent in older records.
+	Seed    *uint64                    `json:"seed,omitempty"`
+	Nodes   []Node                     `json:"nodes"`
+	Outputs map[string]json.RawMessage `json:"outputs,omitempty"`
 	// TornDownAt is set once `orchard teardown` has finished every
 	// node's teardown; such a record is refused by a later teardown.
 	TornDownAt *time.Time `json:"torn_down_at,omitempty"`

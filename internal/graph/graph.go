@@ -111,7 +111,7 @@ func Build(ps *parser.ParsedScenario) (*Graph, error) {
 	// Register scenario-level actions, one node per instance.
 	for _, action := range ps.Scenario.Actions {
 		base := NodeID(fmt.Sprintf("action.%s.%s", action.Type, action.Name))
-		instances, remain, err := parser.ExpandInstances(action.Remain, ps.Variables)
+		instances, remain, err := parser.ExpandInstances(action.Remain, ps.Variables, ps.Seed, string(base))
 		if err != nil {
 			return nil, fmt.Errorf("action %s: %w", base, err)
 		}

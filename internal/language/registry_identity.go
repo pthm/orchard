@@ -8,7 +8,7 @@ func init() {
 			Detail:      "Each call produces a new value. Use for primary keys, correlation IDs, or any field that needs a unique identifier.",
 			ReturnType:  "string",
 			Examples:    []ExampleDef{{Code: `uuid()`, Result: `"a3f29e5b-1234-4abc-9def-0123456789ab"`}},
-			Func:        CustomFunc("uuid"),
+			Random:      uuidFunc,
 		},
 	)
 }

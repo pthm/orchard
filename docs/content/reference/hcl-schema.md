@@ -17,6 +17,7 @@ A scenario file contains exactly one `scenario` block.
 scenario "<name>" {
   description = "..."           # optional
   tags        = ["a", "b"]      # optional
+  seed        = 42              # optional
 
   required_providers { ... }
   variable "<name>"  { ... }
@@ -35,6 +36,7 @@ Single-scenario files work without the flag.
 |-----------|------|----------|-------------|
 | `description` | `string` | no | Free-text summary. Shown by `orchard list`. |
 | `tags` | `list(string)` | no | Categorisation labels. Shown by `orchard list` in violet brackets. |
+| `seed` | `number` | no | Seed for random functions, a literal non-negative integer. `--seed` overrides it. Without either, each run picks a random seed. See [random values and seeds](../expressions/#random-values-and-seeds). |
 
 | Block | Cardinality | Purpose |
 |-------|-------------|---------|

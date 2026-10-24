@@ -102,7 +102,13 @@ func newTeardownCmd() *cobra.Command {
 			// scenario.path is absolute, so it resolves regardless of
 			// cwd. Use the recorded scenario name so files with
 			// multiple scenarios still pick the right one.
-			ps, err := parser.LoadScenarioValues(rec.Scenario.Path, rec.Scenario.Name, vars)
+			var opts []parser.Option
+			if rec.Seed != nil {
+				// Teardown bodies that call random functions see the
+				// run's streams.
+				opts = append(opts, parser.WithSeed(*rec.Seed))
+			}
+			ps, err := parser.LoadScenarioValues(rec.Scenario.Path, rec.Scenario.Name, vars, opts...)
 			if err != nil {
 				return fmt.Errorf("loading scenario %s: %w", rec.Scenario.Path, err)
 			}

@@ -71,7 +71,7 @@ func init() {
 			},
 			ReturnType: "string",
 			Examples:   []ExampleDef{{Code: `timerandom(timesub(now(), "30d"), now())`}},
-			Func:       CustomFunc("timerandom"),
+			Random:     timeRandomFunc,
 		},
 		FunctionDef{
 			Name: "timeseries", Category: "time", Pure: true,
@@ -98,7 +98,7 @@ func init() {
 			VarParam:   &ParamDef{Name: "max_interval", Type: "string", Description: "Maximum step duration (optional)."},
 			ReturnType: "list(string)",
 			Examples:   []ExampleDef{{Code: `timesequence(timesub(now(), "30d"), now(), "1d", "5d")`}},
-			Func:       CustomFunc("timesequence"),
+			Random:     timeSequenceFunc,
 		},
 	)
 }

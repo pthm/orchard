@@ -1,10 +1,7 @@
 package language
 
 import (
-	"crypto/rand"
 	"fmt"
-	"math/big"
-	mrand "math/rand"
 	"os"
 	"strconv"
 	"strings"
@@ -32,14 +29,11 @@ func CustomFunc(name string) function.Function {
 // lowercase compound words, matching the cty convention.
 func customFunctions() map[string]function.Function {
 	return map[string]function.Function{
-		"uuid":         uuidFunc(),
-		"env":          envFunc(),
-		"now":          nowFunc(),
-		"timesub":      timeSubFunc(),
-		"timesequence": timeSequenceFunc(),
-		"timeseries":   timeSeriesFunc(),
-		"timeunix":     timeUnixFunc(),
-		"timerandom":   timeRandomFunc(),
+		"env":        envFunc(),
+		"now":        nowFunc(),
+		"timesub":    timeSubFunc(),
+		"timeseries": timeSeriesFunc(),
+		"timeunix":   timeUnixFunc(),
 	}
 }
 
@@ -47,15 +41,13 @@ func customFunctions() map[string]function.Function {
 // deterministic — each invocation produces a new value. That's
 // intentional: scenarios are single-shot imperative runs, not
 // convergent plans, so impurity is fine.
-func uuidFunc() function.Function {
+func uuidFunc(r *Rand) function.Function {
 	return function.New(&function.Spec{
 		Params: []function.Parameter{},
 		Type:   function.StaticReturnType(cty.String),
 		Impl: func(args []cty.Value, retType cty.Type) (cty.Value, error) {
 			var buf [16]byte
-			if _, err := rand.Read(buf[:]); err != nil {
-				return cty.NilVal, fmt.Errorf("uuid: %w", err)
-			}
+			r.fill(buf[:])
 			buf[6] = (buf[6] & 0x0f) | 0x40 // version 4
 			buf[8] = (buf[8] & 0x3f) | 0x80 // variant 10
 			s := fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
@@ -143,7 +135,7 @@ func timeSubFunc() function.Function {
 //
 // Returns an empty list when start >= end or the interval is wider
 // than the range.
-func timeSequenceFunc() function.Function {
+func timeSequenceFunc(r *Rand) function.Function {
 	return function.New(&function.Spec{
 		Params: []function.Parameter{
 			{Name: "start", Type: cty.String},
@@ -190,8 +182,7 @@ func timeSequenceFunc() function.Function {
 				step := minInterval
 				if maxInterval > minInterval {
 					delta := int64(maxInterval - minInterval)
-					jitter, _ := cryptoRandInt64(delta)
-					step = minInterval + time.Duration(jitter)
+					step = minInterval + time.Duration(r.Int64N(delta))
 				}
 				cursor = cursor.Add(step)
 			}
@@ -284,7 +275,7 @@ func timeUnixFunc() function.Function {
 //
 //	timerandom(timesub(now(), "30d"), now())
 //	→ "2026-04-05T14:22:31Z"
-func timeRandomFunc() function.Function {
+func timeRandomFunc(r *Rand) function.Function {
 	return function.New(&function.Spec{
 		Params: []function.Parameter{
 			{Name: "start", Type: cty.String},
@@ -304,8 +295,7 @@ func timeRandomFunc() function.Function {
 			if span <= 0 {
 				return cty.StringVal(start.UTC().Format(time.RFC3339)), nil
 			}
-			offset, _ := cryptoRandInt64(int64(span))
-			t := start.Add(time.Duration(offset))
+			t := start.Add(time.Duration(r.Int64N(int64(span))))
 			return cty.StringVal(t.UTC().Format(time.RFC3339)), nil
 		},
 	})
@@ -336,15 +326,4 @@ func parseExtendedDuration(s string) (time.Duration, error) {
 		return time.Duration(n * float64(7*24*time.Hour)), nil
 	}
 	return 0, fmt.Errorf("invalid duration %q (expected Go duration, or Nd/Nw for days/weeks)", s)
-}
-
-// cryptoRandInt64 returns a cryptographically random int64 in [0, max).
-// Falls back to math/rand if crypto/rand fails — fine for interval
-// jitter, not for security.
-func cryptoRandInt64(upper int64) (int64, error) { //nolint:unparam // error kept for API consistency with callers
-	n, err := rand.Int(rand.Reader, big.NewInt(upper))
-	if err != nil {
-		return mrand.Int63n(upper), nil //nolint:gosec // mrand is fine for non-crypto jitter
-	}
-	return n.Int64(), nil
 }

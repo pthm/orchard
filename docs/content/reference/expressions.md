@@ -158,6 +158,32 @@ available functions with signatures, descriptions, parameter tables, and
 examples. The reference is auto-generated from Orchard's function registry
 so it stays in sync with the binary.
 
+### Random values and seeds
+
+Every random function (`uuid`, `timerandom`, `timesequence`, and the rest
+of the random and identity functions) draws from the run's **seed**. Pass
+`--seed <n>` to `orchard run` or `orchard plan`, or pin one in the
+scenario with `seed = <n>`; the flag wins. Without either, each run picks a
+random seed, prints it as `seed: <n>`, and stores it in the run record, so
+any run can be repeated:
+
+```sh
+orchard run scenarios/demo.hcl            # seed: 1742…
+orchard run scenarios/demo.hcl --seed 1742…  # the same random values again
+```
+
+Each attribute of each action, each variable default, each provider
+setting and each output draws from its own stream, derived from the seed
+and that place's address. So the values one action gets don't change when
+you add or remove other actions, or run with `--parallelism`, and
+`orchard plan --show-values --seed <n>` shows the values the run with that
+seed uses.
+
+A seed fixes the random part only. `now()`, `env()`, and the timestamp in
+time-ordered IDs such as `ulid()` still change between runs. And two runs
+with the same seed generate the same `uuid()` keys, so a second run before
+tearing down the first can hit unique constraints.
+
 ## Reference syntax in `depends_on`
 
 `depends_on` accepts references as bare traversals — not strings:

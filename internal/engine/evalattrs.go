@@ -7,6 +7,7 @@ import (
 	"github.com/zclconf/go-cty/cty"
 	"github.com/zclconf/go-cty/cty/convert"
 
+	"github.com/pthm/orchard/internal/language"
 	"github.com/pthm/orchard/pkg/protocol"
 )
 
@@ -30,6 +31,8 @@ func evalAttrs(
 	body hcl.Body,
 	schema protocol.ActionSchema,
 	evalCtx *hcl.EvalContext,
+	seed uint64,
+	scope string,
 ) (map[string]cty.Value, error) {
 	// Actions with no attributes and no body (test fixtures, future
 	// no-op actions) are legal. Early-return avoids a nil-body panic
@@ -76,7 +79,9 @@ func evalAttrs(
 			continue
 		}
 
-		val, diags := hclAttr.Expr.Value(evalCtx)
+		// Each attribute gets its own random stream: attributes are
+		// visited in map order, so a shared one wouldn't be stable.
+		val, diags := hclAttr.Expr.Value(language.Scoped(evalCtx, seed, scope+"."+name))
 		if diags.HasErrors() {
 			return nil, fmt.Errorf("evaluating %q: %s", name, diags.Error())
 		}

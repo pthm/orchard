@@ -30,7 +30,7 @@ func TestEvalAttrsRequiredAndPresent(t *testing.T) {
 		"query": {Type: "string", Required: true},
 	}}
 
-	out, err := evalAttrs(body, schema, &hcl.EvalContext{})
+	out, err := evalAttrs(body, schema, &hcl.EvalContext{}, 0, "test")
 	if err != nil {
 		t.Fatalf("evalAttrs: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestEvalAttrsMissingRequired(t *testing.T) {
 	schema := protocol.ActionSchema{Attrs: map[string]protocol.AttrSchema{
 		"query": {Type: "string", Required: true},
 	}}
-	_, err := evalAttrs(body, schema, &hcl.EvalContext{})
+	_, err := evalAttrs(body, schema, &hcl.EvalContext{}, 0, "test")
 	if err == nil || !strings.Contains(err.Error(), "query") {
 		t.Fatalf("expected missing-required error, got %v", err)
 	}
@@ -56,7 +56,7 @@ func TestEvalAttrsOptionalMissingNoDefault(t *testing.T) {
 		"required_attr": {Type: "string", Required: true},
 		"timeout":       {Type: "number"},
 	}}
-	out, err := evalAttrs(body, schema, &hcl.EvalContext{})
+	out, err := evalAttrs(body, schema, &hcl.EvalContext{}, 0, "test")
 	if err != nil {
 		t.Fatalf("evalAttrs: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestEvalAttrsOptionalMissingWithDefault(t *testing.T) {
 		"required_attr": {Type: "string", Required: true},
 		"timeout":       {Type: "number", Default: json.RawMessage(`30`)},
 	}}
-	out, err := evalAttrs(body, schema, &hcl.EvalContext{})
+	out, err := evalAttrs(body, schema, &hcl.EvalContext{}, 0, "test")
 	if err != nil {
 		t.Fatalf("evalAttrs: %v", err)
 	}
@@ -93,7 +93,7 @@ mystery = true
 	schema := protocol.ActionSchema{Attrs: map[string]protocol.AttrSchema{
 		"query": {Type: "string", Required: true},
 	}}
-	_, err := evalAttrs(body, schema, &hcl.EvalContext{})
+	_, err := evalAttrs(body, schema, &hcl.EvalContext{}, 0, "test")
 	if err == nil || !strings.Contains(err.Error(), "mystery") {
 		t.Fatalf("expected unknown-attribute error, got %v", err)
 	}
@@ -106,7 +106,7 @@ func TestEvalAttrsTypeCoercion(t *testing.T) {
 	schema := protocol.ActionSchema{Attrs: map[string]protocol.AttrSchema{
 		"count": {Type: "number"},
 	}}
-	out, err := evalAttrs(body, schema, &hcl.EvalContext{})
+	out, err := evalAttrs(body, schema, &hcl.EvalContext{}, 0, "test")
 	if err != nil {
 		t.Fatalf("evalAttrs: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestEvalAttrsDynamicPassthrough(t *testing.T) {
 	schema := protocol.ActionSchema{Attrs: map[string]protocol.AttrSchema{
 		"values": {Type: "any"},
 	}}
-	out, err := evalAttrs(body, schema, &hcl.EvalContext{})
+	out, err := evalAttrs(body, schema, &hcl.EvalContext{}, 0, "test")
 	if err != nil {
 		t.Fatalf("evalAttrs: %v", err)
 	}
@@ -135,14 +135,14 @@ func TestEvalAttrsUncoerceableType(t *testing.T) {
 	schema := protocol.ActionSchema{Attrs: map[string]protocol.AttrSchema{
 		"count": {Type: "number"},
 	}}
-	_, err := evalAttrs(body, schema, &hcl.EvalContext{})
+	_, err := evalAttrs(body, schema, &hcl.EvalContext{}, 0, "test")
 	if err == nil || !strings.Contains(err.Error(), "count") {
 		t.Fatalf("expected coercion error, got %v", err)
 	}
 }
 
 func TestEvalAttrsNilBodyWithNoAttrs(t *testing.T) {
-	out, err := evalAttrs(nil, protocol.ActionSchema{}, &hcl.EvalContext{})
+	out, err := evalAttrs(nil, protocol.ActionSchema{}, &hcl.EvalContext{}, 0, "test")
 	if err != nil {
 		t.Fatalf("evalAttrs: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestEvalAttrsNilBodyWithRequiredAttr(t *testing.T) {
 	schema := protocol.ActionSchema{Attrs: map[string]protocol.AttrSchema{
 		"query": {Type: "string", Required: true},
 	}}
-	_, err := evalAttrs(nil, schema, &hcl.EvalContext{})
+	_, err := evalAttrs(nil, schema, &hcl.EvalContext{}, 0, "test")
 	if err == nil || !strings.Contains(err.Error(), "required") {
 		t.Fatalf("expected required-missing error, got %v", err)
 	}

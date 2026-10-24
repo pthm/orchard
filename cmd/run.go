@@ -44,7 +44,7 @@ func newRunCmd() *cobra.Command {
 				return fmt.Errorf("--parallelism must be at least 1, got %d", parallelismFlag)
 			}
 
-			ps, err := parser.LoadScenario(args[0], runScenarioFlag, varFlags)
+			ps, err := parser.LoadScenario(args[0], runScenarioFlag, varFlags, seedOption(cmd)...)
 			if err != nil {
 				return fmt.Errorf("loading scenario: %w", err)
 			}
@@ -109,6 +109,7 @@ func newRunCmd() *cobra.Command {
 					Writer:    record.FileWriter{Dir: recordDirFlag},
 					Scenario:  record.ScenarioFromParser(ps, args[0]),
 					Variables: ps.Variables,
+					Seed:      ps.Seed,
 					LogOutput: cmd.ErrOrStderr(),
 				})
 				if err != nil {
@@ -120,6 +121,7 @@ func newRunCmd() *cobra.Command {
 			eng.SetParallelism(parallelismFlag)
 
 			_, execErr := eng.Execute(ctx, ps, g)
+			fmt.Fprintf(cmd.ErrOrStderr(), "seed: %d\n", ps.Seed)
 			if recRep != nil && recRep.Path() != "" {
 				fmt.Fprintf(cmd.ErrOrStderr(), "record: %s\n", recRep.Path())
 			}
@@ -135,6 +137,7 @@ func newRunCmd() *cobra.Command {
 		"Skip writing a run record")
 	cmd.Flags().StringVar(&runScenarioFlag, "scenario", "",
 		"Pick a scenario by name when the file defines multiple")
+	addSeedFlag(cmd)
 	cmd.Flags().IntVar(&parallelismFlag, "parallelism", 1,
 		"Run up to N independent actions at once")
 

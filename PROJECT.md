@@ -588,7 +588,7 @@ Orchard aims for reproducible runs:
 - **Deterministic execution order.** Kahn's topological sort emits siblings in lexicographic order of their node IDs, so same graph → same walk, run after run, at the default parallelism 1; with `--parallelism N`, independent siblings may finish in any order. Provider registration iterates `required_providers` in sorted order; scenario outputs and variables print alphabetically.
 - **Deterministic close order.** Providers close in reverse registration order. Subprocess shutdown is bounded by a single deadline across the graceful RPC and the process wait — a hung provider cannot wedge orchard's exit.
 - **Fail-fast on authoring collisions.** Duplicate variable names, action `(type, name)` pairs, component instance keys, output names, and provider blocks are rejected at parse time rather than silently overwriting.
-- **Seeded random generators** for data generation (planned; individual providers responsible).
+- **Seeded random functions.** Every random function draws from the run's seed (`--seed`, the scenario's `seed`, or a random one stored in the run record), with a separate stream per attribute, variable and output, so a seed reproduces a run's random values at any `--parallelism`.
 - **Stable IDs** where possible (planned; tied to Milestone 5's run-record model).
 - **Explicit timestamp control** (planned; HCL `now()` and clock-freeze in Milestone 7).
 
@@ -1035,6 +1035,7 @@ Harden the tool for real-world use and improve the authoring experience.
 | HCL function library (55+ functions: strings, collections, encoding, math, regex, time, identity, environment, sets) | Done |
 | Custom time functions (`now`, `timesub`, `timeseries`, `timesequence`, `timerandom`, `timeunix`) | Done |
 | `uuid()` and `env()` functions | Done |
+| Seeded randomness (`--seed`, scenario `seed`, seed in the run record) | Done |
 | Unified function registry (`internal/language`) with metadata for docs/LSP/grammars | Done |
 | `orchard functions` subcommand (markdown + `--json` for tooling) | Done |
 | Auto-generated functions reference page via `just docs-generate` | Done |

@@ -68,6 +68,7 @@ func (e *Engine) Teardown(
 	done map[string]bool,
 	completed []string,
 ) ([]string, error) {
+	e.seed = ps.Seed
 	e.reporter.RunStarted(ps.Scenario.Name)
 	start := time.Now()
 
@@ -183,7 +184,7 @@ func (e *Engine) teardownAction(
 
 	evalCtx := withInstance(buildTeardownEvalContext(vars, selfOutputs, allOutputs), node.Instance)
 
-	attrs, err := evalAttrs(node.Teardown, route.schema, evalCtx)
+	attrs, err := evalAttrs(node.Teardown, route.schema, evalCtx, e.seed, string(node.ID)+".teardown")
 	if err != nil {
 		return fmt.Errorf("evaluating teardown: %w", err)
 	}

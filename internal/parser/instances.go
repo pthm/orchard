@@ -6,6 +6,8 @@ import (
 	"github.com/hashicorp/hcl/v2"
 	"github.com/zclconf/go-cty/cty"
 	"github.com/zclconf/go-cty/cty/convert"
+
+	"github.com/pthm/orchard/internal/language"
 )
 
 // Instance identifies one copy of an action or component expanded
@@ -52,7 +54,10 @@ var RepetitionSchema = &hcl.BodySchema{
 // Both attributes must be known before anything runs, so they may
 // only reference var.* and functions — never action or component
 // outputs.
-func ExpandInstances(body hcl.Body, vars map[string]cty.Value) ([]*Instance, hcl.Body, error) {
+//
+// seed and scope (the block's address) seed any random functions the
+// expression calls.
+func ExpandInstances(body hcl.Body, vars map[string]cty.Value, seed uint64, scope string) ([]*Instance, hcl.Body, error) {
 	if body == nil {
 		return []*Instance{nil}, nil, nil
 	}
@@ -66,26 +71,24 @@ func ExpandInstances(body hcl.Body, vars map[string]cty.Value) ([]*Instance, hcl
 	case hasCount && hasEach:
 		return nil, nil, fmt.Errorf("count and for_each are mutually exclusive")
 	case hasCount:
-		insts, err := expandCount(countAttr, vars)
+		insts, err := expandCount(language.Scoped(nil, seed, scope+".count"), countAttr, vars)
 		return insts, remain, err
 	case hasEach:
-		insts, err := expandForEach(eachAttr, vars)
+		insts, err := expandForEach(language.Scoped(nil, seed, scope+".for_each"), eachAttr, vars)
 		return insts, remain, err
 	}
 	return []*Instance{nil}, remain, nil
 }
 
-func evalRepetition(attr *hcl.Attribute, vars map[string]cty.Value) (cty.Value, error) {
+func evalRepetition(rnd *hcl.EvalContext, attr *hcl.Attribute, vars map[string]cty.Value) (cty.Value, error) {
 	for _, trav := range attr.Expr.Variables() {
 		if root := trav.RootName(); root != "var" {
 			return cty.NilVal, fmt.Errorf("%s: cannot reference %s.*; it may only reference var.* and literals, because it must be known before anything runs",
 				attr.Name, root)
 		}
 	}
-	ctx := &hcl.EvalContext{
-		Variables: map[string]cty.Value{"var": cty.ObjectVal(vars)},
-		Functions: Functions(),
-	}
+	ctx := rnd.NewChild()
+	ctx.Variables = map[string]cty.Value{"var": cty.ObjectVal(vars)}
 	val, diags := attr.Expr.Value(ctx)
 	if diags.HasErrors() {
 		return cty.NilVal, fmt.Errorf("%s: %s", attr.Name, diags.Error())
@@ -96,8 +99,8 @@ func evalRepetition(attr *hcl.Attribute, vars map[string]cty.Value) (cty.Value, 
 	return val, nil
 }
 
-func expandCount(attr *hcl.Attribute, vars map[string]cty.Value) ([]*Instance, error) {
-	val, err := evalRepetition(attr, vars)
+func expandCount(rnd *hcl.EvalContext, attr *hcl.Attribute, vars map[string]cty.Value) ([]*Instance, error) {
+	val, err := evalRepetition(rnd, attr, vars)
 	if err != nil {
 		return nil, err
 	}
@@ -117,8 +120,8 @@ func expandCount(attr *hcl.Attribute, vars map[string]cty.Value) ([]*Instance, e
 	return insts, nil
 }
 
-func expandForEach(attr *hcl.Attribute, vars map[string]cty.Value) ([]*Instance, error) {
-	val, err := evalRepetition(attr, vars)
+func expandForEach(rnd *hcl.EvalContext, attr *hcl.Attribute, vars map[string]cty.Value) ([]*Instance, error) {
+	val, err := evalRepetition(rnd, attr, vars)
 	if err != nil {
 		return nil, err
 	}

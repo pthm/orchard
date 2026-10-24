@@ -129,6 +129,8 @@ orchard version
 | `orchard teardown <record>` | Undo a recorded run, in reverse order. |
 | `orchard schema pull <scenario>` | Snapshot the schemas of the databases and gRPC services a scenario uses, for plan-time checks. |
 | `orchard list [dir]` | List the scenarios under a directory. |
+| `orchard list runs` | List recorded runs, newest first. |
+| `orchard inspect <run>` | Show a run record: variables, nodes, outputs, teardown state. |
 | `orchard functions` | List the HCL functions available in scenarios. |
 | `orchard docs <source>` | Render a provider's reference docs. |
 

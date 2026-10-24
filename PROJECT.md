@@ -758,8 +758,8 @@ orchard schema pull scenarios/dev.hcl --var dsn=$DATABASE_URL
 # Inspect a run (future — Milestone 5)
 orchard inspect <run-id>
 
-# List past runs (future — Milestone 5)
-orchard list runs
+# List past runs, newest first, with status and teardown progress
+orchard list runs --record-dir .orchard/runs
 ```
 
 ### Configuration
@@ -1006,7 +1006,7 @@ Make cleanup a first-class operation so that scenarios can be torn down cleanly,
 | Managed cleanup for `<p>_update`: restore previous values of rows inserted this run by default; `managed_teardown = true` for other rows | Done |
 | `lifecycle` blocks on scenarios (`on_failure`, `on_success` policies) | Not started |
 | Rollback on partial failure | Not started |
-| `orchard list runs` — list past runs | Not started |
+| `orchard list runs` — list past runs (status, teardown progress, node counts) | Done |
 | `orchard inspect <run-id>` — show run details | Not started |
 | `orchard teardown <scenario> --latest` convenience | Not started |
 | Run metadata tagging on created resources | Not started |
@@ -1014,7 +1014,7 @@ Make cleanup a first-class operation so that scenarios can be torn down cleanly,
 
 **Done summary.** The core records + teardown loop is functional: every `orchard run` writes a JSON record with per-node outputs and resolved variables; `orchard teardown <record-file | run-id>` replays the scenario in reverse topological order and evaluates each action's `lifecycle { teardown { } }` body against a `var.* / self.* / action.*` eval context. Teardown uses the provider's existing `Execute` — no new provider surface — so any action type automatically supports teardown once its author writes a lifecycle block.
 
-**Next up.** Milestone 4 closed the "every teardown is hand-written" gap for typed inserts, which record their own undo. What's left here: restoring previous values on typed-update teardown, scenario-level `lifecycle { on_failure / on_success }` policies, and `orchard list runs` / `orchard inspect` to take the record format beyond a single invocation.
+**Next up.** Milestone 4 closed the "every teardown is hand-written" gap for typed inserts, which record their own undo. What's left here: restoring previous values on typed-update teardown, scenario-level `lifecycle { on_failure / on_success }` policies, and `orchard inspect` to take the record format beyond a single invocation.
 
 ### Milestone 6: Robustness and Ergonomics
 

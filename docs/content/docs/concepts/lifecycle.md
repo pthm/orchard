@@ -197,5 +197,6 @@ failures the record gets `torn_down_at`, and a later teardown of it is refused
 - **Re-inserting what a typed delete removed.** Not automatic yet.
 - **Scenario-level lifecycle policies** (`on_failure = "rollback"`). Planned;
   not yet implemented.
-- **`orchard list runs` / `orchard inspect <id>`**. Also planned. For now,
-  records are plain JSON — `jq`, `cat`, and `ls` are your tools.
+- **`orchard inspect <id>`**. Also planned. `orchard list runs` lists
+  records with their status and teardown progress; for detail, records are
+  plain JSON — `jq` and `cat` are your tools.

@@ -302,6 +302,42 @@ Files with multiple scenarios list each one as a separate entry.
 - `0` — walk succeeded. Output may be empty.
 - `1` — filesystem error.
 
+## `orchard list runs`
+
+```
+orchard list runs [--record-dir .]
+```
+
+List the run records `orchard run` wrote, newest first, one line per run.
+
+| Flag | Description |
+|------|-------------|
+| `--record-dir` | Directory to read run records from. Defaults to `.`. |
+
+**Behavior**
+
+- Each line shows the run ID, scenario name (bold), status (green
+  `succeeded`, red `failed`), a `torn down` or `partly torn down` marker
+  once `orchard teardown` has run, the start time (UTC) and node counts
+  by status.
+- Records that can't be loaded are skipped with a warning on stderr.
+- An empty directory prints `No runs found in <dir> (see --record-dir)`.
+- `--no-color` (or `NO_COLOR`) prints plain text.
+- A directory named `runs` can still be listed for scenarios as
+  `orchard list ./runs`.
+
+**Example output**
+
+```
+  20260415T100512Z_9f2c1a7b  dev  failed  2026-04-15T10:05:12Z  1 succeeded, 1 failed
+  20260415T093001Z_4be03d11  dev  succeeded  torn down  2026-04-15T09:30:01Z  2 succeeded
+```
+
+**Exit codes**
+
+- `0` — listing succeeded. Output may say no runs were found.
+- `1` — filesystem error.
+
 ## Examples
 
 Scaffold a new project and run it:
@@ -338,6 +374,13 @@ List every scenario in a repo:
 
 ```sh
 orchard list .
+```
+
+List past runs and tear down one by its ID:
+
+```sh
+orchard list runs --record-dir .orchard/runs
+orchard teardown 20260415T093001Z_4be03d11 --record-dir .orchard/runs
 ```
 
 Run and tear down in one session:

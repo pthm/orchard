@@ -6,16 +6,19 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclparse"
 	"github.com/spf13/cobra"
 
 	"github.com/pthm/orchard/internal/cli/render"
+	"github.com/pthm/orchard/internal/record"
 )
 
 func newListCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "list [directory]",
 		Short: "List available scenarios",
 		Args:  cobra.MaximumNArgs(1),
@@ -51,6 +54,84 @@ func newListCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.AddCommand(newListRunsCmd())
+	return cmd
+}
+
+// newListRunsCmd builds `orchard list runs`: one line per run record
+// in --record-dir, newest first.
+func newListRunsCmd() *cobra.Command {
+	var recordDir string
+	cmd := &cobra.Command{
+		Use:   "runs",
+		Short: "List recorded runs, newest first",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			out := cmd.OutOrStdout()
+			files, err := record.List(recordDir, cmd.ErrOrStderr())
+			if err != nil {
+				return err
+			}
+			if len(files) == 0 {
+				fmt.Fprintf(out, "No runs found in %s (see --record-dir)\n", recordDir)
+				return nil
+			}
+			style := func(s lipgloss.Style, text string) string {
+				if noColorFlag {
+					return text
+				}
+				return s.Render(text)
+			}
+			for _, f := range files {
+				rec := f.Record
+				status := style(render.Success, rec.Status)
+				if rec.Status != record.StatusSucceeded {
+					status = style(render.Error, rec.Status)
+				}
+				line := rec.ID + "  " + style(render.Bold, rec.Scenario.Name) + "  " + status
+				if marker := tornDownMarker(rec); marker != "" {
+					line += "  " + style(render.Warn, marker)
+				}
+				line += "  " + style(render.Muted, rec.StartedAt.UTC().Format(time.RFC3339)+"  "+nodeCounts(rec))
+				fmt.Fprintf(out, "  %s\n", line)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&recordDir, "record-dir", ".",
+		"Directory to read run records from")
+	return cmd
+}
+
+// tornDownMarker says how far `orchard teardown` got with rec.
+func tornDownMarker(rec *record.Record) string {
+	if rec.TornDownAt != nil {
+		return "torn down"
+	}
+	for _, n := range rec.Nodes {
+		if n.TornDown {
+			return "partly torn down"
+		}
+	}
+	return ""
+}
+
+// nodeCounts summarises rec's nodes by status, e.g. "1 succeeded, 1 failed".
+func nodeCounts(rec *record.Record) string {
+	counts := map[string]int{}
+	for _, n := range rec.Nodes {
+		counts[n.Status]++
+	}
+	var parts []string
+	for _, st := range []string{record.StatusSucceeded, record.StatusFailed, record.StatusSkipped} {
+		if counts[st] > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", counts[st], st))
+		}
+	}
+	if len(parts) == 0 {
+		return "no nodes"
+	}
+	return strings.Join(parts, ", ")
 }
 
 type scenarioInfo struct {

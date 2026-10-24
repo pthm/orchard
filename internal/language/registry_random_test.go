@@ -38,6 +38,13 @@ func TestRandomFunctionsAreSeeded(t *testing.T) {
 		"randshuffle":  {strs("a", "b", "c", "d", "e", "f", "g", "h")},
 		"randsample":   {strs("a", "b", "c", "d", "e", "f", "g", "h"), num(3)},
 		"uuid":         nil,
+		"uuidv7":       {atArg()},
+		"ulid":         {atArg()},
+		"ksuid":        {atArg()},
+		"xid":          {atArg()},
+		"objectid":     {atArg()},
+		"typeid":       {cty.StringVal("user"), atArg()},
+		"nanoid":       nil,
 		"randweighted": {cty.MapVal(map[string]cty.Value{"a": num(1), "b": num(1), "c": num(1), "d": num(1)})},
 	} {
 		a := callSeeded(t, "x", name, args...)

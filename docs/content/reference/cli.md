@@ -213,6 +213,7 @@ order).
 | `--record-dir <path>` | string | `.` (cwd) | Directory to look a run ID or `--latest` run up in. Ignored when the argument is an existing record file. |
 | `--latest` | bool | `false` | Treat the argument as a scenario file and tear down the newest record in `--record-dir` for it that isn't fully torn down (failed runs included). Prints `tearing down run <id> (<record path>)` first. Repeat to unwind runs newest first; errors with `no runs left to tear down for <path> in <dir>` when none remain. |
 | `--scenario <name>` | string | — | With `--latest`, which scenario to pick when runs of several scenarios in the file match. Required in that case. |
+| `--ignore-config-drift` | bool | `false` | Tear down even when a provider config differs from the one the run used, e.g. after a password rotation. |
 
 **Behavior**
 
@@ -226,8 +227,12 @@ order).
    has been rewritten to declare a different scenario), and that every
    recorded node with outputs or an undo step, and not yet torn down, is still
    in the scenario (reject and name the missing nodes otherwise).
-4. Register and configure providers using the scenario's current config
-   blocks, evaluated against the recorded variables.
+4. Evaluate the scenario's current provider config blocks against the
+   recorded variables, and compare them with the hashes the run recorded
+   (`config_hashes`). Refuse and name each changed attribute
+   (`provider config changed since the run: db.dsn`) unless
+   `--ignore-config-drift` is set. Records without hashes skip the check.
+   Then register and configure the providers.
 5. Walk the recorded actions in reverse of the order they completed (so after
    a `--parallelism` run, independent actions are undone in the reverse of the
    order they really ran); for each action that succeeded in the

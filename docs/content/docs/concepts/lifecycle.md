@@ -218,6 +218,15 @@ no longer declares an action the record says created something, teardown
 refuses and names it, so put the action back before tearing down. An action
 an earlier teardown of the record already tore down can be removed.
 
+Provider configs are evaluated again from the scenario, so teardown also checks
+that they still match the run's. The record holds a hash of each config
+attribute (keyed by the run ID, so no DSN or key is written in clear). If one
+differs, say because a literal `dsn` was edited or an `env()` it reads has
+changed, teardown refuses and names it (`provider config changed since the run:
+db.dsn`) rather than cleaning up in a different environment. When the change is
+harmless, such as a rotated password for the same database, pass
+`--ignore-config-drift`.
+
 Teardown is **best-effort**: if one action's teardown fails, the walk keeps
 going. The joined set of errors is returned at the end. That matches how
 cleanup usually works in practice — you want to unwind as much as possible,

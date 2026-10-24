@@ -69,6 +69,7 @@ type Reporter struct {
 	scenario Scenario
 	vars     map[string]json.RawMessage
 	seed     uint64
+	configs  map[string]map[string]cty.Value
 	writer   Writer
 	log      io.Writer
 
@@ -101,7 +102,10 @@ type Options struct {
 	Scenario  Scenario
 	Variables map[string]cty.Value // resolved scenario variables
 	Seed      uint64               // the run's random seed
-	LogOutput io.Writer            // where write failures surface; defaults to os.Stderr
+	// ProviderConfigs are the evaluated provider configs, recorded as
+	// hashes (see HashConfig).
+	ProviderConfigs map[string]map[string]cty.Value
+	LogOutput       io.Writer // where write failures surface; defaults to os.Stderr
 }
 
 // NewReporter constructs a Reporter from options. The scenario
@@ -123,6 +127,7 @@ func NewReporter(opts Options) (*Reporter, error) {
 		scenario: opts.Scenario,
 		vars:     vars,
 		seed:     opts.Seed,
+		configs:  opts.ProviderConfigs,
 		writer:   opts.Writer,
 		log:      opts.LogOutput,
 		pending:  make(map[string]time.Time),
@@ -236,6 +241,9 @@ func (r *Reporter) RunCompleted(summary engine.RunSummary) {
 	}
 	if summary.Err != nil {
 		rec.Error = summary.Err.Error()
+	}
+	if rec.ConfigHashes, err = HashConfig(rec.ID, r.configs); err != nil {
+		_, _ = fmt.Fprintf(r.log, "orchard: record: hash provider configs: %v\n", err)
 	}
 
 	if r.writer == nil {

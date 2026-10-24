@@ -503,3 +503,56 @@ func TestRunParallelism(t *testing.T) {
 		t.Fatalf("teardown should remove every row, %d left", got)
 	}
 }
+
+// TestTeardownRefusesConfigDrift: a provider config edited since the
+// run fails teardown by attribute unless --ignore-config-drift, and
+// the record holds only a hash of the config.
+func TestTeardownRefusesConfigDrift(t *testing.T) {
+	project := t.TempDir()
+	db := filepath.Join(project, "shop.db")
+	other := filepath.Join(project, "other.db")
+	createDB(t, db, "CREATE TABLE merchants (id INTEGER PRIMARY KEY, name TEXT NOT NULL)")
+	createDB(t, other, "CREATE TABLE merchants (id INTEGER PRIMARY KEY, name TEXT NOT NULL)")
+	scenario := filepath.Join(project, "shop.hcl")
+	write := func(path string) {
+		writeFile(t, scenario, `scenario "shop" {
+  required_providers {
+    db = { source = "builtin/sqlite" }
+  }
+  provider "db" {
+    path = "`+path+`"
+  }
+  action "sqlite_insert" "merchant" {
+    table  = "merchants"
+    values = { name = "m" }
+  }
+}
+`)
+	}
+	write(db)
+	rec := runRecorded(t, scenario)
+	raw, err := os.ReadFile(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), db) {
+		t.Fatalf("record should not hold the provider config in clear:\n%s", raw)
+	}
+
+	write(other)
+	out, err := runCLI(t, "teardown", rec, "--no-color")
+	if err == nil || !strings.Contains(err.Error(), "db.path") {
+		t.Fatalf("teardown should refuse the changed db.path, got %v\n%s", err, out)
+	}
+	if got := countRows(t, db); got != 1 {
+		t.Fatalf("refused teardown should leave the row, got %d", got)
+	}
+
+	write(db)
+	if out, err := runCLI(t, "teardown", rec, "--no-color"); err != nil {
+		t.Fatalf("teardown with the run's config: %v\n%s", err, out)
+	}
+	if got := countRows(t, db); got != 0 {
+		t.Fatalf("teardown should remove the row, %d left", got)
+	}
+}

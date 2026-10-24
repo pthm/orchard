@@ -105,12 +105,13 @@ func newRunCmd() *cobra.Command {
 			var recRep *record.Reporter
 			if !noRecordFlag {
 				recRep, err = record.NewReporter(record.Options{
-					Inner:     cliRep,
-					Writer:    record.FileWriter{Dir: recordDirFlag},
-					Scenario:  record.ScenarioFromParser(ps, args[0]),
-					Variables: ps.Variables,
-					Seed:      ps.Seed,
-					LogOutput: cmd.ErrOrStderr(),
+					Inner:           cliRep,
+					Writer:          record.FileWriter{Dir: recordDirFlag},
+					Scenario:        record.ScenarioFromParser(ps, args[0]),
+					Variables:       ps.Variables,
+					Seed:            ps.Seed,
+					ProviderConfigs: ps.ProviderConfigs,
+					LogOutput:       cmd.ErrOrStderr(),
 				})
 				if err != nil {
 					return fmt.Errorf("preparing record: %w", err)

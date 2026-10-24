@@ -49,6 +49,7 @@ func newTeardownCmd() *cobra.Command {
 		recordDir    string
 		latest       bool
 		scenarioName string
+		ignoreDrift  bool
 	)
 	cmd := &cobra.Command{
 		Use:   "teardown <record-file | run-id | scenario-file --latest>",
@@ -147,6 +148,19 @@ func newTeardownCmd() *cobra.Command {
 					rec.Scenario.Path, strings.Join(missing, ", "))
 			}
 
+			// Provider configs are re-evaluated from the scenario
+			// against the recorded variables; a literal edited or an
+			// env() changed since the run would point teardown at
+			// another environment, so refuse unless told otherwise.
+			drift, err := record.ConfigDrift(rec, ps.ProviderConfigs)
+			if err != nil {
+				return fmt.Errorf("checking provider configs: %w", err)
+			}
+			if len(drift) > 0 && !ignoreDrift {
+				return fmt.Errorf("provider config changed since the run: %s; pass --ignore-config-drift if it still targets the same environment",
+					strings.Join(drift, ", "))
+			}
+
 			reg, err := registerProviders(ps, providerModeRun)
 			if err != nil {
 				return fmt.Errorf("registering providers: %w", err)
@@ -157,10 +171,6 @@ func newTeardownCmd() *cobra.Command {
 				}
 			}()
 
-			// Provider configs are re-evaluated from the scenario
-			// against the recorded variables. If provider credentials
-			// have moved since the original run, the user fixes them
-			// in the scenario.
 			if err := reg.Configure(ctx, ps.ProviderConfigs); err != nil {
 				return fmt.Errorf("configuring providers: %w", err)
 			}
@@ -189,6 +199,8 @@ func newTeardownCmd() *cobra.Command {
 		"Treat the argument as a scenario file and tear down its newest run not yet fully torn down")
 	cmd.Flags().StringVar(&scenarioName, "scenario", "",
 		"With --latest, the scenario to pick when the file declares several")
+	cmd.Flags().BoolVar(&ignoreDrift, "ignore-config-drift", false,
+		"Tear down even when a provider config differs from the run's (e.g. a rotated password)")
 	return cmd
 }
 

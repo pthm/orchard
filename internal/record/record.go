@@ -16,6 +16,9 @@
 package record
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -68,6 +71,11 @@ type Record struct {
 	// TornDownAt is set once `orchard teardown` has finished every
 	// node's teardown; such a record is refused by a later teardown.
 	TornDownAt *time.Time `json:"torn_down_at,omitempty"`
+	// ConfigHashes fingerprints each provider config attribute the run
+	// used (provider -> attribute -> HashConfig), so teardown can
+	// refuse a config that now points somewhere else without the
+	// record holding DSNs or keys. Absent in older records.
+	ConfigHashes map[string]map[string]string `json:"config_hashes,omitempty"`
 }
 
 // Scenario is the subset of scenario metadata worth persisting. Path
@@ -181,6 +189,61 @@ func IndexUndos(r *Record) (map[string]provider.Invocation, error) {
 		out[n.ID] = provider.Invocation{Action: n.Undo.Action, Attrs: attrs}
 	}
 	return out, nil
+}
+
+// HashConfig fingerprints evaluated provider configs as HMAC-SHA256
+// per attribute, keyed by the run ID so equal values in different
+// records hash differently.
+func HashConfig(runID string, configs map[string]map[string]cty.Value) (map[string]map[string]string, error) {
+	if len(configs) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]map[string]string, len(configs))
+	for name, attrs := range configs {
+		hashes := make(map[string]string, len(attrs))
+		for attr, v := range attrs {
+			raw, err := protocol.MarshalValue(v)
+			if err != nil {
+				return nil, fmt.Errorf("%s.%s: %w", name, attr, err)
+			}
+			mac := hmac.New(sha256.New, []byte(runID))
+			mac.Write([]byte(name + "\x00" + attr + "\x00"))
+			mac.Write(raw)
+			hashes[attr] = hex.EncodeToString(mac.Sum(nil))
+		}
+		out[name] = hashes
+	}
+	return out, nil
+}
+
+// ConfigDrift lists, sorted, the "<provider>.<attribute>" configs that
+// differ between the run r recorded and configs: changed, added or
+// removed. Providers the run didn't record are left out, and a record
+// without hashes reports no drift.
+func ConfigDrift(r *Record, configs map[string]map[string]cty.Value) ([]string, error) {
+	if r.ConfigHashes == nil {
+		return nil, nil
+	}
+	now, err := HashConfig(r.ID, configs)
+	if err != nil {
+		return nil, err
+	}
+	var drift []string
+	for name, was := range r.ConfigHashes {
+		cur := now[name]
+		for attr, h := range was {
+			if cur[attr] != h {
+				drift = append(drift, name+"."+attr)
+			}
+		}
+		for attr := range cur {
+			if _, ok := was[attr]; !ok {
+				drift = append(drift, name+"."+attr)
+			}
+		}
+	}
+	slices.Sort(drift)
+	return drift, nil
 }
 
 // Load reads and parses a record file from disk, refusing a format

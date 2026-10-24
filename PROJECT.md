@@ -607,7 +607,7 @@ Every `orchard run` writes a JSON record to the working directory (override with
 - Teardown progress: `torn_down` on each node whose teardown succeeded, and `torn_down_at` once a teardown finished with no failures.
 - Run id, scenario name and absolute path, start/finish timestamps.
 - Overall status (`succeeded` / `failed`) and top-level error, if any.
-- The scenario's resolved variables (cty-encoded via `pkg/protocol/ctyjson`).
+- The scenario's resolved variables (cty-encoded via `pkg/protocol/ctyjson`), and each component's (`component_variables`, keyed by component key).
 - Per-node entries: id, kind (`action` / `component`), status (`succeeded` / `failed`), start/finish timestamps, outputs or error.
 - Scenario-level outputs.
 
@@ -619,7 +619,7 @@ The file-on-disk shape is deliberately simpler than Terraform's state: no remote
 
 `orchard teardown <record-file | run-id>` (a run ID is looked up in `--record-dir`) reloads the scenario at the record's absolute path with the record's variables (so `count` / `for_each` expand as they did in the run, and variables without a default resolve), refuses if a recorded node that created something and isn't torn down yet is no longer declared, re-configures providers from the current scenario file (refusing, unless `--ignore-config-drift`, when a config's hash no longer matches the record's), and walks the dependency graph in **reverse** topological order. For each action whose original run succeeded AND that declares a `lifecycle { teardown { } }` block, the engine evaluates the teardown body against an eval context composed of:
 
-- `var.<name>` — the scenario variables from the record.
+- `var.<name>` — the scenario variables from the record; inside a component, the component's recorded variables (`action.*` is then scoped to the component's own actions too).
 - `self.<field>` — the teardown-only namespace pointing at this action's own recorded outputs. Authors write `DELETE FROM t WHERE id = ${self.id}` without restating the node name.
 - `action.<type>.<name>.<field>` — any other action's recorded outputs, so a downstream teardown can reference an upstream's natural keys if needed.
 
@@ -1017,7 +1017,7 @@ Make cleanup a first-class operation so that scenarios can be torn down cleanly,
 | `orchard list runs` — list past runs (status, teardown progress, node counts) | Done |
 | `orchard inspect <run-id>` — show run details (nodes, errors, undo steps, teardown marks, outputs) | Done |
 | `orchard teardown <scenario> --latest` — newest run of the file not fully torn down; `--scenario` picks among several | Done |
-| Run metadata tagging on created resources | Done (via variables): a `variable "run_tag" { default = uuid() }` is evaluated once per run and recorded, and teardown reuses the recorded value; `--var run_tag=...` pins it. Scenario-level only: component variables aren't recorded and `var.*` in a component's teardown body doesn't resolve yet |
+| Run metadata tagging on created resources | Done (via variables): a `variable "run_tag" { default = uuid() }` is evaluated once per run and recorded, and teardown reuses the recorded value; `--var run_tag=...` pins it. Components' resolved variables are recorded too (`component_variables`), so `var.*` in a component's teardown body sees the run's values |
 | Provider config drift check (hashed configs in the record; `--ignore-config-drift`) | Done |
 | Record format migrations / version negotiation | Version check done; migrations when a format 2 exists |
 

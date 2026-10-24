@@ -84,6 +84,15 @@ type UndoReporter interface {
 	NodeUndo(nodeID string, undo provider.Invocation)
 }
 
+// ComponentVarsReporter is implemented by reporters that keep run
+// records. The engine passes it each component's resolved inputs (its
+// var.* namespace, keyed like ParsedScenario.Components) before the
+// component's first action runs, so teardown can evaluate the
+// component's teardown bodies against the same values.
+type ComponentVarsReporter interface {
+	ComponentVars(componentKey string, vars map[string]cty.Value)
+}
+
 // Reporter receives observability events from the engine's
 // execution loop. The engine has no opinion on how events are
 // surfaced — CLI, structured logs, test-silence, or a future TUI
@@ -432,6 +441,9 @@ func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *grap
 						break
 					}
 					compVars[node.ComponentKey] = vars
+					if cr, ok := e.reporter.(ComponentVarsReporter); ok {
+						cr.ComponentVars(node.ComponentKey, vars)
+					}
 				}
 			}
 			evalCtx := e.buildNodeEvalContext(node, ps.Variables, compVars, resolved)

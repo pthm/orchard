@@ -65,9 +65,14 @@ type Record struct {
 	Variables  map[string]json.RawMessage `json:"variables,omitempty"`
 	// Seed is the run's random seed; `orchard run --seed` with it
 	// draws the same random values again. Absent in older records.
-	Seed    *uint64                    `json:"seed,omitempty"`
-	Nodes   []Node                     `json:"nodes"`
-	Outputs map[string]json.RawMessage `json:"outputs,omitempty"`
+	Seed *uint64 `json:"seed,omitempty"`
+	// ComponentVariables are each component's resolved inputs (its
+	// var.* namespace), keyed by component key ("merchant.acme",
+	// "merchant.acme[0]"), for its actions' teardown bodies. Absent
+	// in older records.
+	ComponentVariables map[string]map[string]json.RawMessage `json:"component_variables,omitempty"`
+	Nodes              []Node                                `json:"nodes"`
+	Outputs            map[string]json.RawMessage            `json:"outputs,omitempty"`
 	// TornDownAt is set once `orchard teardown` has finished every
 	// node's teardown; such a record is refused by a later teardown.
 	TornDownAt *time.Time `json:"torn_down_at,omitempty"`
@@ -170,6 +175,23 @@ func IndexOutputs(r *Record) (map[string]map[string]cty.Value, error) {
 			return nil, err
 		}
 		out[n.ID] = m
+	}
+	return out, nil
+}
+
+// IndexComponentVars decodes the record's component variables, keyed
+// by component key, for engine.Teardown.
+func IndexComponentVars(r *Record) (map[string]map[string]cty.Value, error) {
+	out := make(map[string]map[string]cty.Value, len(r.ComponentVariables))
+	for key, raw := range r.ComponentVariables {
+		vars, err := DecodeCty(raw)
+		if err != nil {
+			return nil, fmt.Errorf("component %s: %w", key, err)
+		}
+		if vars == nil {
+			vars = map[string]cty.Value{}
+		}
+		out[key] = vars
 	}
 	return out, nil
 }

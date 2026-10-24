@@ -181,10 +181,11 @@ action "s3_put_object" "report" {
 the tag yourself, say to match a CI job, pin it with
 `--var run_tag=ci-1234`; the record stores that value instead.
 
-Declare the tag on the scenario and use it in the scenario's own actions. Inside
-a component, `var.*` does not resolve in a `lifecycle { teardown { } }` body yet:
-the record doesn't store component variables, so teardown fails with an unknown
-variable error, even when the scenario passes the tag in through `inputs`.
+Components can use the tag too: pass it in through `inputs`, or give the
+component its own `variable "tag" { default = uuid() }`. The record stores each
+component's resolved variables, so inside a component a `lifecycle { teardown { } }`
+body sees the same `var.*` the run did, and `action.*` refers to the
+component's own actions.
 
 ## `orchard teardown <record>`
 

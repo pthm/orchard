@@ -279,7 +279,7 @@ func TestTeardownFollowsCompletionOrder(t *testing.T) {
 		return provider.Invocation{Action: "step", Attrs: map[string]cty.Value{"value": cty.StringVal(v)}}
 	}
 	undos := map[string]provider.Invocation{"action.step.a": undo("a"), "action.step.b": undo("b")}
-	if _, err := eng.Teardown(context.Background(), ps, g, nil, nil, undos, nil,
+	if _, err := eng.Teardown(context.Background(), ps, g, nil, nil, nil, undos, nil,
 		[]string{"action.step.b", "action.step.a"}); err != nil {
 		t.Fatal(err)
 	}

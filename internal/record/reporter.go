@@ -70,6 +70,7 @@ type Reporter struct {
 	vars     map[string]json.RawMessage
 	seed     uint64
 	configs  map[string]map[string]cty.Value
+	compVars map[string]map[string]json.RawMessage
 	writer   Writer
 	log      io.Writer
 
@@ -191,6 +192,22 @@ func (r *Reporter) NodeUndo(nodeID string, undo provider.Invocation) {
 	}
 }
 
+// ComponentVars implements engine.ComponentVarsReporter.
+func (r *Reporter) ComponentVars(componentKey string, vars map[string]cty.Value) {
+	raw, err := EncodeCty(vars)
+	if err != nil {
+		_, _ = fmt.Fprintf(r.log, "orchard: record: encode variables for component %s: %v\n", componentKey, err)
+		return
+	}
+	if r.compVars == nil {
+		r.compVars = map[string]map[string]json.RawMessage{}
+	}
+	if raw == nil {
+		raw = map[string]json.RawMessage{}
+	}
+	r.compVars[componentKey] = raw
+}
+
 // NodeFailed implements engine.Reporter.
 func (r *Reporter) NodeFailed(nodeID string, err error) {
 	start, ok := r.pending[nodeID]
@@ -228,16 +245,17 @@ func (r *Reporter) RunCompleted(summary engine.RunSummary) {
 	}
 
 	rec := &Record{
-		Format:     Format,
-		ID:         NewID(r.startedAt),
-		Scenario:   r.scenario,
-		StartedAt:  r.startedAt,
-		FinishedAt: finished,
-		Status:     status,
-		Variables:  r.vars,
-		Seed:       &r.seed,
-		Nodes:      r.nodes,
-		Outputs:    outputs,
+		Format:             Format,
+		ID:                 NewID(r.startedAt),
+		Scenario:           r.scenario,
+		StartedAt:          r.startedAt,
+		FinishedAt:         finished,
+		Status:             status,
+		Variables:          r.vars,
+		Seed:               &r.seed,
+		ComponentVariables: r.compVars,
+		Nodes:              r.nodes,
+		Outputs:            outputs,
 	}
 	if summary.Err != nil {
 		rec.Error = summary.Err.Error()

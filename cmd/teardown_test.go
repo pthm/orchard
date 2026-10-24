@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pthm/orchard/internal/record"
 )
@@ -554,5 +555,59 @@ func TestTeardownRefusesConfigDrift(t *testing.T) {
 	}
 	if got := countRows(t, db); got != 0 {
 		t.Fatalf("teardown should remove the row, %d left", got)
+	}
+}
+
+// TestTeardownComponentScope: a teardown body inside a component sees
+// the component's inputs as var.* and its sibling actions as action.*.
+// The tag defaults to uuidv7(), which reads the clock, so teardown only
+// matches the run's rows by using the variables the record kept.
+func TestTeardownComponentScope(t *testing.T) {
+	project := t.TempDir()
+	db := filepath.Join(project, "shop.db")
+	createDB(t, db, "CREATE TABLE merchants (id INTEGER PRIMARY KEY, name TEXT NOT NULL)")
+	writeFile(t, filepath.Join(project, "merchant.hcl"), `component "merchant" {
+  variable "tag" { default = uuidv7() }
+  action "sqlite_insert" "first" {
+    table  = "merchants"
+    values = { name = var.tag }
+    lifecycle { managed_teardown = false }
+  }
+  action "sqlite_query" "second" {
+    query  = "INSERT INTO merchants (name) VALUES (?) RETURNING id"
+    params = ["${var.tag}-2"]
+    lifecycle {
+      teardown {
+        query  = "DELETE FROM merchants WHERE name IN (?, ?) AND id >= ?"
+        params = [var.tag, "${var.tag}-2", action.sqlite_insert.first.id]
+      }
+    }
+  }
+}
+`)
+	scenario := filepath.Join(project, "shop.hcl")
+	writeFile(t, scenario, `scenario "shop" {
+  variable "path" {}
+  required_providers {
+    db = { source = "builtin/sqlite" }
+  }
+  provider "db" {
+    path = var.path
+  }
+  component "merchant" "acme" {
+    source = "./merchant.hcl"
+  }
+}
+`)
+	rec := runRecorded(t, scenario, "--var", "path="+db)
+	if got := countRows(t, db); got != 2 {
+		t.Fatalf("run should insert 2 rows, got %d", got)
+	}
+	time.Sleep(2 * time.Millisecond) // a re-evaluated uuidv7() would differ
+	if out, err := runCLI(t, "teardown", rec, "--no-color"); err != nil {
+		t.Fatalf("teardown: %v\n%s", err, out)
+	}
+	if got := countRows(t, db); got != 0 {
+		t.Fatalf("teardown should remove both rows, %d left", got)
 	}
 }

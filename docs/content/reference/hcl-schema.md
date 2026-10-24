@@ -186,11 +186,13 @@ provider**. A sql action's teardown declares `query`; an http action's declares
 
 Inside the `teardown` body, three reference namespaces are in scope:
 
-- `var.<name>` — scenario variables (from the record).
+- `var.<name>` — scenario variables (from the record). Inside a component,
+  the component's variables, as the run resolved them (also from the record).
 - `self.<field>` — this action's own recorded outputs. Use it to target the
   resources this action created, without restating the node name.
 - `action.<type>.<name>.<field>` — any other action's recorded outputs, for
-  teardowns that reference upstream state.
+  teardowns that reference upstream state. Inside a component, only the
+  component's own actions.
 
 See [lifecycle](/docs/concepts/lifecycle/) for authoring guidance and the
 [`self` namespace](../expressions/#self-teardown-only) under expressions.

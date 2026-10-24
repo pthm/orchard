@@ -16,11 +16,14 @@ import (
 )
 
 // Teardown undoes each action that succeeded in a prior `orchard run`,
-// in the reverse of the order that run completed them. vars,
+// in the reverse of the order that run completed them. vars, compVars,
 // recordedOutputs and undos are the state that run captured in its
-// record: the scenario's resolved variables, each succeeded node's
+// record: the scenario's resolved variables, each component's resolved
+// inputs (keyed like ParsedScenario.Components), each succeeded node's
 // outputs, and the undo invocations providers described, keyed by full
-// node ID ("action.sql.create_merchant" etc.). Nodes in done were torn
+// node ID ("action.sql.create_merchant" etc.). A component missing from
+// compVars (a record from before they were kept) has its inputs
+// evaluated again from vars and recordedOutputs. Nodes in done were torn
 // down by an earlier, partly failed teardown and are skipped. completed
 // lists node IDs in the order the run completed them (the record's node
 // order); nodes it doesn't name, or all nodes when it is nil, follow in
@@ -44,9 +47,11 @@ import (
 // or nil if every attempted teardown succeeded.
 //
 // Eval context per action:
-//   - var.<name>   — scenario variables
+//   - var.<name>   — scenario variables, or for an action inside a
+//     component, the component's inputs
 //   - self.<field> — this action's recorded outputs
-//   - action.<type>.<name>.<field> — any other action's recorded outputs
+//   - action.<type>.<name>.<field> — any other action's recorded
+//     outputs; inside a component, only the component's own actions
 //
 // The teardown body is evaluated against the same provider action
 // schema as the outer action, so `lifecycle { teardown { query = "..." } }`
@@ -63,6 +68,7 @@ func (e *Engine) Teardown(
 	ps *parser.ParsedScenario,
 	g *graph.Graph,
 	vars map[string]cty.Value,
+	compVars map[string]map[string]cty.Value,
 	recordedOutputs map[string]map[string]cty.Value,
 	undos map[string]provider.Invocation,
 	done map[string]bool,
@@ -121,7 +127,20 @@ func (e *Engine) Teardown(
 			if !ok {
 				continue
 			}
-			run = func() error { return e.teardownAction(ctx, node, vars, selfOutputs, recordedOutputs) }
+			run = func() error {
+				scopeVars, scopeOutputs := vars, recordedOutputs
+				if key := node.ComponentKey; key != "" {
+					scopeOutputs = scopedComponentResolved(key, recordedOutputs)
+					var ok bool
+					if scopeVars, ok = compVars[key]; !ok {
+						var err error
+						if scopeVars, err = e.resolveComponentInputs(ps.Components[key], vars, recordedOutputs); err != nil {
+							return err
+						}
+					}
+				}
+				return e.teardownAction(ctx, node, scopeVars, selfOutputs, scopeOutputs)
+			}
 		case hasUndo && !managedTeardownOff(node):
 			run = func() error { return e.runUndo(ctx, node, undo) }
 		default:

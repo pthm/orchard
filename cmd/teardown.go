@@ -92,6 +92,10 @@ func newTeardownCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("decoding record outputs: %w", err)
 			}
+			compVars, err := record.IndexComponentVars(rec)
+			if err != nil {
+				return fmt.Errorf("decoding record component variables: %w", err)
+			}
 			undos, err := record.IndexUndos(rec)
 			if err != nil {
 				return fmt.Errorf("decoding record undo steps: %w", err)
@@ -185,7 +189,7 @@ func newTeardownCmd() *cobra.Command {
 				ForcePlain: noColorFlag,
 			}))
 
-			torn, tdErr := eng.Teardown(ctx, ps, g, vars, outputs, undos, done, completed)
+			torn, tdErr := eng.Teardown(ctx, ps, g, vars, compVars, outputs, undos, done, completed)
 			markTornDown(rec, torn, tdErr == nil)
 			if err := record.Save(file.Path, rec); err != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "warning: saving teardown progress: %v\n", err)

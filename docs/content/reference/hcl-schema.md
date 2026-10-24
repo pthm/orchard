@@ -90,9 +90,17 @@ sensitive variable with a default (`default = env("DB_PASSWORD")`) needs no
 
 A component variable counts as sensitive, and is left out of the record too,
 when it is declared `sensitive = true` or its input expression reads a
-sensitive scenario variable (`inputs = { dsn = var.dsn }`). Only variables are
-covered: a sensitive value that ends up in an action's outputs, a typed
-insert's undo step, or a scenario output is recorded like any other value.
+sensitive scenario variable (`inputs = { dsn = var.dsn }`).
+
+Wherever else the value turns up (an action's outputs, such as a command
+echoing it; a typed insert's undo step; a scenario output; an error message),
+`orchard run` and `orchard teardown` replace it with `«sensitive:<name>»` in
+what they print and record. Teardown puts the value back before using recorded
+outputs and undo steps, so a row inserted with the secret is still found and
+deleted. Matching is by value, so `run` refuses a sensitive string shorter than
+4 characters: it would match unrelated text. Only strings are matched; a
+sensitive number or bool is kept out of the variables in the record but not
+out of outputs.
 
 ### `provider`
 

@@ -701,3 +701,64 @@ func TestTeardownSensitiveVariables(t *testing.T) {
 		t.Fatalf("teardown should remove both rows, %d left", got)
 	}
 }
+
+// TestSensitiveValuesScrubbed: a sensitive value that travels into an
+// action's outputs, a typed insert's undo step and a scenario output is
+// recorded as a marker, and teardown puts the value back so the undo
+// still finds its row. A failing action's error doesn't print it either.
+func TestSensitiveValuesScrubbed(t *testing.T) {
+	project := t.TempDir()
+	db := filepath.Join(project, "shop.db")
+	createDB(t, db, "CREATE TABLE merchants (id INTEGER PRIMARY KEY, name TEXT NOT NULL)")
+	scenario := filepath.Join(project, "shop.hcl")
+	writeFile(t, scenario, `scenario "shop" {
+  variable "path" {}
+  variable "token" { sensitive = true }
+  variable "fail" { default = false }
+  required_providers {
+    db = { source = "builtin/sqlite" }
+    sh = { source = "builtin/exec" }
+  }
+  provider "db" {
+    path = var.path
+  }
+  action "sqlite_insert" "merchant" {
+    table  = "merchants"
+    values = { name = "acme-${var.token}" }
+  }
+  action "exec_run" "echo" {
+    command = "sh"
+    args    = ["-c", var.fail ? "echo \"$0\" >&2; exit 1" : "echo \"$0\"", var.token]
+  }
+  output "echoed" { value = action.exec_run.echo.stdout }
+}
+`)
+	const token = "tok-9f3a71"
+	rec := runRecorded(t, scenario, "--var", "path="+db, "--var", "token="+token)
+	raw, err := os.ReadFile(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), token) {
+		t.Fatalf("record should not hold the sensitive value:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "«sensitive:token»") {
+		t.Errorf("record should mark where the value was:\n%s", raw)
+	}
+
+	if out, err := runCLI(t, "teardown", rec, "--no-color", "--var", "token="+token); err != nil {
+		t.Fatalf("teardown: %v\n%s", err, out)
+	}
+	if got := countRows(t, db); got != 0 {
+		t.Fatalf("the restored undo step should delete the row, %d left", got)
+	}
+
+	out, err := runCLI(t, "run", scenario, "--no-color", "--record-dir", t.TempDir(),
+		"--var", "path="+db, "--var", "token="+token, "--var", "fail=true")
+	if err == nil {
+		t.Fatal("run should fail")
+	}
+	if strings.Contains(out+err.Error(), token) {
+		t.Errorf("a failing run should not print the sensitive value:\n%s\n%v", out, err)
+	}
+}

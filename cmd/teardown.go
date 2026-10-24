@@ -18,6 +18,7 @@ import (
 	"github.com/pthm/orchard/internal/graph"
 	"github.com/pthm/orchard/internal/parser"
 	"github.com/pthm/orchard/internal/record"
+	"github.com/pthm/orchard/internal/sensitive"
 	"github.com/pthm/orchard/pkg/provider"
 )
 
@@ -55,11 +56,12 @@ func newTeardownCmd() *cobra.Command {
 		Use:   "teardown <record-file | run-id | scenario-file --latest>",
 		Short: "Tear down the state created by a recorded scenario run",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) (err error) {
+			var red *sensitive.Redactor
+			defer func() { err = red.Error(err) }()
 			ctx := cmd.Context()
 
 			var file record.File
-			var err error
 			switch {
 			case latest:
 				file, err = latestRecord(recordDir, args[0], scenarioName, cmd.ErrOrStderr())
@@ -156,6 +158,27 @@ func newTeardownCmd() *cobra.Command {
 				)
 			}
 
+			// The run recorded sensitive values as markers wherever they
+			// travelled (outputs, undo steps, component inputs); now
+			// they're verified, put them back.
+			secret := map[string]bool{}
+			for name := range rec.SensitiveVariables {
+				secret[name] = true
+			}
+			if red, err = sensitive.New(ps.Variables, secret); err != nil {
+				return err
+			}
+			for id, m := range outputs {
+				outputs[id] = red.Restore(m)
+			}
+			for key, m := range compVars {
+				compVars[key] = red.Restore(m)
+			}
+			for id, u := range undos {
+				u.Attrs = red.Restore(u.Attrs)
+				undos[id] = u
+			}
+
 			g, err := graph.Build(ps)
 			if err != nil {
 				return fmt.Errorf("building graph: %w", err)
@@ -211,10 +234,10 @@ func newTeardownCmd() *cobra.Command {
 				return fmt.Errorf("building engine: %w", err)
 			}
 
-			eng.SetReporter(reporter.Select(reporter.Options{
+			eng.SetReporter(sensitive.Wrap(reporter.Select(reporter.Options{
 				Out:        cmd.OutOrStdout(),
 				ForcePlain: noColorFlag,
-			}))
+			}), red))
 
 			torn, tdErr := eng.Teardown(ctx, ps, g, ps.Variables, compVars, outputs, undos, done, completed)
 			markTornDown(rec, torn, tdErr == nil)

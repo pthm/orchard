@@ -10,6 +10,7 @@ import (
 	"github.com/pthm/orchard/internal/graph"
 	"github.com/pthm/orchard/internal/parser"
 	"github.com/pthm/orchard/internal/record"
+	"github.com/pthm/orchard/internal/sensitive"
 
 	// Side-effect imports register builtin provider sources. Adding
 	// a new builtin provider is a one-line change here.
@@ -38,8 +39,12 @@ func newRunCmd() *cobra.Command {
 		Use:   "run <scenario>",
 		Short: "Execute a scenario",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) (err error) {
 			ctx := cmd.Context()
+			// Sensitive values stay out of the error cobra prints, as
+			// they do out of the reporter's output and the record.
+			var red *sensitive.Redactor
+			defer func() { err = red.Error(err) }()
 			if parallelismFlag < 1 {
 				return fmt.Errorf("--parallelism must be at least 1, got %d", parallelismFlag)
 			}
@@ -47,6 +52,9 @@ func newRunCmd() *cobra.Command {
 			ps, err := parser.LoadScenario(args[0], runScenarioFlag, varFlags, seedOption(cmd)...)
 			if err != nil {
 				return fmt.Errorf("loading scenario: %w", err)
+			}
+			if red, err = sensitive.New(ps.Variables, ps.Sensitive); err != nil {
+				return err
 			}
 
 			g, err := graph.Build(ps)
@@ -120,7 +128,7 @@ func newRunCmd() *cobra.Command {
 				}
 				finalReporter = recRep
 			}
-			eng.SetReporter(finalReporter)
+			eng.SetReporter(sensitive.Wrap(finalReporter, red))
 			eng.SetParallelism(parallelismFlag)
 
 			_, execErr := eng.Execute(ctx, ps, g)

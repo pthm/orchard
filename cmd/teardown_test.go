@@ -2,9 +2,12 @@ package cmd
 
 import (
 	"database/sql"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/pthm/orchard/internal/record"
 )
 
 // runRecorded runs scenario with args and returns the record it wrote.
@@ -110,5 +113,105 @@ func TestTeardownRefusesMissingNodes(t *testing.T) {
 	}
 	if got := countRows(t, filepath.Join(project, "shop.db")); got != 2 {
 		t.Fatalf("a refused teardown should leave rows alone, %d left", got)
+	}
+}
+
+// TestTeardownProgress: teardown by run ID records each node it tore
+// down, a re-run after a partial failure skips the nodes already torn
+// down (even once the scenario stops declaring them), and a fully
+// torn-down record is refused before the scenario is even loaded.
+func TestTeardownProgress(t *testing.T) {
+	t.Run("rerun", func(t *testing.T) { testTeardownProgress(t, false) })
+	t.Run("torn node dropped", func(t *testing.T) { testTeardownProgress(t, true) })
+}
+
+func testTeardownProgress(t *testing.T, dropSecond bool) {
+	project := t.TempDir()
+	count := filepath.Join(project, "count")
+	marker := filepath.Join(project, "marker")
+	scenario := filepath.Join(project, "s.hcl")
+	// Reverse order tears down "second" first (it appends to count),
+	// then "first", which fails until the marker exists.
+	src := `scenario "progress" {
+  required_providers {
+    exec = { source = "builtin/exec" }
+  }
+  action "exec_run" "first" {
+    command = "true"
+    lifecycle {
+      teardown {
+        command = "test"
+        args    = ["-e", "` + marker + `"]
+      }
+    }
+  }
+  action "exec_run" "second" {
+    command    = "true"
+    depends_on = [action.exec_run.first]
+    lifecycle {
+      teardown {
+        command = "sh"
+        args    = ["-c", "echo x >> ` + count + `"]
+      }
+    }
+  }
+}
+`
+	writeFile(t, scenario, src)
+	dir := t.TempDir()
+	out, err := runCLI(t, "run", scenario, "--no-color", "--record-dir", dir)
+	if err != nil {
+		t.Fatalf("run: %v\n%s", err, out)
+	}
+	recs, _ := filepath.Glob(filepath.Join(dir, "*.json"))
+	if len(recs) != 1 || !strings.Contains(out, "record: "+recs[0]) {
+		t.Fatalf("run should print the record path %v:\n%s", recs, out)
+	}
+	rec, err := record.Load(recs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := runCLI(t, "teardown", rec.ID, "--record-dir", dir, "--no-color"); err == nil {
+		t.Fatal("first teardown should fail on the missing marker")
+	}
+	rec, err = record.Load(recs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	torn := map[string]bool{}
+	for _, n := range rec.Nodes {
+		torn[n.ID] = n.TornDown
+	}
+	if !torn["action.exec_run.second"] || torn["action.exec_run.first"] || rec.TornDownAt != nil {
+		t.Fatalf("partial teardown should mark only second: %+v", rec)
+	}
+
+	if dropSecond {
+		cut := strings.Index(src, `  action "exec_run" "second"`)
+		writeFile(t, scenario, src[:cut]+"}\n")
+	}
+	writeFile(t, marker, "")
+	if out, err := runCLI(t, "teardown", rec.ID, "--record-dir", dir, "--no-color"); err != nil {
+		t.Fatalf("second teardown: %v\n%s", err, out)
+	}
+	if got, _ := os.ReadFile(count); string(got) != "x\n" {
+		t.Errorf("second's teardown should run once, count file: %q", got)
+	}
+	rec, err = record.Load(recs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.TornDownAt == nil {
+		t.Fatalf("complete teardown should set torn_down_at: %+v", rec)
+	}
+
+	// Without the scenario nothing can be configured, so the refusal
+	// must come first.
+	if err := os.Remove(scenario); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runCLI(t, "teardown", recs[0], "--no-color"); err == nil || !strings.Contains(err.Error(), "already torn down at") {
+		t.Fatalf("torn-down record should be refused, got %v", err)
 	}
 }

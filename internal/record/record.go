@@ -18,7 +18,11 @@ package record
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/zclconf/go-cty/cty"
@@ -28,8 +32,9 @@ import (
 )
 
 // Format is a monotonically-increasing record format version. Bump
-// when making a breaking change to the on-disk shape so readers can
-// refuse a record they don't understand.
+// only for breaking changes to the on-disk shape: Load refuses any
+// other format, so additive fields (omitempty, absent in older
+// records) stay on the current one.
 const Format = "1"
 
 // Status values for runs and nodes.
@@ -57,6 +62,9 @@ type Record struct {
 	Variables  map[string]json.RawMessage `json:"variables,omitempty"`
 	Nodes      []Node                     `json:"nodes"`
 	Outputs    map[string]json.RawMessage `json:"outputs,omitempty"`
+	// TornDownAt is set once `orchard teardown` has finished every
+	// node's teardown; such a record is refused by a later teardown.
+	TornDownAt *time.Time `json:"torn_down_at,omitempty"`
 }
 
 // Scenario is the subset of scenario metadata worth persisting. Path
@@ -83,6 +91,9 @@ type Node struct {
 	// runs it when the action has no explicit teardown block. Records
 	// from before undo existed simply don't have it.
 	Undo *Undo `json:"undo,omitempty"`
+	// TornDown marks a node whose teardown succeeded, so re-running a
+	// partly failed teardown skips it.
+	TornDown bool `json:"torn_down,omitempty"`
 }
 
 // Undo is a recorded provider.Invocation: an action and its evaluated
@@ -169,7 +180,8 @@ func IndexUndos(r *Record) (map[string]provider.Invocation, error) {
 	return out, nil
 }
 
-// Load reads and parses a record file from disk.
+// Load reads and parses a record file from disk, refusing a format
+// other than Format.
 func Load(path string) (*Record, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -179,5 +191,93 @@ func Load(path string) (*Record, error) {
 	if err := json.Unmarshal(raw, &rec); err != nil {
 		return nil, err
 	}
+	if rec.Format != Format {
+		return nil, fmt.Errorf("%s: record format %q, want %q", path, rec.Format, Format)
+	}
 	return &rec, nil
+}
+
+// Save writes rec to path through a sibling temp file and a rename,
+// so a partially-flushed record can't appear on disk.
+func Save(path string, rec *Record) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".orchard-record-*.json.tmp")
+	if err != nil {
+		return fmt.Errorf("record: tempfile: %w", err)
+	}
+	tmpPath := tmp.Name()
+	enc := json.NewEncoder(tmp)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(rec); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("record: encode: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("record: close: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("record: rename: %w", err)
+	}
+	return nil
+}
+
+// File is a record and the path it was loaded from.
+type File struct {
+	Path   string
+	Record *Record
+}
+
+// List loads every record in dir, newest first. Files that match the
+// record name but can't be loaded (unreadable, not JSON, an unknown
+// format) are skipped with a line on warn.
+func List(dir string, warn io.Writer) ([]File, error) {
+	paths, err := filepath.Glob(filepath.Join(dir, "orchard_*_run_*.json"))
+	if err != nil {
+		return nil, err
+	}
+	var files []File
+	for _, p := range paths {
+		rec, err := Load(p)
+		if err != nil {
+			_, _ = fmt.Fprintf(warn, "warning: skipping record %s: %v\n", p, err)
+			continue
+		}
+		files = append(files, File{Path: p, Record: rec})
+	}
+	// IDs only carry the second, so two runs in one second need
+	// StartedAt's full precision; the ID breaks exact ties.
+	slices.SortFunc(files, func(a, b File) int {
+		if c := b.Record.StartedAt.Compare(a.Record.StartedAt); c != 0 {
+			return c
+		}
+		return strings.Compare(b.Record.ID, a.Record.ID)
+	})
+	return files, nil
+}
+
+// Resolve finds a record from a command-line argument: a path to an
+// existing file, or else a run ID looked up in dir. Records in dir
+// that can't be loaded are reported on warn, as List does.
+func Resolve(dir, arg string, warn io.Writer) (File, error) {
+	if st, err := os.Stat(arg); err == nil && !st.IsDir() {
+		rec, err := Load(arg)
+		if err != nil {
+			return File{}, err
+		}
+		return File{Path: arg, Record: rec}, nil
+	}
+	// ponytail: loads every record in dir to match one ID; index by
+	// filename if record dirs grow to thousands of runs.
+	files, err := List(dir, warn)
+	if err != nil {
+		return File{}, err
+	}
+	for _, f := range files {
+		if f.Record.ID == arg {
+			return f, nil
+		}
+	}
+	return File{}, fmt.Errorf("no record file %s, and no run with that ID in %s", arg, dir)
 }

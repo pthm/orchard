@@ -115,6 +115,9 @@ func newRunCmd() *cobra.Command {
 			eng.SetReporter(finalReporter)
 
 			_, execErr := eng.Execute(ctx, ps, g)
+			if recRep != nil && recRep.Path() != "" {
+				fmt.Fprintf(cmd.ErrOrStderr(), "record: %s\n", recRep.Path())
+			}
 			// Propagate Execute's error after letting the record land —
 			// the record reporter has already fired from inside Execute.
 			return execErr

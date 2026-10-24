@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/zclconf/go-cty/cty"
@@ -16,8 +17,9 @@ import (
 	"github.com/pthm/orchard/pkg/provider"
 )
 
-// newTeardownCmd builds the `orchard teardown <record-file>`
-// subcommand. It reads a record produced by a prior `orchard run`,
+// newTeardownCmd builds the `orchard teardown <record>` subcommand.
+// The record is a file path or a run ID looked up in --record-dir. It
+// reads a record produced by a prior `orchard run`,
 // reloads the scenario the record points at, and invokes the
 // engine's Teardown pass.
 //
@@ -31,17 +33,27 @@ import (
 // not the --var flag — teardown is meant to clean up the state the
 // recorded run produced. Future work may reintroduce overrides for
 // partial / targeted teardown.
+//
+// Progress is written back to the record: each node whose teardown
+// succeeded is marked torn_down and skipped by a re-run, and once
+// nothing fails the record gets torn_down_at and is refused from then
+// on.
 func newTeardownCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "teardown <record-file>",
+	var recordDir string
+	cmd := &cobra.Command{
+		Use:   "teardown <record-file | run-id>",
 		Short: "Tear down the state created by a recorded scenario run",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 
-			rec, err := record.Load(args[0])
+			file, err := record.Resolve(recordDir, args[0], cmd.ErrOrStderr())
 			if err != nil {
 				return fmt.Errorf("loading record: %w", err)
+			}
+			rec := file.Record
+			if rec.TornDownAt != nil {
+				return fmt.Errorf("record %s already torn down at %s", file.Path, rec.TornDownAt.Format(time.RFC3339))
 			}
 
 			// Decode record state into cty values once, before we do
@@ -88,10 +100,18 @@ func newTeardownCmd() *cobra.Command {
 				return fmt.Errorf("building graph: %w", err)
 			}
 
+			done := map[string]bool{}
+			for _, n := range rec.Nodes {
+				if n.TornDown {
+					done[n.ID] = true
+				}
+			}
+
 			// A recorded node that created something but is gone from
 			// the scenario would be skipped silently, leaving its
-			// state behind while teardown reports success.
-			if missing := missingNodes(g, outputs, undos); len(missing) > 0 {
+			// state behind while teardown reports success. Nodes
+			// already torn down have nothing left behind.
+			if missing := missingNodes(g, outputs, undos, done); len(missing) > 0 {
 				return fmt.Errorf("scenario %s no longer declares recorded node(s) %s; restore them to tear down",
 					rec.Scenario.Path, strings.Join(missing, ", "))
 			}
@@ -124,22 +144,46 @@ func newTeardownCmd() *cobra.Command {
 				ForcePlain: noColorFlag,
 			}))
 
-			return eng.Teardown(ctx, ps, g, vars, outputs, undos)
+			torn, tdErr := eng.Teardown(ctx, ps, g, vars, outputs, undos, done)
+			markTornDown(rec, torn, tdErr == nil)
+			if err := record.Save(file.Path, rec); err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: saving teardown progress: %v\n", err)
+			}
+			return tdErr
 		},
+	}
+	cmd.Flags().StringVar(&recordDir, "record-dir", ".",
+		"Directory to look a run ID up in")
+	return cmd
+}
+
+// markTornDown flags the torn nodes on rec, and stamps the record as
+// fully torn down when complete (no teardown failed).
+func markTornDown(rec *record.Record, torn []string, complete bool) {
+	for _, id := range torn {
+		for i := range rec.Nodes {
+			if rec.Nodes[i].ID == id {
+				rec.Nodes[i].TornDown = true
+			}
+		}
+	}
+	if complete {
+		now := time.Now().UTC()
+		rec.TornDownAt = &now
 	}
 }
 
 // missingNodes lists, sorted, the recorded nodes with outputs or an
-// undo step that g no longer contains.
-func missingNodes(g *graph.Graph, outputs map[string]map[string]cty.Value, undos map[string]provider.Invocation) []string {
+// undo step that g no longer contains, leaving out those already done.
+func missingNodes(g *graph.Graph, outputs map[string]map[string]cty.Value, undos map[string]provider.Invocation, done map[string]bool) []string {
 	var missing []string
 	for id := range outputs {
-		if _, ok := g.Nodes[graph.NodeID(id)]; !ok {
+		if _, ok := g.Nodes[graph.NodeID(id)]; !ok && !done[id] {
 			missing = append(missing, id)
 		}
 	}
 	for id := range undos {
-		if _, ok := g.Nodes[graph.NodeID(id)]; !ok && outputs[id] == nil {
+		if _, ok := g.Nodes[graph.NodeID(id)]; !ok && outputs[id] == nil && !done[id] {
 			missing = append(missing, id)
 		}
 	}

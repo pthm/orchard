@@ -602,7 +602,8 @@ Lifecycle is a first-class concern, not an afterthought. Once Orchard can create
 
 Every `orchard run` writes a JSON record to the working directory (override with `--record-dir`, skip with `--no-record`). Filename: `orchard_<scenario>_run_<id>.json`, where the id is a sortable `YYYYMMDDTHHMMSSZ_<8hex>` string. The record captures:
 
-- A format version so readers can reject records they don't understand.
+- A format version; readers refuse any format other than the one they know.
+- Teardown progress: `torn_down` on each node whose teardown succeeded, and `torn_down_at` once a teardown finished with no failures.
 - Run id, scenario name and absolute path, start/finish timestamps.
 - Overall status (`succeeded` / `failed`) and top-level error, if any.
 - The scenario's resolved variables (cty-encoded via `pkg/protocol/ctyjson`).
@@ -615,11 +616,13 @@ The file-on-disk shape is deliberately simpler than Terraform's state: no remote
 
 ### Teardown
 
-`orchard teardown <record-file>` reloads the scenario at the record's absolute path with the record's variables (so `count` / `for_each` expand as they did in the run, and variables without a default resolve), refuses if a recorded node that created something is no longer declared, re-configures providers from the current scenario file, and walks the dependency graph in **reverse** topological order. For each action whose original run succeeded AND that declares a `lifecycle { teardown { } }` block, the engine evaluates the teardown body against an eval context composed of:
+`orchard teardown <record-file | run-id>` (a run ID is looked up in `--record-dir`) reloads the scenario at the record's absolute path with the record's variables (so `count` / `for_each` expand as they did in the run, and variables without a default resolve), refuses if a recorded node that created something and isn't torn down yet is no longer declared, re-configures providers from the current scenario file, and walks the dependency graph in **reverse** topological order. For each action whose original run succeeded AND that declares a `lifecycle { teardown { } }` block, the engine evaluates the teardown body against an eval context composed of:
 
 - `var.<name>` — the scenario variables from the record.
 - `self.<field>` — the teardown-only namespace pointing at this action's own recorded outputs. Authors write `DELETE FROM t WHERE id = ${self.id}` without restating the node name.
 - `action.<type>.<name>.<field>` — any other action's recorded outputs, so a downstream teardown can reference an upstream's natural keys if needed.
+
+Progress is saved back to the record: each node whose teardown succeeded is marked `torn_down` and skipped by a re-run, and a teardown with no failures stamps `torn_down_at`, after which the record is refused.
 
 The teardown body uses the **same schema as the outer action's provider**. A sql action's teardown declares `query`; an http action's declares `method` + `url`; an exec action's declares `command` + `args`. No teardown-specific provider surface — the provider's existing `Execute` is what runs.
 
@@ -741,8 +744,9 @@ orchard functions --json
 orchard docs builtin/postgres
 orchard docs exec:./providers/stripe
 
-# Teardown a specific run by pointing at its record file
+# Teardown a specific run by its record file or run ID
 orchard teardown orchard_dev_run_20260415T000000Z_abc.json
+orchard teardown 20260415T000000Z_abc --record-dir .orchard/runs
 
 # Control where records land, or skip them entirely
 orchard run scenarios/dev.hcl --record-dir .orchard/runs
@@ -992,6 +996,8 @@ Make cleanup a first-class operation so that scenarios can be torn down cleanly,
 | `lifecycle { teardown { } }` blocks on actions (same schema as the outer action's provider) | Done |
 | `self.*` reference namespace inside teardown bodies | Done |
 | `orchard teardown <record-file>` command | Done |
+| `orchard teardown <run-id>` (looked up in `--record-dir`); `orchard run` prints the record path | Done |
+| Per-node teardown progress (`torn_down`) saved back to the record; re-runs skip torn-down nodes; fully torn-down records (`torn_down_at`) are refused | Done |
 | Reverse-order cleanup driven by the dependency graph | Done |
 | Best-effort teardown with joined error reporting | Done |
 | Teardown reloads the scenario with the recorded variables; refuses records whose created nodes the scenario no longer declares | Done |
@@ -1004,10 +1010,9 @@ Make cleanup a first-class operation so that scenarios can be torn down cleanly,
 | `orchard inspect <run-id>` — show run details | Not started |
 | `orchard teardown <scenario> --latest` convenience | Not started |
 | Run metadata tagging on created resources | Not started |
-| `orchard run --teardown` one-shot create-then-teardown | Not started |
-| Record format migrations / version negotiation | Not started |
+| Record format migrations / version negotiation | Version check done; migrations when a format 2 exists |
 
-**Done summary.** The core records + teardown loop is functional: every `orchard run` writes a JSON record with per-node outputs and resolved variables; `orchard teardown <record-file>` replays the scenario in reverse topological order and evaluates each action's `lifecycle { teardown { } }` body against a `var.* / self.* / action.*` eval context. Teardown uses the provider's existing `Execute` — no new provider surface — so any action type automatically supports teardown once its author writes a lifecycle block.
+**Done summary.** The core records + teardown loop is functional: every `orchard run` writes a JSON record with per-node outputs and resolved variables; `orchard teardown <record-file | run-id>` replays the scenario in reverse topological order and evaluates each action's `lifecycle { teardown { } }` body against a `var.* / self.* / action.*` eval context. Teardown uses the provider's existing `Execute` — no new provider surface — so any action type automatically supports teardown once its author writes a lifecycle block.
 
 **Next up.** Milestone 4 closed the "every teardown is hand-written" gap for typed inserts, which record their own undo. What's left here: restoring previous values on typed-update teardown, scenario-level `lifecycle { on_failure / on_success }` policies, and `orchard list runs` / `orchard inspect` to take the record format beyond a single invocation.
 

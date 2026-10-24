@@ -20,7 +20,8 @@ import (
 // recordedOutputs and undos are the state that run captured in its
 // record: the scenario's resolved variables, each succeeded node's
 // outputs, and the undo invocations providers described, keyed by full
-// node ID ("action.sql.create_merchant" etc.).
+// node ID ("action.sql.create_merchant" etc.). Nodes in done were torn
+// down by an earlier, partly failed teardown and are skipped.
 //
 // For each action, in order of precedence:
 //  1. its `lifecycle { teardown { } }` body, evaluated and run against
@@ -35,7 +36,8 @@ import (
 //
 // Teardown is best-effort: failures on individual actions are
 // logged via the reporter's NodeFailed hook but don't abort the
-// walk. The returned error is the joined set of per-action errors,
+// walk. Teardown returns the nodes whose teardown succeeded, so the
+// caller can record them, and the joined set of per-action errors,
 // or nil if every attempted teardown succeeded.
 //
 // Eval context per action:
@@ -60,11 +62,13 @@ func (e *Engine) Teardown(
 	vars map[string]cty.Value,
 	recordedOutputs map[string]map[string]cty.Value,
 	undos map[string]provider.Invocation,
-) error {
+	done map[string]bool,
+) ([]string, error) {
 	e.reporter.RunStarted(ps.Scenario.Name)
 	start := time.Now()
 
 	var errs []error
+	var torn []string
 	succeeded := 0
 	failed := 0
 
@@ -76,7 +80,7 @@ func (e *Engine) Teardown(
 		nodeID := g.Order[i]
 		node := g.Nodes[nodeID]
 
-		if node.Kind != graph.ActionNode {
+		if node.Kind != graph.ActionNode || done[string(nodeID)] {
 			continue
 		}
 		var run func() error
@@ -111,6 +115,7 @@ func (e *Engine) Teardown(
 		// provider's Execute return is discarded. A future
 		// enhancement could surface them via a teardown record.
 		e.reporter.NodeCompleted(string(nodeID), nil, time.Since(nodeStart))
+		torn = append(torn, string(nodeID))
 		succeeded++
 	}
 
@@ -127,7 +132,7 @@ func (e *Engine) Teardown(
 		OK:        ok,
 		Err:       finalErr,
 	})
-	return finalErr
+	return torn, finalErr
 }
 
 // teardownAction evaluates one action's teardown body against its

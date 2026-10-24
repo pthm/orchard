@@ -40,32 +40,12 @@ func (fw FileWriter) Write(r *Record) error {
 	if err := os.MkdirAll(fw.Dir, 0o755); err != nil {
 		return fmt.Errorf("record: create dir: %w", err)
 	}
-	path := filepath.Join(fw.Dir, Filename(r.Scenario.Name, r.ID))
+	return Save(fw.Path(r), r)
+}
 
-	// Atomic rename: write to a sibling temp file then rename. If
-	// the process dies mid-write, there's no half-written target
-	// for consumers to mistake as valid.
-	tmp, err := os.CreateTemp(fw.Dir, ".orchard-record-*.json.tmp")
-	if err != nil {
-		return fmt.Errorf("record: tempfile: %w", err)
-	}
-	tmpPath := tmp.Name()
-	enc := json.NewEncoder(tmp)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(r); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("record: encode: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("record: close: %w", err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("record: rename: %w", err)
-	}
-	return nil
+// Path is where Write puts r.
+func (fw FileWriter) Path(r *Record) string {
+	return filepath.Join(fw.Dir, Filename(r.Scenario.Name, r.ID))
 }
 
 // Reporter wraps another engine.Reporter and accumulates enough
@@ -103,7 +83,14 @@ type Reporter struct {
 
 	// WriteErr is set if the record could not be persisted.
 	WriteErr error
+
+	path string
 }
+
+// Path is the file the record was written to, or "" if it wasn't
+// written (no writer, a failed write, or a writer that isn't a
+// FileWriter).
+func (r *Reporter) Path() string { return r.path }
 
 // Options configures a Reporter. Most callers only need Writer and
 // scenario context; LogOutput is where a write failure surfaces.
@@ -253,6 +240,10 @@ func (r *Reporter) RunCompleted(summary engine.RunSummary) {
 	if err := r.writer.Write(rec); err != nil {
 		r.WriteErr = err
 		_, _ = fmt.Fprintf(r.log, "orchard: record: %v\n", err)
+		return
+	}
+	if fw, ok := r.writer.(FileWriter); ok {
+		r.path = fw.Path(rec)
 	}
 }
 

@@ -22,9 +22,10 @@ executing...
   ok action.postgres_query.create_product (2ms)
 ...
 
-$ ls orchard_dev_run_*.json
-orchard_dev_run_20260415T103045Z_a3f29e5b.json
+record: orchard_dev_run_20260415T103045Z_a3f29e5b.json
 ```
+
+`orchard run` prints the record's path on stderr once it's written.
 
 The record captures:
 
@@ -33,6 +34,7 @@ The record captures:
 - Per-node timing and outputs.
 - The scenario-level outputs.
 - A top-level status: `succeeded` or `failed`.
+- Teardown progress, once you've run `orchard teardown` on it.
 
 Records land in `.` by default. Override with `--record-dir <path>` or skip
 entirely with `--no-record`.
@@ -127,11 +129,14 @@ same rules as above, and removes the backup either way.
 
 ## `orchard teardown <record>`
 
-Hand the record file to `orchard teardown` and Orchard walks the scenario in
-**reverse** topological order, running each action's teardown body:
+Hand the record file, or just its run ID, to `orchard teardown` and Orchard
+walks the scenario in **reverse** topological order, running each action's
+teardown body:
 
 ```sh
 orchard teardown orchard_dev_run_20260415T103045Z_a3f29e5b.json
+orchard teardown 20260415T103045Z_a3f29e5b                       # looked up in .
+orchard teardown 20260415T103045Z_a3f29e5b --record-dir .orchard/runs
 ```
 
 For a scenario that inserted a merchant and then a product (FK → merchants),
@@ -143,12 +148,20 @@ their current defaults, and `--var` doesn't apply. A scenario run with
 `--var rows=3` against an action with `count = var.rows` tears down all three
 instances, and a variable with no default needs no override. If the scenario
 no longer declares an action the record says created something, teardown
-refuses and names it, so put the action back before tearing down.
+refuses and names it, so put the action back before tearing down. An action
+an earlier teardown of the record already tore down can be removed.
 
 Teardown is **best-effort**: if one action's teardown fails, the walk keeps
 going. The joined set of errors is returned at the end. That matches how
 cleanup usually works in practice — you want to unwind as much as possible,
 not stop at the first stubborn row.
+
+Teardown writes its progress back into the record. Each action whose teardown
+succeeded is marked `torn_down`, so after fixing whatever failed you run the
+same `orchard teardown` again and it picks up where it left off, without
+repeating the teardowns that already ran. Once a teardown finishes with no
+failures the record gets `torn_down_at`, and a later teardown of it is refused
+("already torn down at ...") before any provider is touched.
 
 ## When teardown isn't the right tool
 
@@ -184,6 +197,5 @@ not stop at the first stubborn row.
 - **Re-inserting what a typed delete removed.** Not automatic yet.
 - **Scenario-level lifecycle policies** (`on_failure = "rollback"`). Planned;
   not yet implemented.
-- **`orchard run --teardown` one-shot.** Also planned.
 - **`orchard list runs` / `orchard inspect <id>`**. Also planned. For now,
   records are plain JSON — `jq`, `cat`, and `ls` are your tools.

@@ -89,8 +89,8 @@ prints declared outputs. Exits non-zero on validation or execution failure.
 6. Evaluate scenario outputs and print them.
 7. Send `shutdown` to every provider.
 8. Write a JSON **run record** to `--record-dir` (unless `--no-record` is set),
-   capturing variables, per-node outputs, and scenario outputs. See
-   [run records](#run-records) below.
+   capturing variables, per-node outputs, and scenario outputs, and print
+   `record: <path>` on stderr. See [run records](#run-records) below.
 
 **Exit codes**
 
@@ -160,7 +160,7 @@ See [plan vs run](/docs/concepts/plan-vs-run/) for the rationale behind the spli
 ## `orchard teardown`
 
 ```
-orchard teardown <record-file>
+orchard teardown <record-file | run-id> [--record-dir <path>]
 ```
 
 Tear down the state created by a recorded scenario run. Reads the JSON record
@@ -170,19 +170,26 @@ the record, and evaluates each action's `lifecycle { teardown { } }` body in
 
 | Argument | Description |
 |----------|-------------|
-| `<record-file>` | Path to a record written by `orchard run`. Required. |
+| `<record-file \| run-id>` | Path to a record written by `orchard run`, or its run ID (`20260415T103045Z_a3f29e5b`) looked up in `--record-dir`. Required. |
+
+**Flags**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--record-dir <path>` | string | `.` (cwd) | Directory to look a run ID up in. Ignored when the argument is an existing file. |
 
 **Behavior**
 
-1. Load and decode the record file.
+1. Load and decode the record. Refuse a record whose format isn't `1`, and one
+   already fully torn down (`already torn down at <time>`).
 2. Load the scenario at the absolute path stored in the record, with the
    variables the recorded run used (`--var` does not apply), so `count` /
    `for_each` expand to the same instances and variables without a default
    resolve.
 3. Verify the scenario name matches the one in the record (reject if the file
    has been rewritten to declare a different scenario), and that every
-   recorded node with outputs or an undo step is still in the scenario (reject
-   and name the missing nodes otherwise).
+   recorded node with outputs or an undo step, and not yet torn down, is still
+   in the scenario (reject and name the missing nodes otherwise).
 4. Register and configure providers using the scenario's current config
    blocks, evaluated against the recorded variables.
 5. Walk the dependency graph in reverse; for each action that succeeded in the
@@ -190,8 +197,11 @@ the record, and evaluates each action's `lifecycle { teardown { } }` body in
    `lifecycle { teardown { } }` body if it has one, or otherwise the undo step
    its provider recorded (a typed insert's delete by primary key, or a typed
    update's previous values), unless the action sets `managed_teardown = false`.
-6. Skip actions with neither, actions whose original run failed, and component
-   nodes.
+6. Skip actions with neither, actions whose original run failed, actions an
+   earlier teardown of this record already tore down, and component nodes.
+7. Save progress back to the record: mark each action whose teardown
+   succeeded `torn_down`, and set `torn_down_at` if nothing failed. A failed
+   save is a warning, not an error.
 
 Teardown is **best-effort**: a failure on one action doesn't abort the walk.
 The joined set of errors is returned at the end.
@@ -347,7 +357,7 @@ chronological order.
 
 Records are written atomically (temp + rename) and contain:
 
-- `format` — record format version, for future readers.
+- `format` — record format version (`1`). Readers refuse any other format.
 - `id`, `scenario.name`, `scenario.path` — what ran, where from.
 - `started_at`, `finished_at`, `status` (`succeeded` / `failed`) — when and how
   it went.
@@ -355,6 +365,8 @@ Records are written atomically (temp + rename) and contain:
 - `nodes` — per-node entries: id, kind, status, timing, and outputs (or error).
 - `outputs` — scenario-level outputs.
 - `error` — top-level error if the run aborted.
+- `torn_down` (per node) and `torn_down_at` — teardown progress, written back
+  by `orchard teardown`. Absent until a teardown runs.
 
 Records power `orchard teardown`, which replays the scenario in reverse using
 each action's `lifecycle { teardown { } }` block. Records are not required for

@@ -151,8 +151,8 @@ func runTeardown(t *testing.T, scenarioPath string, vars map[string]string, rec 
 
 	undos, err := record.IndexUndos(rec)
 	require.NoError(t, err)
-	require.NoError(t, eng.Teardown(context.Background(), ps, g, recVars, outputs, undos),
-		"teardown reported errors")
+	_, err = eng.Teardown(context.Background(), ps, g, recVars, outputs, undos, nil)
+	require.NoError(t, err, "teardown reported errors")
 }
 
 // assertMerchantExists checks whether a merchant row with the given

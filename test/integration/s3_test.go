@@ -15,6 +15,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
+	"github.com/zclconf/go-cty/cty"
+
+	"github.com/pthm/orchard/pkg/provider"
+	s3provider "github.com/pthm/orchard/pkg/provider/s3"
 )
 
 // TestS3_RunAndTeardown runs the S3 scenario against SeaweedFS's S3
@@ -105,6 +109,45 @@ func TestS3_RunAndTeardown(t *testing.T) {
 	body, _ = get("existing", "unowned.txt")
 	assert.Equal(t, "ours", body, "unowned object left as written")
 	assert.ElementsMatch(t, []string{"ignored.txt", "requested.txt", "unowned.txt"}, keys("existing"), "no backups left")
+}
+
+// TestS3_ConcurrentExecuteUndo: concurrent puts each get the undo for
+// their own object.
+func TestS3_ConcurrentExecuteUndo(t *testing.T) {
+	ctx := context.Background()
+	p := s3provider.New()
+	require.NoError(t, p.Configure(ctx, map[string]cty.Value{
+		"endpoint":          cty.StringVal(s3Server(t)),
+		"path_style":        cty.True,
+		"access_key_id":     cty.StringVal("minioadmin"),
+		"secret_access_key": cty.StringVal("minioadmin"),
+	}))
+	t.Cleanup(func() { _ = p.Close() })
+	_, _, err := p.ExecuteUndo(ctx, "s3_create_bucket", map[string]cty.Value{"bucket": cty.StringVal("concurrent")}, provider.InverseOptions{})
+	require.NoError(t, err)
+
+	const n = 10
+	undos := make([]*provider.Invocation, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, undos[i], errs[i] = p.ExecuteUndo(ctx, "s3_put_object", map[string]cty.Value{
+				"bucket":  cty.StringVal("concurrent"),
+				"key":     cty.StringVal(fmt.Sprintf("k%d", i)),
+				"content": cty.StringVal("x"),
+			}, provider.InverseOptions{})
+		}()
+	}
+	wg.Wait()
+	for i, u := range undos {
+		require.NoError(t, errs[i])
+		require.NotNil(t, u, "k%d", i)
+		assert.Equal(t, "s3_delete_object", u.Action)
+		assert.Equal(t, fmt.Sprintf("k%d", i), u.Attrs["key"].AsString())
+	}
 }
 
 var (

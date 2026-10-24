@@ -129,16 +129,25 @@ func (p *Provider) PlanAction(ctx context.Context, action string, attrs map[stri
 }
 
 // Compile-time assertion that typed inserts tear themselves down.
-var _ provider.Inverter = (*Provider)(nil)
+var _ provider.Undoer = (*Provider)(nil)
 
-// Inverse describes the automatic teardown of a typed action: deleting
-// an inserted row by its primary key, or restoring the previous values
-// of rows an update changed.
-func (p *Provider) Inverse(action string, attrs, outputs map[string]cty.Value, opts provider.InverseOptions) *provider.Invocation {
-	if p.typed == nil {
-		return nil
+// ExecuteUndo runs an action like Execute and, for a typed action, also
+// describes its automatic teardown: deleting an inserted row by its
+// primary key, or restoring the previous values of rows an update
+// changed.
+func (p *Provider) ExecuteUndo(ctx context.Context, action string, attrs map[string]cty.Value, opts provider.InverseOptions) (map[string]cty.Value, *provider.Invocation, error) {
+	if p.db == nil {
+		return nil, nil, fmt.Errorf("sqlite: not configured")
 	}
-	return p.typed.Inverse(action, attrs, outputs, opts)
+	if _, ok := p.typed.Verb(action); !ok {
+		out, err := p.Execute(ctx, action, attrs)
+		return out, nil, err
+	}
+	out, undo, err := p.typed.ExecuteUndo(ctx, action, attrs, opts)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: %w", action, err)
+	}
+	return out, undo, nil
 }
 
 // Compile-time assertion that `orchard plan` can check typed actions.

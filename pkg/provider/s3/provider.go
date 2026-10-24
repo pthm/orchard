@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"regexp"
+	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -41,14 +42,9 @@ type Provider struct {
 	token string
 	// owned records the objects (bucket/key) typed puts created this
 	// run, so a later overwrite of them is restored on teardown by
-	// default.
+	// default. mu guards it.
+	mu    sync.Mutex
 	owned map[string]bool
-	// last is what the most recent action wrote, for Inverse. The
-	// engine runs actions one at a time and calls Inverse straight after
-	// Execute.
-	// ponytail: a single slot, like sqlcrud and redis; key it by action
-	// if actions ever run in parallel.
-	last *written
 }
 
 // New returns an unconfigured S3 provider.
@@ -59,7 +55,7 @@ func New() *Provider {
 var (
 	_ provider.Provider      = (*Provider)(nil)
 	_ provider.ActionPlanner = (*Provider)(nil)
-	_ provider.Inverter      = (*Provider)(nil)
+	_ provider.Undoer        = (*Provider)(nil)
 )
 
 // Schema returns the embedded provider schema.
@@ -146,37 +142,54 @@ func (p *Provider) Configure(ctx context.Context, cfg map[string]cty.Value) erro
 
 // Execute dispatches to the handler for the given action.
 func (p *Provider) Execute(ctx context.Context, action string, attrs map[string]cty.Value) (map[string]cty.Value, error) {
+	out, _, err := p.execute(ctx, action, attrs)
+	return out, err
+}
+
+// ExecuteUndo runs an action like Execute and also describes its undo
+// (see written.undo).
+func (p *Provider) ExecuteUndo(ctx context.Context, action string, attrs map[string]cty.Value, opts provider.InverseOptions) (map[string]cty.Value, *provider.Invocation, error) {
+	out, w, err := p.execute(ctx, action, attrs)
+	if err != nil {
+		return nil, nil, err
+	}
+	return out, w.undo(opts), nil
+}
+
+// execute runs an action, returning what it wrote (nil if nothing to
+// undo).
+func (p *Provider) execute(ctx context.Context, action string, attrs map[string]cty.Value) (map[string]cty.Value, *written, error) {
 	if p.client == nil {
-		return nil, fmt.Errorf("s3: not configured")
+		return nil, nil, fmt.Errorf("s3: not configured")
 	}
 	if err := check(action, attrs); err != nil {
-		return nil, fmt.Errorf("%s: %w", action, err)
+		return nil, nil, fmt.Errorf("%s: %w", action, err)
 	}
-	p.last = nil
 	var (
 		out map[string]cty.Value
+		w   *written
 		err error
 	)
 	switch action {
 	case "s3_create_bucket":
-		out, err = p.createBucket(ctx, attrs)
+		out, w, err = p.createBucket(ctx, attrs)
 	case "s3_put_object":
-		out, err = p.putObject(ctx, attrs)
+		out, w, err = p.putObject(ctx, attrs)
 	case "s3_delete_object":
 		out, err = p.deleteObject(ctx, attrs)
 	case "s3_delete_bucket":
 		out, err = p.deleteBucket(ctx, attrs)
 	case "s3_restore":
-		// Internal: the undo Inverse records for an overwrite. It isn't
-		// in the schema, so scenarios can't call it.
+		// Internal: the undo ExecuteUndo records for an overwrite. It
+		// isn't in the schema, so scenarios can't call it.
 		out, err = p.restore(ctx, attrs)
 	default:
-		return nil, fmt.Errorf("s3: unknown action %q", action)
+		return nil, nil, fmt.Errorf("s3: unknown action %q", action)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", action, err)
+		return nil, nil, fmt.Errorf("%s: %w", action, err)
 	}
-	return out, nil
+	return out, w, nil
 }
 
 // PlanAction runs the checks that need no network, at plan and before

@@ -2,9 +2,12 @@ package sqlite
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/zclconf/go-cty/cty"
 
@@ -219,10 +222,11 @@ func TestUpdateRestoreLimit(t *testing.T) {
 			"set":   cty.ObjectVal(map[string]cty.Value{"region": cty.StringVal("eu")}),
 			"where": where,
 		}
-		if _, err := p.Execute(context.Background(), "sqlite_update", attrs); err != nil {
+		_, inv, err := p.ExecuteUndo(context.Background(), "sqlite_update", attrs, provider.InverseOptions{Requested: true})
+		if err != nil {
 			t.Fatal(err)
 		}
-		return p.Inverse("sqlite_update", attrs, nil, provider.InverseOptions{Requested: true})
+		return inv
 	}
 	if inv := update(cty.ObjectVal(map[string]cty.Value{"region": cty.StringVal("us")})); inv != nil {
 		t.Fatalf("1001 rows: expected no restore, got %v", inv.Action)
@@ -230,5 +234,63 @@ func TestUpdateRestoreLimit(t *testing.T) {
 	inv := update(cty.ObjectVal(map[string]cty.Value{"name": cty.StringVal("m1")}))
 	if inv == nil || inv.Action != "sqlite_restore" || inv.Attrs["rows"].LengthInt() != 1 {
 		t.Fatalf("one row: expected a restore of it, got %#v", inv)
+	}
+}
+
+// A typed insert into a cached table, concurrent with one into a table
+// created after the schema was read (so it re-reads the schema), must
+// not deadlock on SQLite's single connection: re-reading the schema
+// mustn't hold the lock the other insert needs while it holds the
+// connection.
+func TestConcurrentInsertDuringSchemaRefresh(t *testing.T) {
+	p := open(t, ":memory:")
+	exec(t, p, schemaSQL)
+	insert := func(table string) error {
+		_, _, err := p.ExecuteUndo(context.Background(), "sqlite_insert", map[string]cty.Value{
+			"table":  cty.StringVal(table),
+			"values": cty.ObjectVal(map[string]cty.Value{"name": cty.StringVal("x"), "region": cty.StringVal("us")}),
+		}, provider.InverseOptions{})
+		return err
+	}
+	if err := insert("merchants"); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		for i := range 50 {
+			table := fmt.Sprintf("later_%d", i)
+			if _, err := p.Execute(context.Background(), "sqlite_query", map[string]cty.Value{
+				"query": cty.StringVal("CREATE TABLE " + table + " (id INTEGER PRIMARY KEY, name TEXT, region TEXT)"),
+			}); err != nil {
+				done <- err
+				return
+			}
+			var wg sync.WaitGroup
+			errs := make([]error, 2)
+			for j, tbl := range []string{"merchants", table} {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					errs[j] = insert(tbl)
+				}()
+			}
+			wg.Wait()
+			for _, err := range errs {
+				if err != nil {
+					done <- err
+					return
+				}
+			}
+		}
+		done <- nil
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("deadlocked")
 	}
 }

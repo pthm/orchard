@@ -40,8 +40,12 @@ func (b *blockingProvider) Execute(ctx context.Context, _ string, _ map[string]c
 	return nil, ctx.Err()
 }
 
-func (b *blockingProvider) Inverse(string, map[string]cty.Value, map[string]cty.Value, provider.InverseOptions) *provider.Invocation {
-	return &provider.Invocation{Action: "sql_delete", Attrs: map[string]cty.Value{"id": cty.StringVal("1")}}
+func (b *blockingProvider) ExecuteUndo(ctx context.Context, action string, attrs map[string]cty.Value, _ provider.InverseOptions) (map[string]cty.Value, *provider.Invocation, error) {
+	out, err := b.Execute(ctx, action, attrs)
+	if err != nil {
+		return nil, nil, err
+	}
+	return out, &provider.Invocation{Action: "sql_delete", Attrs: map[string]cty.Value{"id": cty.StringVal("1")}}, nil
 }
 
 // captureReporter keeps the events an interrupted run emits.

@@ -30,8 +30,7 @@ func conflictMode(attrs map[string]cty.Value) string {
 	return conflictUpdate
 }
 
-// written is what the most recent typed action did to its key, for
-// Inverse to describe the undo.
+// written is what a typed action did to its key, for its undo.
 type written struct {
 	key       string
 	created   bool
@@ -43,14 +42,12 @@ type written struct {
 	hash      bool
 }
 
-// Inverse describes the undo of the typed action that just ran: DEL a
-// key it created; RESTORE one it overwrote, when the key is owned or
-// the scenario asks (managed_teardown = true); for an unowned hash,
-// HDEL just the fields it added. Otherwise nothing.
-func (p *Provider) Inverse(action string, _, _ map[string]cty.Value, opts provider.InverseOptions) *provider.Invocation {
-	w := p.last
-	p.last = nil
-	if w == nil || !w.wrote || (action != "redis_set" && action != "redis_hset") {
+// undo describes the undo of a typed action: DEL a key it created;
+// RESTORE one it overwrote, when the key is owned or the scenario asks
+// (managed_teardown = true); for an unowned hash, HDEL just the fields
+// it added. Otherwise, and for a nil w (an untyped action), nothing.
+func (w *written) undo(opts provider.InverseOptions) *provider.Invocation {
+	if w == nil || !w.wrote {
 		return nil
 	}
 	if w.created {
@@ -83,6 +80,8 @@ func command(args ...string) *provider.Invocation {
 // remember records what a typed action did, and the key as owned when
 // it created it.
 func (p *Provider) remember(w *written) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if p.owned == nil {
 		p.owned = map[string]bool{}
 	}
@@ -90,7 +89,6 @@ func (p *Provider) remember(w *written) {
 	if w.created {
 		p.owned[w.key] = true
 	}
-	p.last = w
 }
 
 // capture queues DUMP and PTTL of key ahead of a write in the same
@@ -167,21 +165,21 @@ func (p *Provider) restore(ctx context.Context, attrs map[string]cty.Value) (map
 // SET, preceded in the same MULTI/EXEC by EXISTS and a capture of the
 // old value so created is exact and an overwrite can be undone. With
 // "ignore" it's SET NX: an existing key is left alone.
-func (p *Provider) set(ctx context.Context, attrs map[string]cty.Value) (map[string]cty.Value, error) {
+func (p *Provider) set(ctx context.Context, attrs map[string]cty.Value) (map[string]cty.Value, *written, error) {
 	key := attrs["key"].AsString()
 	value, err := encodeValue(attrs["value"])
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	ttl, _, err := parseTTL(attrs["ttl"])
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	w := &written{key: key}
 	if conflictMode(attrs) == conflictIgnore {
 		if w.created, err = p.client.SetNX(ctx, key, value, ttl).Result(); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		w.wrote = w.created
 	} else {
@@ -196,13 +194,13 @@ func (p *Provider) set(ctx context.Context, attrs map[string]cty.Value) (map[str
 			return nil
 		})
 		if err := txErr(cmds, err); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		w.created, w.wrote = exists.Val() == 0, true
 		old.fill(w)
 	}
 	p.remember(w)
-	return map[string]cty.Value{"key": cty.StringVal(key), "created": cty.BoolVal(w.created)}, nil
+	return map[string]cty.Value{"key": cty.StringVal(key), "created": cty.BoolVal(w.created)}, w, nil
 }
 
 // hset sets fields on the hash at key, then its expiry when ttl is set.
@@ -210,11 +208,11 @@ func (p *Provider) set(ctx context.Context, attrs map[string]cty.Value) (map[str
 // captures the old hash, and writes in one MULTI/EXEC, so created and
 // new_fields are exact. With "ignore" it writes only if the key doesn't
 // exist, under WATCH.
-func (p *Provider) hset(ctx context.Context, attrs map[string]cty.Value) (map[string]cty.Value, error) {
+func (p *Provider) hset(ctx context.Context, attrs map[string]cty.Value) (map[string]cty.Value, *written, error) {
 	key := attrs["key"].AsString()
 	ttl, hasTTL, err := parseTTL(attrs["ttl"])
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	fields := attrs["fields"].AsValueMap()
 	names := make([]string, 0, len(fields))
@@ -222,7 +220,7 @@ func (p *Provider) hset(ctx context.Context, attrs map[string]cty.Value) (map[st
 	for name, v := range fields {
 		s, err := encodeValue(v)
 		if err != nil {
-			return nil, fmt.Errorf("field %q: %w", name, err)
+			return nil, nil, fmt.Errorf("field %q: %w", name, err)
 		}
 		names = append(names, name)
 		pairs = append(pairs, name, s)
@@ -258,12 +256,12 @@ func (p *Provider) hset(ctx context.Context, attrs map[string]cty.Value) (map[st
 			return err
 		}, key)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if w.created {
 			w.wrote, w.newFields = true, names
 		}
-		return out(), nil
+		return out(), w, nil
 	}
 
 	var (
@@ -281,7 +279,7 @@ func (p *Provider) hset(ctx context.Context, attrs map[string]cty.Value) (map[st
 		return nil
 	})
 	if err := txErr(cmds, err); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for i, name := range names {
 		if !hasFields[i].Val() {
@@ -290,5 +288,5 @@ func (p *Provider) hset(ctx context.Context, attrs map[string]cty.Value) (map[st
 	}
 	w.created, w.wrote = exists.Val() == 0, true
 	old.fill(w)
-	return out(), nil
+	return out(), w, nil
 }

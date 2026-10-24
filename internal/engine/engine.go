@@ -66,10 +66,6 @@ type Engine struct {
 	// attributes as ValidateReferences evaluated them, by node.
 	keepPlanned bool
 	planned     map[graph.NodeID]map[string]cty.Value
-
-	// undos holds, during Execute, the undo invocation each succeeded
-	// action's provider described (see provider.Inverter).
-	undos map[graph.NodeID]*provider.Invocation
 }
 
 // UndoReporter is implemented by reporters that keep run records.
@@ -332,7 +328,6 @@ func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *grap
 	// the inputs.
 	compVars := make(map[string]map[string]cty.Value)
 
-	e.undos = map[graph.NodeID]*provider.Invocation{}
 	runStart := time.Now()
 	e.reporter.RunStarted(ps.Scenario.Name)
 	succeeded := 0
@@ -372,14 +367,14 @@ func (e *Engine) Execute(ctx context.Context, ps *parser.ParsedScenario, g *grap
 			}
 			e.reporter.NodeStarted(string(nodeID))
 			start := time.Now()
-			outputs, err := e.executeAction(ctx, node, ps.Variables, compVars, resolved)
+			outputs, undo, err := e.executeAction(ctx, node, ps.Variables, compVars, resolved)
 			if err != nil {
 				return nil, reportFailure(string(nodeID),
 					fmt.Errorf("executing %s%s: %w", nodeID, formatSourceLoc(node.SourceRange), err))
 			}
 			resolved[string(nodeID)] = outputs
 			e.reporter.NodeCompleted(string(nodeID), outputs, time.Since(start))
-			if undo := e.undos[nodeID]; undo != nil {
+			if undo != nil {
 				if ur, ok := e.reporter.(UndoReporter); ok {
 					ur.NodeUndo(string(nodeID), *undo)
 				}
@@ -429,7 +424,7 @@ func (e *Engine) executeAction(
 	vars map[string]cty.Value,
 	compVars map[string]map[string]cty.Value,
 	resolved map[string]map[string]cty.Value,
-) (map[string]cty.Value, error) {
+) (map[string]cty.Value, *provider.Invocation, error) {
 	if node.Retry == nil {
 		return e.executeActionOnce(ctx, node, vars, compVars, resolved)
 	}
@@ -441,11 +436,11 @@ func (e *Engine) executeAction(
 	var lastErr error
 	for attempt := 1; attempt <= node.Retry.MaxAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		outputs, err := e.executeActionOnce(ctx, node, vars, compVars, resolved)
+		outputs, undo, err := e.executeActionOnce(ctx, node, vars, compVars, resolved)
 		if err == nil {
-			return outputs, nil
+			return outputs, undo, nil
 		}
 		lastErr = err
 		if attempt == node.Retry.MaxAttempts {
@@ -453,38 +448,40 @@ func (e *Engine) executeAction(
 		}
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, nil, ctx.Err()
 		case <-time.After(computeRetryDelay(node.Retry, attempt)):
 		}
 	}
-	return nil, fmt.Errorf("action %s failed after %d attempts: %w",
+	return nil, nil, fmt.Errorf("action %s failed after %d attempts: %w",
 		node.ID, node.Retry.MaxAttempts, lastErr)
 }
 
 // executeActionOnce runs exactly one attempt of a node against
 // its provider. Factored out so the retry wrapper can invoke it
-// in a loop without duplicating the route/eval/timeout plumbing.
+// in a loop without duplicating the route/eval/timeout plumbing. It
+// returns the action's undo, when its provider describes one (see
+// provider.Undoer).
 func (e *Engine) executeActionOnce(
 	ctx context.Context,
 	node *graph.Node,
 	vars map[string]cty.Value,
 	compVars map[string]map[string]cty.Value,
 	resolved map[string]map[string]cty.Value,
-) (map[string]cty.Value, error) {
+) (map[string]cty.Value, *provider.Invocation, error) {
 	route, err := e.resolveRoute(node.ActionType, node.ProviderAlias)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	p, err := e.registry.Get(route.providerAlias)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	evalCtx := e.buildNodeEvalContext(node, vars, compVars, resolved)
 
 	attrs, err := evalAttrs(node.Body, route.schema, evalCtx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Resolve `file` attributes to absolute paths against the
@@ -506,31 +503,34 @@ func (e *Engine) executeActionOnce(
 		defer cancel()
 	}
 
-	outputs, err := p.Execute(execCtx, route.actionName, attrs)
+	// An explicit teardown block wins over the provider's own undo.
+	var (
+		outputs map[string]cty.Value
+		undo    *provider.Invocation
+	)
+	if u, ok := p.(provider.Undoer); ok && node.Teardown == nil && !managedTeardownOff(node) {
+		opts := provider.InverseOptions{Requested: node.ManagedTeardown != nil && *node.ManagedTeardown}
+		outputs, undo, err = u.ExecuteUndo(execCtx, route.actionName, attrs, opts)
+	} else {
+		outputs, err = p.Execute(execCtx, route.actionName, attrs)
+	}
 	if err != nil {
 		// Rewrite deadline-exceeded to name the action and the
 		// timeout that fired — generic "context deadline exceeded"
 		// buries the signal scenario authors need.
 		if errors.Is(err, context.DeadlineExceeded) && node.Timeout > 0 {
-			return nil, fmt.Errorf("action %s exceeded timeout %s: %w",
+			return nil, nil, fmt.Errorf("action %s exceeded timeout %s: %w",
 				node.ID, node.Timeout, err)
 		}
-		return nil, err
+		return nil, nil, err
 	}
 	validated, err := validateOutputs(route.schema, outputs)
 	if err != nil {
 		// Don't prefix with node.ID here — the caller in Execute
 		// already wraps with "executing <nodeID> (file:line)".
-		return nil, fmt.Errorf("output validation: %w", err)
+		return nil, nil, fmt.Errorf("output validation: %w", err)
 	}
-	// An explicit teardown block wins over the provider's own undo.
-	if inv, ok := p.(provider.Inverter); ok && node.Teardown == nil && !managedTeardownOff(node) {
-		opts := provider.InverseOptions{Requested: node.ManagedTeardown != nil && *node.ManagedTeardown}
-		if undo := inv.Inverse(route.actionName, attrs, validated, opts); undo != nil {
-			e.undos[node.ID] = undo
-		}
-	}
-	return validated, nil
+	return validated, undo, nil
 }
 
 // managedTeardownOff reports `managed_teardown = false`.

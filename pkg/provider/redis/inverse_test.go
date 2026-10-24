@@ -2,6 +2,8 @@ package redis
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -10,12 +12,15 @@ import (
 	"github.com/pthm/orchard/pkg/provider"
 )
 
-// run executes a typed action and returns its undo, then runs the undo
-// later via teardown(), the way the engine does.
+// runWithUndo executes a typed action and returns its undo, for
+// teardown() to run later, the way the engine does.
 func runWithUndo(t *testing.T, p *Provider, action string, attrs map[string]cty.Value, requested bool) *provider.Invocation {
 	t.Helper()
-	out := exec(t, p, action, attrs)
-	return p.Inverse(action, attrs, out, provider.InverseOptions{Requested: requested})
+	_, undo, err := p.ExecuteUndo(context.Background(), action, attrs, provider.InverseOptions{Requested: requested})
+	if err != nil {
+		t.Fatalf("%s: %v", action, err)
+	}
+	return undo
 }
 
 func teardown(t *testing.T, p *Provider, undos ...*provider.Invocation) {
@@ -110,5 +115,36 @@ func TestTeardownSkipsLargeDump(t *testing.T) {
 	_ = srv.Set("big", string(big))
 	if u := runWithUndo(t, p, "redis_set", setAttrs("big", "small"), true); u != nil {
 		t.Errorf("oversized dump: want no undo, got %s", u.Action)
+	}
+}
+
+// Concurrent typed actions each get the undo for their own key.
+func TestExecuteUndoConcurrent(t *testing.T) {
+	p, srv := configured(t)
+	const n = 20
+	undos := make([]*provider.Invocation, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key := fmt.Sprintf("c%d", i)
+			if i%2 == 1 {
+				_ = srv.Set(key, "theirs")
+			}
+			_, undos[i], _ = p.ExecuteUndo(context.Background(), "redis_set", setAttrs(key, "ours"), provider.InverseOptions{Requested: true})
+		}()
+	}
+	wg.Wait()
+	for i, u := range undos {
+		key := fmt.Sprintf("c%d", i)
+		switch {
+		case u == nil:
+			t.Errorf("%s: no undo", key)
+		case i%2 == 0 && (u.Action != "redis_command" || u.Attrs["args"].Index(cty.NumberIntVal(1)).AsString() != key):
+			t.Errorf("%s: want DEL of it, got %s %#v", key, u.Action, u.Attrs)
+		case i%2 == 1 && (u.Action != "redis_restore" || u.Attrs["key"].AsString() != key):
+			t.Errorf("%s: want restore of it, got %s %#v", key, u.Action, u.Attrs)
+		}
 	}
 }

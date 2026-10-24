@@ -32,7 +32,7 @@ const (
 // write, so teardown can put it back.
 const backupPrefix = ".orchard-backup/"
 
-// written is what the most recent action did, for Inverse.
+// written is what an action did, for its undo.
 type written struct {
 	bucket        string
 	key           string
@@ -42,13 +42,11 @@ type written struct {
 	owned         bool   // an earlier put this run created the object
 }
 
-// Inverse describes the undo of the action that just ran: delete a
-// bucket or object it created; for an overwrite, put the backup back
-// when the object is owned or the scenario asks (managed_teardown =
-// true), and otherwise just delete the backup.
-func (p *Provider) Inverse(_ string, _, _ map[string]cty.Value, opts provider.InverseOptions) *provider.Invocation {
-	w := p.last
-	p.last = nil
+// undo describes the undo of an action: delete a bucket or object it
+// created; for an overwrite, put the backup back when the object is
+// owned or the scenario asks (managed_teardown = true), and otherwise
+// just delete the backup. A nil w (nothing written) has none.
+func (w *written) undo(opts provider.InverseOptions) *provider.Invocation {
 	switch {
 	case w == nil:
 		return nil
@@ -84,18 +82,17 @@ func status(err error) int {
 	return 0
 }
 
-func (p *Provider) createBucket(ctx context.Context, attrs map[string]cty.Value) (map[string]cty.Value, error) {
+func (p *Provider) createBucket(ctx context.Context, attrs map[string]cty.Value) (map[string]cty.Value, *written, error) {
 	bucket := attrs["bucket"].AsString()
 	existsOK := true
 	if v, ok := attrs["exists_ok"]; ok && v.IsKnown() && !v.IsNull() {
 		existsOK = v.True()
 	}
-	out := func(created bool) (map[string]cty.Value, error) {
+	out := func(created bool) (map[string]cty.Value, *written, error) {
 		if !created && !existsOK {
-			return nil, fmt.Errorf("bucket %q already exists (set exists_ok = true to use it)", bucket)
+			return nil, nil, fmt.Errorf("bucket %q already exists (set exists_ok = true to use it)", bucket)
 		}
-		p.last = &written{bucket: bucket, createdBucket: created}
-		return map[string]cty.Value{"bucket": cty.StringVal(bucket), "created": cty.BoolVal(created)}, nil
+		return map[string]cty.Value{"bucket": cty.StringVal(bucket), "created": cty.BoolVal(created)}, &written{bucket: bucket, createdBucket: created}, nil
 	}
 
 	// HeadBucket first: in us-east-1, CreateBucket on a bucket you
@@ -105,7 +102,7 @@ func (p *Provider) createBucket(ctx context.Context, attrs map[string]cty.Value)
 	case err == nil:
 		return out(false)
 	case status(err) != 404:
-		return nil, err
+		return nil, nil, err
 	}
 
 	in := &s3.CreateBucketInput{Bucket: &bucket}
@@ -126,7 +123,7 @@ func (p *Provider) createBucket(ctx context.Context, attrs map[string]cty.Value)
 	case errors.As(err, &owned):
 		return out(false)
 	case err != nil:
-		return nil, err
+		return nil, nil, err
 	}
 	return out(true)
 }
@@ -166,11 +163,11 @@ func copySource(bucket, key string) string {
 	return bucket + "/" + strings.Join(segs, "/")
 }
 
-func (p *Provider) putObject(ctx context.Context, attrs map[string]cty.Value) (map[string]cty.Value, error) {
+func (p *Provider) putObject(ctx context.Context, attrs map[string]cty.Value) (map[string]cty.Value, *written, error) {
 	bucket, key := attrs["bucket"].AsString(), attrs["key"].AsString()
 	r, size, closeBody, err := body(attrs)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer closeBody()
 
@@ -179,7 +176,7 @@ func (p *Provider) putObject(ctx context.Context, attrs map[string]cty.Value) (m
 	head, err := p.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: &bucket, Key: &key})
 	exists := err == nil
 	if err != nil && status(err) != 404 {
-		return nil, err
+		return nil, nil, err
 	}
 	out := func(etag *string, size int64, created bool) map[string]cty.Value {
 		return map[string]cty.Value{
@@ -191,7 +188,7 @@ func (p *Provider) putObject(ctx context.Context, attrs map[string]cty.Value) (m
 		}
 	}
 	if exists && attrs["on_conflict"].IsKnown() && !attrs["on_conflict"].IsNull() && attrs["on_conflict"].AsString() == conflictIgnore {
-		return out(head.ETag, aws.ToInt64(head.ContentLength), false), nil
+		return out(head.ETag, aws.ToInt64(head.ContentLength), false), nil, nil
 	}
 
 	w := &written{bucket: bucket, key: key, createdObject: !exists}
@@ -202,7 +199,7 @@ func (p *Provider) putObject(ctx context.Context, attrs map[string]cty.Value) (m
 			Key:        &w.backup,
 			CopySource: aws.String(copySource(bucket, key)),
 		}); err != nil {
-			return nil, fmt.Errorf("backing up %s before overwriting it: %w", key, err)
+			return nil, nil, fmt.Errorf("backing up %s before overwriting it: %w", key, err)
 		}
 	}
 
@@ -231,9 +228,10 @@ func (p *Provider) putObject(ctx context.Context, attrs map[string]cty.Value) (m
 	}
 	put, err := p.client.PutObject(ctx, in)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
+	p.mu.Lock()
 	if p.owned == nil {
 		p.owned = map[string]bool{}
 	}
@@ -242,8 +240,8 @@ func (p *Provider) putObject(ctx context.Context, attrs map[string]cty.Value) (m
 	if w.createdObject {
 		p.owned[id] = true
 	}
-	p.last = w
-	return out(put.ETag, size, w.createdObject), nil
+	p.mu.Unlock()
+	return out(put.ETag, size, w.createdObject), w, nil
 }
 
 func (p *Provider) deleteObject(ctx context.Context, attrs map[string]cty.Value) (map[string]cty.Value, error) {

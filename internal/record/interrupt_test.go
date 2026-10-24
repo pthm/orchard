@@ -40,8 +40,12 @@ func (s *stallProvider) Execute(ctx context.Context, _ string, _ map[string]cty.
 	return nil, ctx.Err()
 }
 
-func (s *stallProvider) Inverse(string, map[string]cty.Value, map[string]cty.Value, provider.InverseOptions) *provider.Invocation {
-	return &provider.Invocation{Action: "sql_delete", Attrs: map[string]cty.Value{"id": cty.StringVal("1")}}
+func (s *stallProvider) ExecuteUndo(ctx context.Context, action string, attrs map[string]cty.Value, _ provider.InverseOptions) (map[string]cty.Value, *provider.Invocation, error) {
+	out, err := s.Execute(ctx, action, attrs)
+	if err != nil {
+		return nil, nil, err
+	}
+	return out, &provider.Invocation{Action: "sql_delete", Attrs: map[string]cty.Value{"id": cty.StringVal("1")}}, nil
 }
 
 // TestRecordWrittenOnInterrupt: an interrupted run still writes a

@@ -654,7 +654,7 @@ Teardown is best-effort: a per-action failure is surfaced through the reporter b
 
 Resources are one of:
 - **Explicit** — cleanup declared via `lifecycle { teardown { } }`. Always wins.
-- **Managed** — the provider records how to undo the action when it runs (`provider.Inverter`), stored as the node's `undo` in the run record. Typed inserts (`<p>_insert`) are managed: the undo deletes the row by its primary key. `lifecycle { managed_teardown = false }` opts an action out.
+- **Managed** — the provider returns how to undo the action from the same call that runs it (`provider.Undoer`), stored as the node's `undo` in the run record. Typed inserts (`<p>_insert`) are managed: the undo deletes the row by its primary key. `lifecycle { managed_teardown = false }` opts an action out.
 - **Unmanaged** — no automatic cleanup (sending an email, enqueuing a message, HTTP calls without an idempotent delete endpoint, typed updates and deletes).
 
 ### Failure Behavior
@@ -1057,7 +1057,7 @@ Harden the tool for real-world use and improve the authoring experience.
 | `count` / `for_each` on scenario actions and components (`count.index`, `each.key/value`, `x[0]` / `x["k"]` / `x[*]` references) | Done |
 | Dry-run mode (plan with expression evaluation but no execution) | Done: `orchard plan --show-values` lists each action's evaluated attributes, `(known after run)` for values from other actions |
 | Execution logging with structured output | Deferred: the run record is the structured log of every action, its inputs and outputs |
-| Parallel execution of independent nodes | Not started |
+| Parallel execution of independent nodes | In progress: providers return each action's undo from the call that runs it (`provider.Undoer`), so typed SQL, Redis and S3 actions keep no state between calls and are safe to run concurrently |
 | Transaction wrapping for atomic scenario execution | Won't do: atomicity across providers is impossible; uncommitted rows would be invisible to `http`, `grpc` and `exec` actions; the run record plus `orchard teardown` covers cleanup; a multi-statement `postgres_query` (or `BEGIN; ... COMMIT;` in one query) is atomic within one action |
 | Configuration file (`.orchard/config.hcl` or similar) | Deferred: flags and `--var` cover configuration for now |
 
@@ -1224,7 +1224,7 @@ pkg/ (public SDK surface)
     schema_source.go            Optional SchemaSource interface (PullSchema) for `orchard schema pull`
     planner.go                  Optional ActionPlanner (PlanAction, ErrNoSchema) and PlanConfigurer
                                 (snapshot at plan time) interfaces
-    inverter.go                 Optional Inverter interface: the undo step recorded for teardown
+    undoer.go                   Optional Undoer interface: execute an action and return its undo step for teardown
     postgres/                   builtin/postgres — postgres_query (raw SQL) +
                                 postgres_copy (COPY FROM STDIN bulk load)
       schema.hcl                Embedded via //go:embed; carries description, notes,

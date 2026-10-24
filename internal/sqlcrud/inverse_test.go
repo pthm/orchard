@@ -9,24 +9,20 @@ import (
 	"github.com/pthm/orchard/pkg/provider"
 )
 
-func TestInverse(t *testing.T) {
-	a := &Actions{Prefix: "postgres", Dialect: Postgres, schema: &dbschema.Schema{
-		DefaultSchema: "public",
-		Tables: map[string]*dbschema.Table{
-			"public.merchants": {Schema: "public", Name: "merchants", PrimaryKey: []string{"id"}},
-			"public.tags":      {Schema: "public", Name: "tags", PrimaryKey: []string{"product_id", "tag"}},
-			"public.log":       {Schema: "public", Name: "log"},
-		},
-	}}
-	table := func(name string) map[string]cty.Value { return map[string]cty.Value{"table": cty.StringVal(name)} }
+func TestUndo(t *testing.T) {
+	a := &Actions{Prefix: "postgres", Dialect: Postgres}
+	merchants := &dbschema.Table{Schema: "public", Name: "merchants", PrimaryKey: []string{"id"}}
+	tags := &dbschema.Table{Schema: "public", Name: "tags", PrimaryKey: []string{"product_id", "tag"}}
+	log := &dbschema.Table{Schema: "public", Name: "log"}
+	inserted := change{inserted: true}
 
-	inv := a.Inverse("postgres_insert", table("merchants"), map[string]cty.Value{"id": cty.NumberIntVal(7), "name": cty.StringVal("Acme")}, provider.InverseOptions{})
+	inv := a.undo(merchants, inserted, map[string]cty.Value{"id": cty.NumberIntVal(7), "name": cty.StringVal("Acme")}, provider.InverseOptions{})
 	if inv == nil || inv.Action != "postgres_delete" || !inv.Attrs["table"].RawEquals(cty.StringVal("public.merchants")) ||
 		!inv.Attrs["where"].RawEquals(cty.ObjectVal(map[string]cty.Value{"id": cty.NumberIntVal(7)})) {
 		t.Fatalf("insert undo: %#v", inv)
 	}
 
-	inv = a.Inverse("postgres_insert", table("tags"), map[string]cty.Value{"product_id": cty.NumberIntVal(1), "tag": cty.StringVal("gift")}, provider.InverseOptions{})
+	inv = a.undo(tags, inserted, map[string]cty.Value{"product_id": cty.NumberIntVal(1), "tag": cty.StringVal("gift")}, provider.InverseOptions{})
 	if inv == nil || !inv.Attrs["where"].RawEquals(cty.ObjectVal(map[string]cty.Value{
 		"product_id": cty.NumberIntVal(1), "tag": cty.StringVal("gift"),
 	})) {
@@ -34,23 +30,27 @@ func TestInverse(t *testing.T) {
 	}
 
 	for name, c := range map[string]struct {
-		action  string
-		table   string
+		table   *dbschema.Table
+		change  change
 		outputs map[string]cty.Value
 	}{
-		"update":           {"postgres_update", "merchants", map[string]cty.Value{"rows_affected": cty.NumberIntVal(1)}},
-		"no primary key":   {"postgres_insert", "log", map[string]cty.Value{"msg": cty.StringVal("x")}},
-		"key missing":      {"postgres_insert", "merchants", map[string]cty.Value{"name": cty.StringVal("x")}},
-		"key null":         {"postgres_insert", "merchants", map[string]cty.Value{"id": cty.NullVal(cty.Number)}},
-		"unknown table":    {"postgres_insert", "nope", map[string]cty.Value{"id": cty.NumberIntVal(1)}},
-		"another provider": {"mysql_insert", "merchants", map[string]cty.Value{"id": cty.NumberIntVal(1)}},
+		"update, nothing matched": {merchants, change{}, map[string]cty.Value{"rows_affected": cty.NumberIntVal(0)}},
+		"upsert that ignored":     {merchants, change{}, map[string]cty.Value{"id": cty.NumberIntVal(1)}},
+		"no primary key":          {log, inserted, map[string]cty.Value{"msg": cty.StringVal("x")}},
+		"key missing":             {merchants, inserted, map[string]cty.Value{"name": cty.StringVal("x")}},
+		"key null":                {merchants, inserted, map[string]cty.Value{"id": cty.NullVal(cty.Number)}},
 	} {
-		if inv := a.Inverse(c.action, table(c.table), c.outputs, provider.InverseOptions{}); inv != nil {
+		if inv := a.undo(c.table, c.change, c.outputs, provider.InverseOptions{}); inv != nil {
 			t.Errorf("%s: expected no undo, got %#v", name, inv)
 		}
 	}
 
-	if inv := (&Actions{Prefix: "postgres"}).Inverse("postgres_insert", table("merchants"), map[string]cty.Value{"id": cty.NumberIntVal(1)}, provider.InverseOptions{}); inv != nil {
-		t.Errorf("no schema loaded: expected no undo, got %#v", inv)
+	row := []map[string]cty.Value{{"id": cty.NumberIntVal(1), "name": cty.StringVal("old")}}
+	unowned := change{update: &updated{table: merchants, rows: row}}
+	if inv := a.undo(merchants, unowned, nil, provider.InverseOptions{}); inv != nil {
+		t.Errorf("unowned update, not requested: expected no undo, got %#v", inv)
+	}
+	if inv := a.undo(merchants, unowned, nil, provider.InverseOptions{Requested: true}); inv == nil || inv.Action != "postgres_restore" {
+		t.Errorf("requested update: expected a restore, got %#v", inv)
 	}
 }

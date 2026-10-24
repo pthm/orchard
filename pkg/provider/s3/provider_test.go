@@ -71,7 +71,7 @@ func TestPlanActionChecks(t *testing.T) {
 	}
 }
 
-func TestInverse(t *testing.T) {
+func TestUndo(t *testing.T) {
 	cases := []struct {
 		name      string
 		w         *written
@@ -87,8 +87,7 @@ func TestInverse(t *testing.T) {
 		{"existing bucket", &written{bucket: "b"}, false, "", ""},
 	}
 	for _, c := range cases {
-		p := &Provider{last: c.w}
-		u := p.Inverse("", nil, nil, provider.InverseOptions{Requested: c.requested})
+		u := c.w.undo(provider.InverseOptions{Requested: c.requested})
 		switch {
 		case c.action == "" && u != nil:
 			t.Errorf("%s: want no undo, got %s", c.name, u.Action)

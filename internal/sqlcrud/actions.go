@@ -36,6 +36,10 @@ type Actions struct {
 	// shape as committed, so a missing table is most likely a typo.
 	Strict bool
 
+	// mu guards schema, planned and owned. It's only held briefly:
+	// never while waiting for a connection, or one goroutine holding it
+	// could wait on SQLite's single connection while the goroutine
+	// holding that connection waits on mu.
 	mu     sync.Mutex
 	schema *dbschema.Schema
 	// planned records the tables typed inserts were planned into, in
@@ -44,16 +48,17 @@ type Actions struct {
 	// owned records the rows this run's typed inserts created (RowKey),
 	// so a later update of them is restored on teardown by default.
 	owned map[string]bool
-	// lastUpdate is what the most recent typed update changed, for
-	// Inverse to describe how to restore it. The engine runs actions one
-	// at a time and calls Inverse straight after Execute.
-	// ponytail: a single slot; key it by action if actions ever run in
-	// parallel.
-	lastUpdate *updated
-	// lastExisted is true when the most recent typed insert found its
-	// row already there (on_conflict = ignore or update), so its undo is
-	// a restore, or nothing, rather than a delete.
-	lastExisted bool
+}
+
+// change is what one typed action did, for its undo.
+type change struct {
+	// inserted is true when an insert created its row, so its undo is a
+	// delete. An insert that found its row already there (on_conflict =
+	// ignore or update) is undone by a restore, or nothing.
+	inserted bool
+	// update is what an update, or an upsert that found its row,
+	// changed; nil if nothing.
+	update *updated
 }
 
 // updated is what a typed update changed: the previous values of the
@@ -193,7 +198,8 @@ func (a *Actions) foreignKeyHints(t *dbschema.Table, values cty.Value) []string 
 		}
 		hints = append(hints, fmt.Sprintf(
 			"%s is set to a fixed value (%s), but it references %s.%s, which this scenario inserts into earlier; did you mean that insert's output, e.g. action.%s_insert.<name>.%s?",
-			fk.Columns[0], displayValue(v), fk.References, fk.ReferencedColumns[0], a.Prefix, fk.ReferencedColumns[0]))
+			fk.Columns[0], displayValue(v), fk.References, fk.ReferencedColumns[0], a.Prefix, fk.ReferencedColumns[0],
+		))
 	}
 	return hints
 }
@@ -226,35 +232,58 @@ func (a *Actions) rowType(t *dbschema.Table) cty.Type {
 
 // Execute validates and runs a typed action, returning its outputs.
 func (a *Actions) Execute(ctx context.Context, action string, attrs map[string]cty.Value) (map[string]cty.Value, error) {
+	_, out, _, err := a.execute(ctx, action, attrs)
+	return out, err
+}
+
+// ExecuteUndo runs a typed action like Execute and also describes how
+// to undo it (see undo).
+func (a *Actions) ExecuteUndo(ctx context.Context, action string, attrs map[string]cty.Value, opts provider.InverseOptions) (map[string]cty.Value, *provider.Invocation, error) {
+	t, out, c, err := a.execute(ctx, action, attrs)
+	if err != nil {
+		return nil, nil, err
+	}
+	return out, a.undo(t, c, out, opts), nil
+}
+
+func (a *Actions) execute(ctx context.Context, action string, attrs map[string]cty.Value) (*dbschema.Table, map[string]cty.Value, change, error) {
 	verb, _ := a.Verb(action)
 	t, err := a.table(ctx, attrs["table"].AsString())
 	if err != nil {
-		return nil, err
+		return nil, nil, change{}, err
 	}
 	if verb != "restore" {
 		if err := check(verb, t, attrs); err != nil {
-			return nil, err
+			return nil, nil, change{}, err
 		}
 	}
 
 	conn, err := a.Conn(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("connect: %w", err)
+		return nil, nil, change{}, fmt.Errorf("connect: %w", err)
 	}
 	defer func() { _ = conn.Close() }()
 
+	var (
+		out map[string]cty.Value
+		c   change
+	)
 	switch verb {
 	case "insert":
-		return a.insert(ctx, conn, t, attrs)
+		out, c, err = a.insert(ctx, conn, t, attrs)
 	case "update":
-		return a.update(ctx, conn, t, attrs["set"], attrs["where"])
+		out, c.update, err = a.update(ctx, conn, t, attrs["set"], attrs["where"])
 	case "restore":
-		return inTx(ctx, conn, func(tx *sql.Tx) (map[string]cty.Value, error) {
+		out, err = inTx(ctx, conn, func(tx *sql.Tx) (map[string]cty.Value, error) {
 			return Restore(ctx, tx, a.Dialect, t, attrs["rows"])
 		})
 	default:
-		return Delete(ctx, conn, a.Dialect, t, attrs["where"])
+		out, err = Delete(ctx, conn, a.Dialect, t, attrs["where"])
 	}
+	if err != nil {
+		return nil, nil, change{}, err
+	}
+	return t, out, c, nil
 }
 
 // insert runs a typed insert. With on_conflict = ignore or update it
@@ -266,24 +295,21 @@ func (a *Actions) Execute(ctx context.Context, action string, attrs map[string]c
 // database's ON CONFLICT syntax: one code path for all three, fine for
 // a single client seeding data, but not atomic against concurrent
 // writers.
-func (a *Actions) insert(ctx context.Context, conn *sql.Conn, t *dbschema.Table, attrs map[string]cty.Value) (map[string]cty.Value, error) {
-	a.mu.Lock()
-	a.lastUpdate, a.lastExisted = nil, false
-	a.mu.Unlock()
-
+func (a *Actions) insert(ctx context.Context, conn *sql.Conn, t *dbschema.Table, attrs map[string]cty.Value) (map[string]cty.Value, change, error) {
 	values := attrs["values"]
 	mode := conflictMode(attrs)
 	if mode == dbschema.ConflictError {
 		row, err := Insert(ctx, conn, a.Dialect, t, values)
-		if err == nil {
-			a.own(t, row)
+		if err != nil {
+			return nil, change{}, err
 		}
-		return row, err
+		a.own(t, row)
+		return row, change{inserted: true}, nil
 	}
 
 	key, err := dbschema.ConflictKey(t, conflictColumns(attrs))
 	if err != nil {
-		return nil, err
+		return nil, change{}, err
 	}
 	fields := values.AsValueMap()
 	where := map[string]cty.Value{}
@@ -322,25 +348,17 @@ func (a *Actions) insert(ctx context.Context, conn *sql.Conn, t *dbschema.Table,
 		return SelectRow(ctx, tx, a.Dialect, t, cty.ObjectVal(where))
 	})
 	if err != nil {
-		return nil, err
+		return nil, change{}, err
 	}
 	if !existed {
 		a.own(t, row)
-		return row, nil
+		return row, change{inserted: true}, nil
 	}
-	a.mu.Lock()
-	a.lastExisted = true
+	var c change
 	if mode == dbschema.ConflictUpdate && len(set) > 0 && len(t.PrimaryKey) > 0 {
-		u := &updated{table: t, rows: before, owned: true}
-		for _, r := range before {
-			if k, ok := RowKey(t, r); !ok || !a.owned[k] {
-				u.owned = false
-			}
-		}
-		a.lastUpdate = u
+		c.update = &updated{table: t, rows: before, owned: a.ownsAll(t, before)}
 	}
-	a.mu.Unlock()
-	return row, nil
+	return row, c, nil
 }
 
 // conflictMode is the insert's on_conflict, defaulting to error.
@@ -366,12 +384,12 @@ func conflictColumns(attrs map[string]cty.Value) []string {
 }
 
 // update runs a typed update, first reading the previous values of the
-// columns it sets, in the same transaction, so Inverse can describe how
-// to restore them.
-func (a *Actions) update(ctx context.Context, conn *sql.Conn, t *dbschema.Table, set, where cty.Value) (map[string]cty.Value, error) {
-	a.setLastUpdate(nil)
+// columns it sets, in the same transaction, and returns them so its
+// undo can restore them (nil for a table without a primary key).
+func (a *Actions) update(ctx context.Context, conn *sql.Conn, t *dbschema.Table, set, where cty.Value) (map[string]cty.Value, *updated, error) {
 	if len(t.PrimaryKey) == 0 {
-		return Update(ctx, conn, a.Dialect, t, set, where)
+		out, err := Update(ctx, conn, a.Dialect, t, set, where)
+		return out, nil, err
 	}
 	cols := make([]string, 0, len(set.AsValueMap()))
 	for _, f := range sortedFields(set) {
@@ -386,27 +404,25 @@ func (a *Actions) update(ctx context.Context, conn *sql.Conn, t *dbschema.Table,
 		return Update(ctx, tx, a.Dialect, t, set, where)
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	u := &updated{table: t, truncated: len(before) > restoreLimit, owned: true}
+	u := &updated{table: t, truncated: len(before) > restoreLimit, owned: a.ownsAll(t, before)}
 	if !u.truncated {
 		u.rows = before
 	}
-	a.mu.Lock()
-	for _, row := range before {
-		if key, ok := RowKey(t, row); !ok || !a.owned[key] {
-			u.owned = false
-		}
-	}
-	a.mu.Unlock()
-	a.setLastUpdate(u)
-	return out, nil
+	return out, u, nil
 }
 
-func (a *Actions) setLastUpdate(u *updated) {
+// ownsAll reports whether every row was inserted earlier in this run.
+func (a *Actions) ownsAll(t *dbschema.Table, rows []map[string]cty.Value) bool {
 	a.mu.Lock()
-	a.lastUpdate = u
-	a.mu.Unlock()
+	defer a.mu.Unlock()
+	for _, row := range rows {
+		if key, ok := RowKey(t, row); !ok || !a.owned[key] {
+			return false
+		}
+	}
+	return true
 }
 
 // own records a row this run inserted.
@@ -437,38 +453,17 @@ func inTx(ctx context.Context, conn *sql.Conn, fn func(*sql.Tx) (map[string]cty.
 	return out, tx.Commit()
 }
 
-// Inverse describes how to undo a typed action. An insert is undone by
-// deleting the row by its primary key, read from the inserted row; an
-// update by restoring the values it overwrote (see restoreInvocation).
-// Deletes, tables without a primary key, and rows whose key didn't come
-// back have no automatic undo. It uses state captured when the action
-// ran, so it does no I/O.
-func (a *Actions) Inverse(action string, attrs, outputs map[string]cty.Value, opts provider.InverseOptions) *provider.Invocation {
-	verb, _ := a.Verb(action)
-	if verb == "update" {
-		return a.restoreInvocation(opts)
+// undo describes how to undo a typed action on t, from what it did: an
+// insert that created its row is undone by deleting the row by its
+// primary key, read from the inserted row; an update, or an upsert that
+// found its row, by restoring the values it overwrote (see
+// restoreInvocation). Deletes, tables without a primary key, and rows
+// whose key didn't come back have no automatic undo.
+func (a *Actions) undo(t *dbschema.Table, c change, outputs map[string]cty.Value, opts provider.InverseOptions) *provider.Invocation {
+	if !c.inserted {
+		return a.restoreInvocation(c.update, opts)
 	}
-	if verb != "insert" {
-		return nil
-	}
-	a.mu.Lock()
-	existed := a.lastExisted
-	a.lastExisted = false
-	a.mu.Unlock()
-	if existed {
-		// An upsert that found its row: restore what it updated, never
-		// delete a row it didn't create.
-		return a.restoreInvocation(opts)
-	}
-	a.mu.Lock()
-	s := a.schema
-	a.mu.Unlock()
-	table := attrs["table"]
-	if s == nil || !table.IsKnown() || table.IsNull() {
-		return nil
-	}
-	t, err := s.Lookup(table.AsString())
-	if err != nil || len(t.PrimaryKey) == 0 {
+	if len(t.PrimaryKey) == 0 {
 		return nil
 	}
 	where := make(map[string]cty.Value, len(t.PrimaryKey))
@@ -488,17 +483,13 @@ func (a *Actions) Inverse(action string, attrs, outputs map[string]cty.Value, op
 	}
 }
 
-// restoreInvocation describes how to undo the update that just ran:
-// write back the previous values of the columns it set. Rows this run
-// inserted are restored by default; others only when the scenario asks
+// restoreInvocation describes how to undo update u: write back the
+// previous values of the columns it set. Rows this run inserted are
+// restored by default; others only when the scenario asks
 // (managed_teardown = true), since rewriting rows Orchard didn't create
 // could undo someone else's changes. Updates that matched no rows, or
 // more than restoreLimit, record nothing.
-func (a *Actions) restoreInvocation(opts provider.InverseOptions) *provider.Invocation {
-	a.mu.Lock()
-	u := a.lastUpdate
-	a.lastUpdate = nil
-	a.mu.Unlock()
+func (a *Actions) restoreInvocation(u *updated, opts provider.InverseOptions) *provider.Invocation {
 	if u == nil || u.truncated || len(u.rows) == 0 || (!u.owned && !opts.Requested) {
 		return nil
 	}
@@ -533,18 +524,24 @@ func (a *Actions) table(ctx context.Context, name string) (*dbschema.Table, erro
 }
 
 // load returns the cached schema, reading it on first use or when
-// refresh is set.
+// refresh is set. It doesn't hold mu while Introspect waits for a
+// connection (see mu).
+// ponytail: concurrent misses each introspect, last write wins; add a
+// singleflight if schemas get big enough for that to matter.
 func (a *Actions) load(ctx context.Context, refresh bool) (*dbschema.Schema, error) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.schema != nil && (!refresh || a.Introspect == nil) {
-		return a.schema, nil
+	s := a.schema
+	a.mu.Unlock()
+	if s != nil && (!refresh || a.Introspect == nil) {
+		return s, nil
 	}
 	s, err := a.Introspect(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read schema: %w", err)
 	}
+	a.mu.Lock()
 	a.schema = s
+	a.mu.Unlock()
 	return s, nil
 }
 

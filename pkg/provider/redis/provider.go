@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sync"
 
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/zclconf/go-cty/cty"
@@ -32,14 +33,9 @@ type Provider struct {
 	schema protocol.ProviderSchema
 	client *goredis.Client
 	// owned records the keys typed actions created this run, so a later
-	// overwrite of them is restored on teardown by default.
+	// overwrite of them is restored on teardown by default. mu guards it.
+	mu    sync.Mutex
 	owned map[string]bool
-	// last is what the most recent typed action wrote, for Inverse. The
-	// engine runs actions one at a time and calls Inverse straight after
-	// Execute.
-	// ponytail: a single slot, like sqlcrud; key it by action if actions
-	// ever run in parallel.
-	last *written
 }
 
 // New returns an unconfigured Redis provider.
@@ -50,7 +46,7 @@ func New() *Provider {
 var (
 	_ provider.Provider      = (*Provider)(nil)
 	_ provider.ActionPlanner = (*Provider)(nil)
-	_ provider.Inverter      = (*Provider)(nil)
+	_ provider.Undoer        = (*Provider)(nil)
 )
 
 // Schema returns the embedded provider schema.
@@ -87,34 +83,52 @@ func (p *Provider) Configure(ctx context.Context, config map[string]cty.Value) e
 
 // Execute dispatches to the handler for the given action.
 func (p *Provider) Execute(ctx context.Context, action string, attrs map[string]cty.Value) (map[string]cty.Value, error) {
+	out, _, err := p.execute(ctx, action, attrs)
+	return out, err
+}
+
+// ExecuteUndo runs an action like Execute and also describes its undo
+// (see written.undo).
+func (p *Provider) ExecuteUndo(ctx context.Context, action string, attrs map[string]cty.Value, opts provider.InverseOptions) (map[string]cty.Value, *provider.Invocation, error) {
+	out, w, err := p.execute(ctx, action, attrs)
+	if err != nil {
+		return nil, nil, err
+	}
+	return out, w.undo(opts), nil
+}
+
+// execute runs an action, returning what a typed action wrote (nil for
+// the others).
+func (p *Provider) execute(ctx context.Context, action string, attrs map[string]cty.Value) (map[string]cty.Value, *written, error) {
 	if p.client == nil {
-		return nil, fmt.Errorf("redis: not configured")
+		return nil, nil, fmt.Errorf("redis: not configured")
 	}
 	if err := check(action, attrs); err != nil {
-		return nil, fmt.Errorf("%s: %w", action, err)
+		return nil, nil, fmt.Errorf("%s: %w", action, err)
 	}
 	var (
 		out map[string]cty.Value
+		w   *written
 		err error
 	)
 	switch action {
 	case "redis_command":
 		out, err = p.command(ctx, attrs)
 	case "redis_set":
-		out, err = p.set(ctx, attrs)
+		out, w, err = p.set(ctx, attrs)
 	case "redis_hset":
-		out, err = p.hset(ctx, attrs)
+		out, w, err = p.hset(ctx, attrs)
 	case "redis_restore":
-		// Internal: the undo Inverse records for an overwrite. It isn't in
-		// the schema, so scenarios can't call it.
+		// Internal: the undo ExecuteUndo records for an overwrite. It
+		// isn't in the schema, so scenarios can't call it.
 		out, err = p.restore(ctx, attrs)
 	default:
-		return nil, fmt.Errorf("redis: unknown action %q", action)
+		return nil, nil, fmt.Errorf("redis: unknown action %q", action)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", action, err)
+		return nil, nil, fmt.Errorf("%s: %w", action, err)
 	}
-	return out, nil
+	return out, w, nil
 }
 
 // PlanAction runs the checks that need no server, at plan and before a
